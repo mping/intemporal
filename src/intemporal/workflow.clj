@@ -8,6 +8,7 @@
   (atom {:id            id
          :runid         runid
          :function      sym
+         :store         s/memstore
          :compensations []}))
 
 (def ^:dynamic current-workflow nil)
@@ -27,6 +28,12 @@
   (check (some? current-workflow) "Not running within a workflow function!")
   (get @current-workflow :runid))
 
+(defn current-workflow-store []
+  (check (some? current-workflow) "Not running within a workflow function!")
+  (get @current-workflow :store))
+
+;;;;
+;;
 (defn add-compensation [f]
   (swap! current-workflow update-in [:compensations] conj f))
 
@@ -44,17 +51,18 @@
     (s/save-workflow-definition s/memstore wid sym)
     `(defn ~sym ~args
        (with-bindings {#'current-workflow (make-workflow-state ~wid ~rid #'~sym '~body)}
-         (let [rid#  (current-workflow-runid)]
-           (s/save-workflow-event s/memstore rid# ::invoke ~wid [~@args])
+         (let [rid#   (current-workflow-runid)
+               store# (current-workflow-store)]
+           (s/save-workflow-event store# rid# ::invoke ~wid [~@args])
            (try
              (let [result# ~@body]
                (try
                  result#
                  (finally
-                   (s/save-workflow-event s/memstore rid# ::success ~wid result#)))
+                   (s/save-workflow-event store# rid# ::success ~wid result#)))
                result#)
              (catch Exception e#
-               (s/save-workflow-event s/memstore rid# ::failure ~wid e#)
+               (s/save-workflow-event store# rid# ::failure ~wid e#)
                (throw e#))))))))
 
 (defn restart [runid])

@@ -14,10 +14,9 @@
   (save-activity-event [this runid etype wid aid args]))
 
 (defn- memory-store []
-  (let [seed          {:workflows       {}
-                       :activities      {}
-                       ;; {id -> [events]}
-                       :workflow-events {}}
+  (let [seed          {:workflows       {}                  ;; {id -> fn
+                       :activities      {}                  ;; {id -> fn
+                       :workflow-events {}}                 ;; {id -> [events]}
         store         (atom seed)
 
         persist-event (fn [wid runid evt]
@@ -33,10 +32,10 @@
       (deref [this] @store)
 
       WorkflowStore
-      (clear [this] (reset! store seed))
+      (clear [this] (swap! store assoc :workflow-events {}))
       (serializable? [this _arg] true)
       (lookup [this wid runid]
-        {:workflows (get-in @store [:workflows wid])
+        {:workflows       (get-in @store [:workflows wid])
          :workflow-events (get-in @store [:workflow-events wid runid])})
 
       ;;;;
@@ -45,7 +44,9 @@
         (swap! store (fn [m]
                        (-> m
                          (assoc-in [:workflows wid] (symbol sym))
-                         (assoc-in [:workflow-events wid] {})))))
+                         (assoc-in [:workflow-events wid] {}))))
+        (println ">>" (:workflows @store)))
+
       (save-activity-definition [this aid sym]
         (swap! store assoc-in [:activities aid] (symbol sym)))
       ;;;;
