@@ -83,6 +83,27 @@
   (let [parts (str/split (.getCanonicalName klass) #"\.")]
     (str "#'" (str/join "." (butlast parts)) "/" (last parts))))
 
+(defmacro with-traced-activity
+  "Traces activity with given `aid` by executing `body`, persisting events for ::invoke, ::success or ::failure"
+  [aid args body]
+  `(let [wid#   (w/current-workflow-id)
+         rid#   (w/current-workflow-runid)
+         store# (w/current-workflow-store)]
+     (try
+       ;; mark activity pending
+       (s/save-activity-event store# rid# ::invoke wid# ~aid (vec ~args))
+       (let [result# ~body]
+         ;; save result, mark activity success
+         (try
+           result#
+           (finally
+             (s/save-activity-event store# rid# ::success wid# ~aid result#))))
+       ;; mark activity success, store result
+       (catch Exception e#
+         ;; save error, mark activity failed
+         (s/save-activity-event store# rid# ::failure wid# ~aid e#)
+         (throw (ex-info {:run-id rid# :workflow-id wid# :activity-id ~aid} e#))))))
+
 (defmacro stub-function
   "Stubs and registers a single function as an activity"
   [f]
@@ -91,29 +112,17 @@
         qname    (subs (str resolved) 2)                    ;; poor mans' removing the var #'
         fname    (gensym (str "stub-" (or (:name (meta resolved)) "fn") "-"))]
 
-    (check (= (get @registry fid) f) "Stubbed function '%s' doesn't match registered function '%s'                                                          ")
+    (check (or
+             (nil? (get @registry fid))
+             (= (get @registry fid) f))
+      "Stubbed function '%s' doesn't match registered function '%s'" (get @registry fid) f)
     (swap! registry assoc fid f)
 
     ;; return the proxy fn
     `(fn ~fname [& args#]
-       (let [wid#   (w/current-workflow-id)
-             rid#   (w/current-workflow-runid)
-             store# (w/current-workflow-store)
-             aid#   ~qname]
-         (try
-           ;; mark activity pending
-           (s/save-activity-event store# rid# ::invoke wid# aid# (vec args#))
-           (let [result# (apply ~f args#)]
-             ;; save result, mark activity success
-             (try
-               result#
-               (finally
-                 (s/save-activity-event store# rid# ::success wid# aid# result#))))
-           ;; mark activity success, store result
-           (catch Exception e#
-             ;; save error, mark activity failed
-             (s/save-activity-event store# rid# ::failure wid# aid# e#)
-             (throw (ex-info {:run-id rid# :workflow-id wid# :activity-id aid#} e#))))))))
+       (let [aid# (symbol ~qname)]
+         (with-traced-activity aid# args#
+           (apply ~f args#))))))
 
 (defmacro stub-protocol
   "Requires a stub for activity `proto`. To be used in worfklows"
@@ -130,24 +139,10 @@
        ~@(for [[mname arglist qname] sig+args
                :let [sname (symbol mname)
                      args  (rest (first arglist))]]
+           ;; implement ~sname
            `(~sname [this# ~@args]
-             (let [real#  (get-protocol-impl ~resolved)
-                   wid#   (w/current-workflow-id)
-                   rid#   (w/current-workflow-runid)
-                   store# (w/current-workflow-store)
-                   aid#   '~qname]
+             (let [impl# (get-protocol-impl ~resolved)
+                   aid#  '~qname]
 
-               (try
-                 ;; mark activity pending
-                 (s/save-activity-event store# rid# ::invoke wid# aid# [~@args])
-                 (let [result# (~qname real# ~@args)]
-                   ;; save result, mark activity success
-                   (try
-                     result#
-                     (finally
-                       (s/save-activity-event store# rid# ::success wid# aid# result#))))
-                 ;; mark activity success, store result
-                 (catch Exception e#
-                   ;; save error, mark activity failed
-                   (s/save-activity-event store# rid# ::failure wid# aid# e#)
-                   (throw (ex-info {:run-id rid# :workflow-id wid# :activity-id aid#} e#))))))))))
+               (with-traced-activity aid# [~@args]
+                 (~qname impl# ~@args))))))))

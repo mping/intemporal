@@ -1,6 +1,6 @@
 # intemporal
 
-A Clojure library in the spirit of temporal.io, uber cadence.
+A Clojure library in the spirit of temporal.io or uber cadence.
 
 ## Usage
 

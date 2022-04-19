@@ -39,7 +39,8 @@
 (a/register-protocol TripBookingActivities example-impl)
 (a/register-function send-email)
 
-(w/defn-workflow book-trip [n]
+(defn book-trip
+  [n]
   (let [email-stub (a/stub-function send-email)
         stub       (a/stub-protocol TripBookingActivities)]
     (try
@@ -56,11 +57,14 @@
 
         (email-stub "user@user.com" "trip confirmed")
         :ok)
+      ;; LOL this catch can catch stub exceptions such as "not running within a workflow"
       (catch Exception _
         (w/compensate)
         (email-stub "user@user.com" "trip failed")
         :failed+compensated))))
 
+;; should actually register
+(w/register-workflow s/memstore book-trip)
 
 (s/clear-events s/memstore)
 (book-trip "bla")
@@ -75,4 +79,4 @@
 (let [wevs (-> s/memstore (deref) :workflow-events)
       [wname kvs] (first wevs)
       rid  (-> kvs keys first)]
-  (s/lookup s/memstore wname rid))
+  (s/query-run s/memstore wname rid))
