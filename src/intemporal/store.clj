@@ -5,10 +5,12 @@
 
 (defprotocol WorkflowStore
   :extend-via-metadata true
-  (clear [this])
-  (clear-events [this])
-  (serializable? [this arg])
-  (lookup [this wid runid])
+  (clear [this] "Resets the store")
+  (clear-events [this] "Resets all events")
+  (serializable? [this arg] "Indicates if `arg` can be serialized onto the store")
+  (query-run [this wid runid] "Gets data for a given run")
+  (run->replay-seq [this wid runid] "Gets the stored events for a given run as replayable seq of [type result]")
+
   (save-workflow-definition [this wid sym])
   (save-activity-definition [this aid sym])
   (save-workflow-event [this runid etype wid args])
@@ -36,8 +38,9 @@
       (clear [this] (reset! store seed))
       (clear-events [this] (swap! store assoc :workflow-events {}))
       (serializable? [this _arg] true)
-      (lookup [this wid runid]
+      (query-run [this wid runid]
         {:workflows       (get-in @store [:workflows wid])
+         ;; todo filter activites for this run
          :workflow-events (get-in @store [:workflow-events wid runid])})
 
       ;;;;
