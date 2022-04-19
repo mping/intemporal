@@ -25,11 +25,19 @@
 
 (def ^:private registry (atom {}))
 
+(defn- fn->fnid [f]
+  (check (symbol? f) "'%s' should be a symbol" f)
+  (check (bound? (resolve f)) "'%s' should be bounded" f)
+  (let [resolved (resolve f)
+        cname    (symbol resolved)]
+    (str cname)))
+
+
 (defn- resolve-protocol
   [sym]
   (let [proto (-> sym resolve var-get :on-interface)]
-    (check (some? proto) "Activity should be implemented via a valid `defprotocol`, but is `nil`")
-    (check (.isInterface ^Class proto) "activity should be implemented via a valid `defprotocol`, but it is not an interface: '%s'" proto)
+    (check (some? proto) "'%s': Activity should be implemented via a valid `defprotocol`, but is `nil`" sym)
+    (check (.isInterface ^Class proto) " '%s': Activity should be implemented via a valid `defprotocol`, but it is not an interface" proto)
     proto))
 
 (defn register-protocol
@@ -38,13 +46,24 @@
   (let [protocol (:on-interface proto)]
     (check (some? protocol) "'%s' Should be a protocol" proto)
     (check (.isInterface ^Class protocol) "'%s' Should be a protocol")
-    (check (instance? protocol object) "%s should implement `proto` but doesn't" object)
+    (check (instance? protocol object) "'%s' Should implement `proto` but doesn't" object)
     (check (or (nil? (get @registry protocol))
-             (= object (get @registry protocol))) "An implemention is already registered for the `proto`")
+             (= object (get @registry protocol))) "'%s': An implemention for is already registered for the protocol" protocol)
 
-    (swap! registry assoc (.getCanonicalName protocol) object)))
+    (swap! registry assoc (.getCanonicalName protocol) object)
+    nil))
 
-(defn get-impl
+(defmacro register-function
+  "Registers a function implementation for `f`"
+  [f]
+  (let [cname (fn->fnid f)]
+    (swap! registry assoc cname f)
+    ;; don't return the swap! result to prevent print-dup issues
+    ;; Syntax error compiling fn* at (src/intemporal/example.clj:40:1).
+    ;; Can't embed object in code, maybe print-dup not defined: intemporal.example$reify__10664@32878806
+    true))
+
+(defn get-protocol-impl
   "Gets an implementation for `proto`"
   [^Class proto]
   (let [impl (get @registry (.getCanonicalName proto))]
@@ -67,37 +86,39 @@
 (defmacro stub-function
   "Stubs and registers a single function as an activity"
   [f]
-  (check (symbol? f) "'%s' should be a symbol" f)
-  (check (bound? (resolve f)) "'%s' should be bounded" f)
-  (let [resolved (resolve f)
-        cname    (symbol resolved)
-        fname    (gensym (str "stub-" (or (:name (meta resolved)) "fn") "-"))
-        qname    (subs (str resolved) 2)] ;; poor man quoting
-    (swap! registry assoc (str cname) f)
+  (let [fid      (fn->fnid f)
+        resolved (resolve f)
+        qname    (subs (str resolved) 2)                    ;; poor mans' removing the var #'
+        fname    (gensym (str "stub-" (or (:name (meta resolved)) "fn") "-"))]
+
+    (check (= (get @registry fid) f) "Stubbed function '%s' doesn't match registered function '%s'                                                          ")
+    (swap! registry assoc fid f)
+
     ;; return the proxy fn
     `(fn ~fname [& args#]
-       (let [wid#  (w/current-workflow-id)
-             rid#  (w/current-workflow-runid)
-             aid#  ~qname]
+       (let [wid#   (w/current-workflow-id)
+             rid#   (w/current-workflow-runid)
+             store# (w/current-workflow-store)
+             aid#   ~qname]
          (try
            ;; mark activity pending
-           (s/save-activity-event s/memstore rid# ::invoke wid# aid# args#)
+           (s/save-activity-event store# rid# ::invoke wid# aid# (vec args#))
            (let [result# (apply ~f args#)]
              ;; save result, mark activity success
              (try
                result#
                (finally
-                 (s/save-activity-event s/memstore rid# ::success wid# aid# result#))))
+                 (s/save-activity-event store# rid# ::success wid# aid# result#))))
            ;; mark activity success, store result
            (catch Exception e#
              ;; save error, mark activity failed
-             (s/save-activity-event s/memstore rid# ::failure wid# aid# e#)
+             (s/save-activity-event store# rid# ::failure wid# aid# e#)
              (throw (ex-info {:run-id rid# :workflow-id wid# :activity-id aid#} e#))))))))
 
 (defmacro stub-protocol
   "Requires a stub for activity `proto`. To be used in worfklows"
   [proto]
-  (check (symbol? proto) "Protocol should be a symbol, use `(:require [...])` or a namespace-local protocol for the definition")
+  (check (symbol? proto) "'%s': Protocol should be a symbol, use `(:require [...])` or a namespace-local protocol for the definition" proto)
   (let [resolved  (resolve-protocol proto)
         proto-var (var-get (eval (read-string (class->var resolved))))
         on-klass  (:on proto-var)
@@ -110,21 +131,23 @@
                :let [sname (symbol mname)
                      args  (rest (first arglist))]]
            `(~sname [this# ~@args]
-             (let [real# (get-impl ~resolved)
-                   wid#  (w/current-workflow-id)
-                   rid#  (w/current-workflow-runid)
-                   aid#  '~qname]
+             (let [real#  (get-protocol-impl ~resolved)
+                   wid#   (w/current-workflow-id)
+                   rid#   (w/current-workflow-runid)
+                   store# (w/current-workflow-store)
+                   aid#   '~qname]
+
                (try
                  ;; mark activity pending
-                 (s/save-activity-event s/memstore rid# ::invoke wid# aid# [~@args])
+                 (s/save-activity-event store# rid# ::invoke wid# aid# [~@args])
                  (let [result# (~qname real# ~@args)]
                    ;; save result, mark activity success
                    (try
                      result#
                      (finally
-                       (s/save-activity-event s/memstore rid# ::success wid# aid# result#))))
+                       (s/save-activity-event store# rid# ::success wid# aid# result#))))
                  ;; mark activity success, store result
                  (catch Exception e#
                    ;; save error, mark activity failed
-                   (s/save-activity-event s/memstore rid# ::failure wid# aid# e#)
+                   (s/save-activity-event store# rid# ::failure wid# aid# e#)
                    (throw (ex-info {:run-id rid# :workflow-id wid# :activity-id aid#} e#))))))))))

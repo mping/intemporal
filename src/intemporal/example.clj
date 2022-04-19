@@ -25,44 +25,45 @@
     (reserve-car [this name] (maybe "car-xxx" 9))
     (book-hotel [this name] (maybe "hotel-yyy" 5))
     (book-flight [this name] (maybe "flight-zzz" 4))
-    (cancel-car [this id name] (println "cancel car" id name))
-    (cancel-hotel [this id name] (println "cancel hotel" id name))
-    (cancel-flight [this id name] (println "cancel flight" id name))))
-
-;; registration
-(a/register-protocol TripBookingActivities example-impl)
+    (cancel-car [this id name] (println "!cancel car" id name))
+    (cancel-hotel [this id name] (println "!cancel hotel" id name))
+    (cancel-flight [this id name] (println "!cancel flight" id name))))
 
 ;; functions don't need registration, they are registered on stub
-(defn send-email [name]
-  (println "sending email for " name)
+(defn send-email [name body]
+  (println "sending email for " name "body:" body)
   "email sent!")
 
 
+;; registration
+(a/register-protocol TripBookingActivities example-impl)
+(a/register-function send-email)
+
 (w/defn-workflow book-trip [n]
-  (try
-    (let [stub       (a/stub-protocol TripBookingActivities)
-          email-stub (a/stub-function send-email)
+  (let [email-stub (a/stub-function send-email)
+        stub       (a/stub-protocol TripBookingActivities)]
+    (try
+      (let [cid (reserve-car stub n)
+            _   (println "car id:" cid)
+            _   (w/add-compensation (fn [] (cancel-car stub cid n)))
 
-          cid        (reserve-car stub n)
-          _          (println "car id" cid)
-          _          (w/add-compensation (fn [] (cancel-car stub cid n)))
+            hid (book-hotel stub n)
+            _   (println "hotel id:" hid)
+            _   (w/add-compensation (fn [] (cancel-hotel stub cid n)))
+            fid (book-flight stub n)
+            _   (println "flight id:" fid)
+            _   (w/add-compensation (fn [] (cancel-flight stub cid n)))]
 
-          hid        (book-hotel stub n)
-          _          (println "hotel id" hid)
-          _          (w/add-compensation (fn [] (cancel-hotel stub cid n)))
-          fid        (book-flight stub n)
-          _          (println "flight id" fid)
-          _          (w/add-compensation (fn [] (cancel-flight stub cid n)))]
+        (email-stub "user@user.com" "trip confirmed")
+        :ok)
+      (catch Exception _
+        (w/compensate)
+        (email-stub "user@user.com" "trip failed")
+        :failed+compensated))))
 
-      (email-stub "user@user.com")
-      :ok)
-    (catch Exception _
-      (w/compensate)
-      :failed+compensated)))
 
 (s/clear s/memstore)
 (book-trip "bla")
-
 
 (-> (:workflow-events @s/memstore)
   (last)
@@ -73,4 +74,8 @@
 
 (:workflow-events @s/memstore)
 
-(s/lookup s/memstore "intemporal.example/book-trip" #uuid "cd4c141a-504c-4b28-b49b-12026b2d5e9c")
+(let [wevs (-> s/memstore (deref) :workflow-events)
+      [wname kvs] (first wevs)
+      rid  (-> kvs keys first)]
+  (s/lookup s/memstore wname rid))
+
