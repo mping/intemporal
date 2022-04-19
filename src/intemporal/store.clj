@@ -6,6 +6,7 @@
 (defprotocol WorkflowStore
   :extend-via-metadata true
   (clear [this])
+  (clear-events [this])
   (serializable? [this arg])
   (lookup [this wid runid])
   (save-workflow-definition [this wid sym])
@@ -14,9 +15,9 @@
   (save-activity-event [this runid etype wid aid args]))
 
 (defn- memory-store []
-  (let [seed          {:workflows       {}                  ;; {id -> fn
-                       :activities      {}                  ;; {id -> fn
-                       :workflow-events {}}                 ;; {id -> [events]}
+  (let [seed          {:workflows       {}
+                       :activities      {}
+                       :workflow-events {}}
         store         (atom seed)
 
         persist-event (fn [wid runid evt]
@@ -32,7 +33,8 @@
       (deref [this] @store)
 
       WorkflowStore
-      (clear [this] (swap! store assoc :workflow-events {}))
+      (clear [this] (reset! store seed))
+      (clear-events [this] (swap! store assoc :workflow-events {}))
       (serializable? [this _arg] true)
       (lookup [this wid runid]
         {:workflows       (get-in @store [:workflows wid])
@@ -40,15 +42,15 @@
 
       ;;;;
       ;; persist definitions
-      (save-workflow-definition [this wid sym]
+      (save-workflow-definition [this wid fvar]
+        (check (var? fvar) "%s: is not a var, type is %s" fvar (type fvar))
         (swap! store (fn [m]
                        (-> m
-                         (assoc-in [:workflows wid] (symbol sym))
-                         (assoc-in [:workflow-events wid] {}))))
-        (println ">>" (:workflows @store)))
-
-      (save-activity-definition [this aid sym]
-        (swap! store assoc-in [:activities aid] (symbol sym)))
+                         (assoc-in [:workflows wid] fvar)
+                         (assoc-in [:workflow-events wid] {})))))
+      (save-activity-definition [this aid fvar]
+        (check (bound? fvar) "%s: is not a bounded var, type is %s" fvar (type fvar))
+        (swap! store assoc-in [:activities aid] fvar))
       ;;;;
       ;; persist runtime evts
       (save-workflow-event [this runid etype wid args]

@@ -4,11 +4,11 @@
   (:import [java.util UUID]))
 
 
-(defn make-workflow-state [id runid sym _body-sym]
+(defn make-workflow-state [store id runid sym _body-sym]
   (atom {:id            id
          :runid         runid
          :function      sym
-         :store         s/memstore
+         :store         store
          :compensations []}))
 
 (def ^:dynamic current-workflow nil)
@@ -48,21 +48,24 @@
 (defmacro defn-workflow [sym args & body]
   (let [wid (workflow-id sym)
         rid (workflow-runid sym)]
-    (s/save-workflow-definition s/memstore wid sym)
-    `(defn ~sym ~args
-       (with-bindings {#'current-workflow (make-workflow-state ~wid ~rid #'~sym '~body)}
-         (let [rid#   (current-workflow-runid)
-               store# (current-workflow-store)]
-           (s/save-workflow-event store# rid# ::invoke ~wid [~@args])
-           (try
-             (let [result# ~@body]
-               (try
-                 result#
-                 (finally
-                   (s/save-workflow-event store# rid# ::success ~wid result#)))
-               result#)
-             (catch Exception e#
-               (s/save-workflow-event store# rid# ::failure ~wid e#)
-               (throw e#))))))))
+    `(do
+       (declare ~sym)
+       (s/save-workflow-definition s/memstore ~wid (resolve '~sym))
+       (defn ~sym ~args
+         (with-bindings {#'current-workflow (make-workflow-state s/memstore ~wid ~rid #'~sym '~body)}
+           (let [rid#   (current-workflow-runid)
+                 store# (current-workflow-store)]
+             (s/save-workflow-event store# rid# ::invoke ~wid [~@args])
+             (try
+               (let [result# ~@body]
+                 (try
+                   result#
+                   (finally
+                     (s/save-workflow-event store# rid# ::success ~wid result#)))
+                 result#)
+               (catch Exception e#
+                 (s/save-workflow-event store# rid# ::failure ~wid e#)
+                 (throw e#)))))))))
 
 (defn restart [runid])
+(s/clear s/memstore)

@@ -62,7 +62,7 @@
         :failed+compensated))))
 
 
-(s/clear s/memstore)
+(s/clear-events s/memstore)
 (book-trip "bla")
 
 (-> (:workflow-events @s/memstore)
@@ -72,10 +72,7 @@
   (last)
   (clojure.pprint/print-table))
 
-(:workflow-events @s/memstore)
-
 (let [wevs (-> s/memstore (deref) :workflow-events)
       [wname kvs] (first wevs)
       rid  (-> kvs keys first)]
   (s/lookup s/memstore wname rid))
-
