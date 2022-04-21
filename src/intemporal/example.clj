@@ -34,11 +34,14 @@
   (println "sending email for " name "body:" body)
   "email sent!")
 
-
-;; registration
+;;;;
+;; activities registration
 (a/register-protocol TripBookingActivities example-impl)
 (a/register-function send-email)
 
+
+;;;;
+;; workflow registration
 (defn book-trip
   [n]
   (let [email-stub (a/stub-function send-email)
@@ -64,6 +67,7 @@
         :failed+compensated))))
 
 ;; should actually register
+;; requires a store to keep track of actual execution
 (w/register-workflow s/memstore book-trip)
 
 (s/clear-events s/memstore)
@@ -76,7 +80,11 @@
   (last)
   (clojure.pprint/print-table))
 
+(declare run-uuid)
 (let [wevs (-> s/memstore (deref) :workflow-events)
       [wname kvs] (first wevs)
       rid  (-> kvs keys first)]
+  (def run-uuid rid)
   (s/query-run s/memstore wname rid))
+
+(w/retry s/memstore #'book-trip run-uuid)
