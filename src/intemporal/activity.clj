@@ -91,6 +91,7 @@
      (try
        ;; mark activity pending
        (w/save-activity-event ~aid ::invoke (vec ~args))
+
        (let [result# ~body]
          (w/save-activity-event ~aid ::success result#)
          result#)

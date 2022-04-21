@@ -11,7 +11,7 @@
   ;; local access
   (-add-compensation [this compensation-fn])
   ;; db access
-  (-save-event! [this event-type payload])
+  (-save-workflow-event! [this event-type payload])
   (-save-activity-event! [this activity-id event-type payload])
   (-reset-history-cursor [this] "Resets the cursor")
   (-next-history-event [this] "Advance-only cursor for the events of this workflow run"))
@@ -24,18 +24,32 @@
     (:compensations @state))
   (-add-compensation [_ compensation-fn]
     (swap! state update-in [:compensations] conj compensation-fn))
-  (-save-event! [_ event-type payload]
-    (s/save-workflow-event store workflow-id run-id event-type payload))
-  (-save-activity-event! [_ activity-id event-type payload]
-    (s/save-activity-event store workflow-id run-id activity-id event-type payload))
+  (-save-workflow-event! [this event-type payload]
+    (if-let [stored-evt (-next-history-event this)]
+      (do
+        ;; TODO check if matches args
+        (println "[history] replaying event" stored-evt "| actual payload" payload))
+      (do
+        (println "[workflow] saving event" event-type payload)
+        (s/save-workflow-event store workflow-id run-id event-type payload))))
+  (-save-activity-event! [this activity-id event-type payload]
+    (if-let [stored-evt (-next-history-event this)]
+      (do
+        ;; TODO check if matches args
+        (println "[history] replaying event" stored-evt "| actual payload" payload))
+      (do
+        (println "[activity] saving event" event-type payload)
+        (s/save-workflow-event store workflow-id run-id event-type payload))))
   (-reset-history-cursor [this]
     (swap! state assoc :events-cursor nil))
   (-next-history-event [this]
     (let [evt (get @state :events-cursor)
-          res (if evt (s/next-event store workflow-id run-id (:id evt))
-                      (s/next-event store workflow-id run-id))]
-      ;; advance
-      (swap! state assoc :events-cursor res)
+          res (cond
+                (= evt ::none) nil
+                (some? evt) (s/next-event store workflow-id run-id (:id evt))
+                :else (s/next-event store workflow-id run-id))]
+      ;; mark nil as ::none, effectively ensuring next calls won't return any saved event
+      (swap! state assoc :events-cursor (or res ::none))
       res)))
 
 ;; holds the data for the current workflow
@@ -102,18 +116,13 @@
               ;; we're going to track events from the start
               (-reset-history-cursor current-workflow-run)
               (let [vargs (into [] args)]
-                ;(println "next: " (-next-history-event current-workflow-run))
-                ;(println "fargs: " vargs)
-                (-save-event! current-workflow-run ::invoke vargs)
+                (-save-workflow-event! current-workflow-run ::invoke vargs)
                 (try
                   (let [result (apply f args)]
-                    ;(println "res: " (-next-history-event current-workflow-run))
-                    ;(println "fres: " result)
-                    (-save-event! current-workflow-run ::success result))
+                    ;; TODO check that f is the next evt
+                    (-save-workflow-event! current-workflow-run ::success result))
                   (catch Exception e
-                    ;(println "reserr: " (-next-history-event current-workflow-run))
-                    ;(println "fe: " e)
-                    (-save-event! current-workflow-run ::failure e)
+                    (-save-workflow-event! current-workflow-run ::failure e)
                     (throw e)))))))))
     `(do
        (check (satisfies? s/WorkflowStore ~store) "%s does not implement WorkflowStore" ~store)
@@ -131,3 +140,4 @@
 
         ;; f can accept any number of args
         (apply f (:payload invoke-evt))))))
+
