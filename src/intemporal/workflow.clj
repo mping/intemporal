@@ -1,105 +1,47 @@
 (ns intemporal.workflow
+  "Main namespace. A worfklow definition is a function that is proxied to save its arguments and result/error."
   (:require [intemporal.store :as s]
-            [intemporal.utils.check :refer [check]])
-  (:import [java.util UUID]))
-
-(defprotocol IWorkflowRun
-  ;; accessors
-  (-workflow-id [this])
-  (-workflow-runid [this])
-  (-workflow-compensations [this])
-  ;; local access
-  (-add-compensation [this compensation-fn])
-  ;; db access
-  (-save-workflow-event! [this event-type payload])
-  (-save-activity-event! [this activity-id event-type payload])
-  (-reset-history-cursor [this] "Resets the cursor")
-  (-next-history-event [this] "Advance-only cursor for the events of this workflow run"))
-
-(defrecord WorkflowRun [store state workflow-id run-id]
-  IWorkflowRun
-  (-workflow-id [_] workflow-id)
-  (-workflow-runid [_] run-id)
-  (-workflow-compensations [_]
-    (:compensations @state))
-  (-add-compensation [_ compensation-fn]
-    (swap! state update-in [:compensations] conj compensation-fn))
-  (-save-workflow-event! [this event-type payload]
-    (if-let [stored-evt (-next-history-event this)]
-      (do
-        ;; TODO check if matches args
-        (println "[history] replaying event" stored-evt "| actual payload" payload))
-      (do
-        (println "[workflow] saving event" event-type payload)
-        (s/save-workflow-event store workflow-id run-id event-type payload))))
-  (-save-activity-event! [this activity-id event-type payload]
-    (if-let [stored-evt (-next-history-event this)]
-      (do
-        ;; TODO check if matches args
-        (println "[history] replaying event" stored-evt "| actual payload" payload))
-      (do
-        (println "[activity] saving event" event-type payload)
-        (s/save-workflow-event store workflow-id run-id event-type payload))))
-  (-reset-history-cursor [this]
-    (swap! state assoc :events-cursor nil))
-  (-next-history-event [this]
-    (let [evt (get @state :events-cursor)
-          res (cond
-                (= evt ::none) nil
-                (some? evt) (s/next-event store workflow-id run-id (:id evt))
-                :else (s/next-event store workflow-id run-id))]
-      ;; mark nil as ::none, effectively ensuring next calls won't return any saved event
-      (swap! state assoc :events-cursor (or res ::none))
-      res)))
+            [intemporal.workflow.execution :as e]
+            [intemporal.utils.check :refer [check]]))
 
 ;; holds the data for the current workflow
+;; is a dynamic var so we can rebind each time the workflow function is called
 (def ^:dynamic current-workflow-run nil)
-
-(defn- make-workflow-run
-  "Makes a new workflow run"
-  ([store wid]
-   (make-workflow-run store wid (UUID/randomUUID)))
-  ([store wid runid]
-   (let [runid runid
-         state (atom {:events-cursor nil
-                      :compensations []})]
-     (->WorkflowRun store state wid runid))))
-
-(defn- sym->workflow-id [sym]
-  (symbol (str (ns-name *ns*)) (str sym)))
 
 ;; current workflow accessors
 (defn current-workflow-id []
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
-  (-workflow-id current-workflow-run))
+  (e/-workflow-id current-workflow-run))
 
 (defn current-workflow-runid []
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
-  (-workflow-runid current-workflow-run))
+  (e/-workflow-runid current-workflow-run))
 
 (defn save-activity-event [activity-id event-type payload]
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
-  (-save-activity-event! current-workflow-run activity-id event-type payload))
-
-(defn next-history-event []
-  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
-  (-next-history-event current-workflow-run))
+  (e/-save-activity-event! current-workflow-run activity-id event-type payload))
 
 (defn add-compensation [f]
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
-  (-add-compensation current-workflow-run f))
+  (e/-add-compensation current-workflow-run f))
 
 ;;;;
 ;;
 
-(defn compensate []
+(defn compensate
+  "Calls all compensation functions in order.
+  If any compensation function fails, the remaining functions will NOT be called."
+  []
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
-  (let [actions (-workflow-compensations current-workflow-run)]
+  (let [actions (e/-workflow-compensations current-workflow-run)]
     (doseq [compensation actions]
       (compensation))))
 
 ;;;;
 ;; worfklow is just a function
+
+(defn- sym->workflow-id [sym]
+  (symbol (str (ns-name *ns*)) (str sym)))
 
 (defmacro register-workflow
   "Registers function `fsym`, using `store` to keep track of executions.
@@ -112,17 +54,17 @@
       (fn [f]
         (fn proxy-workflow [& args]
           (let [astore (var-get (resolve store))]
-            (with-bindings {#'current-workflow-run (or current-workflow-run (make-workflow-run astore wid))}
+            (with-bindings {#'current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))}
               ;; we're going to track events from the start
-              (-reset-history-cursor current-workflow-run)
+              (e/-reset-history-cursor current-workflow-run)
               (let [vargs (into [] args)]
-                (-save-workflow-event! current-workflow-run ::invoke vargs)
+                (e/-save-workflow-event! current-workflow-run ::invoke vargs)
                 (try
                   (let [result (apply f args)]
                     ;; TODO check that f is the next evt
-                    (-save-workflow-event! current-workflow-run ::success result))
+                    (e/-save-workflow-event! current-workflow-run ::success result))
                   (catch Exception e
-                    (-save-workflow-event! current-workflow-run ::failure e)
+                    (e/-save-workflow-event! current-workflow-run ::failure e)
                     (throw e)))))))))
     `(do
        (check (satisfies? s/WorkflowStore ~store) "%s does not implement WorkflowStore" ~store)
@@ -130,12 +72,12 @@
        nil)))
 
 (defn retry
-  "Retries `f` with given runid `runid`"
+  "Retries `f` with given `runid`, possibly resuming execution if `f` didn't reach a terminal state"
   [store f runid]
   (let [fsym (symbol f)
         wid  fsym]
-    (with-bindings {#'current-workflow-run (make-workflow-run store wid runid)}
-      (let [invoke-evt (-next-history-event current-workflow-run)]
+    (with-bindings {#'current-workflow-run (e/make-workflow-execution store wid runid)}
+      (let [invoke-evt (e/-next-history-event current-workflow-run)]
         ;; TODO check that invoke-evt matches function we're calling
 
         ;; f can accept any number of args

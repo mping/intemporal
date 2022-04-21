@@ -67,10 +67,10 @@
       ;; persist runtime evts
       (save-workflow-event [this wid runid etype data]
         (check (serializable? this data) "'%s' cannot be serialized")
-        (persist-event wid runid {:type etype :id wid :payload data}))
+        (persist-event wid runid {:type etype :sid wid :payload data}))
       (save-activity-event [this wid runid aid etype data]
         (check (serializable? this data) "'%s' cannot be serialized" data)
-        (persist-event wid runid {:type etype :id aid :payload data})))))
+        (persist-event wid runid {:type etype :sid aid :payload data})))))
 
 ;; for testing purposes
 (def memstore (memory-store))
