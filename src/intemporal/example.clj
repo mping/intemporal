@@ -11,13 +11,18 @@
   (cancel-hotel [this id name])
   (cancel-flight [this id name]))
 
+(def EmptyException
+  (let [e (RuntimeException. "Spurious error")]
+    (.setStackTrace e (into-array StackTraceElement []))
+    e))
+
 (defn- maybe
   ([val]
    (maybe val 5))
   ([val ok-chance-0-10]
    (let [r (rand-int 10)]
      (when (> r ok-chance-0-10)
-       (throw (RuntimeException. "Spurious error")))
+       (throw EmptyException))
      val)))
 
 (def example-impl
@@ -47,14 +52,14 @@
   (let [email-stub (a/stub-function send-email)
         stub       (a/stub-protocol TripBookingActivities)]
     (try
-      (let [cid (reserve-car stub n)
+      (let [cid (reserve-car stub "carr")
             _   (println "car id:" cid)
             _   (w/add-compensation (fn [] (cancel-car stub cid n)))
 
-            hid (book-hotel stub n)
+            hid (book-hotel stub "hotell")
             _   (println "hotel id:" hid)
             _   (w/add-compensation (fn [] (cancel-hotel stub cid n)))
-            fid (book-flight stub n)
+            fid (book-flight stub "flightt")
             _   (println "flight id:" fid)
             _   (w/add-compensation (fn [] (cancel-flight stub cid n)))]
 
@@ -87,4 +92,5 @@
   (def run-uuid rid)
   (s/query-run s/memstore wname rid))
 
-(w/retry s/memstore #'book-trip run-uuid)
+(comment
+  (w/retry s/memstore #'book-trip run-uuid))
