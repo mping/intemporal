@@ -87,22 +87,18 @@
   "Traces activity with given `aid` by executing `body`, persisting events for ::invoke, ::success or ::failure"
   [aid args body]
   `(let [wid#   (w/current-workflow-id)
-         rid#   (w/current-workflow-runid)
-         store# (w/current-workflow-store)]
+         rid#   (w/current-workflow-runid)]
      (try
        ;; mark activity pending
-       (s/save-activity-event store# rid# ::invoke wid# ~aid (vec ~args))
+       (w/save-activity-event ~aid ::invoke (vec ~args))
        (let [result# ~body]
-         ;; save result, mark activity success
-         (try
-           result#
-           (finally
-             (s/save-activity-event store# rid# ::success wid# ~aid result#))))
+         (w/save-activity-event ~aid ::success result#)
+         result#)
        ;; mark activity success, store result
        (catch Exception e#
          ;; save error, mark activity failed
-         (s/save-activity-event store# rid# ::failure wid# ~aid e#)
-         (throw (ex-info {:run-id rid# :workflow-id wid# :activity-id ~aid} e#))))))
+         (w/save-activity-event ~aid ::failure e#)
+         (throw (ex-info {:workflow-id wid# :run-id rid# :activity-id ~aid} e#))))))
 
 (defmacro stub-function
   "Stubs and registers a single function as an activity"
