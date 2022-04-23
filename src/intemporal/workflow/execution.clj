@@ -16,41 +16,8 @@
   (-save-activity-event! [this activity-id event-type payload] "Saves an activity event")
   (-reset-history-cursor [this] "Resets the events cursor")
   (-current-cursor-event [this] "Current event")
+  (-next-event-matches [this type] "check if next event matches")
   (-advance-history-cursor [this] "Advance-only cursor for the events of this workflow run"))
-
-(defn- save-workflow-event [{:keys [store state workflow-id run-id] :as this} event-type payload]
-  (if-let [stored-evt (-advance-history-cursor this)]
-    (do
-      ;; TODO check if matches args
-      (println "[history] replaying event" stored-evt "| actual payload:" payload))
-    (do
-      (println "[workflow] saving event" event-type payload)
-      (s/save-workflow-event store workflow-id run-id event-type payload))))
-
-(defn- save-activity-event [{:keys [store state workflow-id run-id] :as this} activity-id event-type payload]
-  ;; we can't continue
-  (let [curr-evt (-current-cursor-event this)
-        next-evt (-advance-history-cursor this)
-
-        curr-evt? (boolean (and curr-evt (not= curr-evt ::none)))
-        next-evt? (boolean (and next-evt (not= next-evt ::none)))]
-
-    (cond
-      ;; curr event was activity/invoke, no next
-      ;; we must fail unless activity is idempotent
-      (and curr-evt?
-        (= :workflow.activity/invoke (:type curr-evt))
-        (nil? next-evt))
-      (workflow-error "Workflow cannot be reconciled with last stored state" {:workflow-id workflow-id :run-id run-id :activity-id (:sid curr-evt)})
-
-      ;; there's a next event
-      next-evt?
-      (println "[history] replaying event" next-evt "| aactual payload" payload)
-
-      :else
-      (do
-        (println "[activity] saving event" event-type payload)
-        (s/save-activity-event store workflow-id run-id activity-id event-type payload)))))
 
 ;;;;;
 ;; defines a worfklow execution
@@ -63,14 +30,23 @@
   (-add-compensation [_ compensation-fn]
     (swap! state update-in [:compensations] conj compensation-fn))
   (-save-workflow-event! [this event-type payload]
-    (save-workflow-event this event-type payload))
+    (s/save-workflow-event store workflow-id run-id event-type payload))
   (-save-activity-event! [this activity-id event-type payload]
-    (save-activity-event this activity-id event-type payload))
+    (s/save-activity-event store workflow-id run-id activity-id event-type payload))
 
   (-reset-history-cursor [this]
     (swap! state assoc :events-cursor nil))
   (-current-cursor-event [this]
     (get @state :events-cursor))
+  (-next-event-matches [this type]
+    (let [evt    (get @state :events-cursor)
+          nxt    (cond
+                   (= evt ::none) nil
+                   (some? evt) (s/next-event store workflow-id run-id (:id evt))
+                   :else (s/next-event store workflow-id run-id))
+          match? (and (some? nxt)
+                   (= (:type nxt) type))]
+      match?))
   (-advance-history-cursor [this]
     (let [evt (get @state :events-cursor)
           res (cond
@@ -79,6 +55,7 @@
                 :else (s/next-event store workflow-id run-id))]
       ;; mark nil as ::none, effectively ensuring next calls won't return any saved event
       (swap! state assoc :events-cursor (or res ::none))
+      (println "[history] current event:" res)
       res)))
 
 (defn make-workflow-execution

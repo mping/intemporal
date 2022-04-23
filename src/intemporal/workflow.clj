@@ -17,9 +17,23 @@
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (e/-workflow-runid current-workflow-run))
 
+(defn save-workflow-event [event-type payload]
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (e/-save-workflow-event! current-workflow-run event-type payload))
+
 (defn save-activity-event [activity-id event-type payload]
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (e/-save-activity-event! current-workflow-run activity-id event-type payload))
+
+;; TODO supply sid: (workflow-id/activity-id)
+;; TODO rename to next-event-match-or-nil
+(defn next-event-matches [event-type]
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (e/-next-event-matches current-workflow-run event-type))
+
+(defn advance-history-cursor []
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (e/-advance-history-cursor current-workflow-run))
 
 (defn add-compensation [f]
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
@@ -55,18 +69,27 @@
         (fn proxy-workflow [& args]
           (let [astore (var-get (resolve store))]
             (with-bindings {#'current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))}
-              ;; we're going to track events from the start
-              (e/-reset-history-cursor current-workflow-run)
-              (let [vargs (into [] args)]
-                (e/-save-workflow-event! current-workflow-run ::invoke vargs)
+
+              (let [vargs (if (next-event-matches ::invoke)
+                            (:payload (advance-history-cursor))
+                            (do
+                              (save-workflow-event ::invoke args)
+                              (into [] args)))]
                 (try
-                  (let [result (apply f args)]
-                    ;; TODO check that f is the next evt
-                    (e/-save-workflow-event! current-workflow-run ::success result)
-                    result)
+                  (let [result (apply f vargs)]
+                    ;; if it throws we go to the catch
+                    (if (next-event-matches ::success)
+                      (:payload (advance-history-cursor))
+                      (do
+                        (save-workflow-event ::success result)
+                        result)))
                   (catch Exception e
-                    (e/-save-workflow-event! current-workflow-run ::failure e)
-                    (throw e)))))))))
+                    (if (next-event-matches ::failure)
+                      (:payload (advance-history-cursor))
+                      (do
+                        (save-workflow-event ::failure e)
+                        (throw e)))))))))))
+
     `(do
        (check (satisfies? s/WorkflowStore ~store) "%s does not implement WorkflowStore" ~store)
        (s/save-workflow-definition ~store ~wid ~fvar)
@@ -81,5 +104,10 @@
       (let [invoke-evt (e/-advance-history-cursor current-workflow-run)]
         (when-not (some? invoke-evt)
           (throw (IllegalArgumentException. (format "%s: runid %s not found" fsym runid))))
+
+        (when-not (= (:type invoke-evt) ::invoke)
+          (throw (IllegalArgumentException. (format "%s: event for run %s is not ::invoke" fsym runid))))
+
+        (e/-reset-history-cursor current-workflow-run)
         (apply f (:payload invoke-evt))))))
 

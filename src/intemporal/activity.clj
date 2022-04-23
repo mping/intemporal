@@ -90,16 +90,35 @@
          rid#   (w/current-workflow-runid)]
      (try
        ;; mark activity pending
-       (w/save-activity-event ~aid ::invoke (vec ~args))
 
-       (let [result# ~body]
-         (w/save-activity-event ~aid ::success result#)
+       (if (w/next-event-matches ::invoke)
+         (:payload (w/advance-history-cursor))
+         (do
+           (w/save-activity-event ~aid ::invoke (vec ~args))
+           (vec ~args)))
+
+       (let [result# (cond
+                       (w/next-event-matches ::success)
+                       (:payload (w/advance-history-cursor))
+
+                       (w/next-event-matches ::failure)
+                       (throw (:payload (w/advance-history-cursor)))
+
+                       :else
+                       (do
+                         (let [b# ~body]
+                           (w/save-activity-event ~aid ::success b#) ;; can call ~body twice!
+                           b#)))]
          result#)
        ;; mark activity success, store result
        (catch Exception e#
          ;; save error, mark activity failed
-         (w/save-activity-event ~aid ::failure e#)
-         (throw (workflow-error {:workflow-id wid# :run-id rid# :activity-id ~aid} e#))))))
+         (throw
+           (if (w/next-event-matches ::failure)
+             (:payload (w/advance-history-cursor))
+             (do
+               (w/save-activity-event ~aid ::failure e#)
+               e#)))))))
 
 (defmacro stub-function
   "Stubs and registers a single function as an activity"
