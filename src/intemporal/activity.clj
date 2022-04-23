@@ -18,7 +18,7 @@
   (:require [clojure.string :as str]
             [intemporal.utils.check :refer [check]]
             [intemporal.workflow :as w]
-            [intemporal.store :as s]))
+            [intemporal.error :refer [workflow-error]]))
 
 ;;;;
 ;; activity stubbing
@@ -99,7 +99,7 @@
        (catch Exception e#
          ;; save error, mark activity failed
          (w/save-activity-event ~aid ::failure e#)
-         (throw (ex-info {:workflow-id wid# :run-id rid# :activity-id ~aid} e#))))))
+         (throw (workflow-error {:workflow-id wid# :run-id rid# :activity-id ~aid} e#))))))
 
 (defmacro stub-function
   "Stubs and registers a single function as an activity"
