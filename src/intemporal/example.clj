@@ -53,14 +53,14 @@
         stub       (a/stub-protocol TripBookingActivities)]
     (try
       (let [cid (reserve-car stub "carr")
-            _   (println "car id:" cid)
+            _   (println "[workflow fn] car id:" cid)
             _   (w/add-compensation (fn [] (cancel-car stub cid n)))
 
             hid (book-hotel stub "hotell")
-            _   (println "hotel id:" hid)
+            _   (println "[workflow fn] hotel id:" hid)
             _   (w/add-compensation (fn [] (cancel-hotel stub cid n)))
             fid (book-flight stub "flightt")
-            _   (println "flight id:" fid)
+            _   (println "[workflow fn] flight id:" fid)
             _   (w/add-compensation (fn [] (cancel-flight stub cid n)))]
 
         (email-stub "user@user.com" "trip confirmed")
