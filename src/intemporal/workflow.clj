@@ -62,7 +62,8 @@
                 (try
                   (let [result (apply f args)]
                     ;; TODO check that f is the next evt
-                    (e/-save-workflow-event! current-workflow-run ::success result))
+                    (e/-save-workflow-event! current-workflow-run ::success result)
+                    result)
                   (catch Exception e
                     (e/-save-workflow-event! current-workflow-run ::failure e)
                     (throw e)))))))))
@@ -77,9 +78,8 @@
   (let [fsym (symbol f)
         wid  fsym]
     (with-bindings {#'current-workflow-run (e/make-workflow-execution store wid runid)}
-      (let [invoke-evt (e/-next-history-event current-workflow-run)]
-        ;; TODO check that invoke-evt matches function we're calling
-
-        ;; f can accept any number of args
+      (let [invoke-evt (e/-advance-history-cursor current-workflow-run)]
+        (when-not (some? invoke-evt)
+          (throw (IllegalArgumentException. (format "%s: runid %s not found" fsym runid))))
         (apply f (:payload invoke-evt))))))
 
