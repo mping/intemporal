@@ -55,8 +55,13 @@
       rid  (-> kvs keys first)]
   (def run-uuid rid)
   (println ">>" rid)
-  (s/query-run s/memstore wname rid))
+  (s/lookup-workflow-run s/memstore wname rid))
 
 
 (comment
-  (w/retry s/memstore #'simpleflow run-uuid))
+  (w/retry s/memstore #'simpleflow run-uuid)
+
+  ;;TODO fix
+  (s/lookup-workflow s/memstore run-uuid))
+
+

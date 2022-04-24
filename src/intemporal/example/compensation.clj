@@ -90,7 +90,7 @@
       [wname kvs] (first wevs)
       rid  (-> kvs keys first)]
   (def run-uuid rid)
-  (s/query-run s/memstore wname rid))
+  (s/lookup-workflow-run s/memstore wname rid))
 
 (comment
   (w/retry s/memstore #'book-trip run-uuid))
