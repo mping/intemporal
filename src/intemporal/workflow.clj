@@ -25,11 +25,19 @@
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (e/-save-activity-event! current-workflow-run activity-id event-type payload))
 
-;; TODO supply sid: (workflow-id/activity-id)
-;; TODO rename to next-event-match-or-nil
-(defn next-event-matches [event-type]
+(defn next-event-matches? [uid event-type]
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
-  (e/-next-event-matches current-workflow-run event-type))
+  (let [nxt (e/-next-event current-workflow-run)
+        match? (and (some? nxt)
+                (= (:type nxt) event-type)
+                (= (:uid nxt) uid))]
+    (println (format "[store] match found? %s (%s etype %s)" match? uid event-type))
+    match?))
+
+(defn next-event-nil? []
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (let [nxt (e/-next-event current-workflow-run)]
+    (nil? nxt)))
 
 (defn advance-history-cursor []
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
@@ -70,7 +78,7 @@
           (let [astore (var-get (resolve store))]
             (with-bindings {#'current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))}
 
-              (let [vargs (if (next-event-matches ::invoke)
+              (let [vargs (if (next-event-matches? wid ::invoke)
                             (:payload (advance-history-cursor))
                             (do
                               (save-workflow-event ::invoke args)
@@ -78,13 +86,19 @@
                 (try
                   (let [result (apply f vargs)]
                     ;; if it throws we go to the catch
-                    (if (next-event-matches ::success)
+                    (cond
+                      (next-event-matches? wid ::success)
                       (:payload (advance-history-cursor))
+
+                      (next-event-matches? wid ::failure)
+                      (throw (:payload (advance-history-cursor))) ;; goes to catch
+
+                      :else
                       (do
                         (save-workflow-event ::success result)
                         result)))
                   (catch Exception e
-                    (if (next-event-matches ::failure)
+                    (if (next-event-matches? wid ::failure)
                       (:payload (advance-history-cursor))
                       (do
                         (save-workflow-event ::failure e)
@@ -92,7 +106,7 @@
 
     `(do
        (check (satisfies? s/WorkflowStore ~store) "%s does not implement WorkflowStore" ~store)
-       (s/save-workflow-definition ~store ~wid ~fvar)
+       (s/save-workflow-definition ~store '~wid ~fvar)
        nil)))
 
 (defn retry

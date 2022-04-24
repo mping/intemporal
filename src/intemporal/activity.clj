@@ -86,39 +86,37 @@
 (defmacro with-traced-activity
   "Traces activity with given `aid` by executing `body`, persisting events for ::invoke, ::success or ::failure"
   [aid args body]
-  `(let [wid#   (w/current-workflow-id)
-         rid#   (w/current-workflow-runid)]
-     (try
-       ;; mark activity pending
+  `(try
+     ;; mark activity pending
 
-       (if (w/next-event-matches ::invoke)
-         (:payload (w/advance-history-cursor))
-         (do
-           (w/save-activity-event ~aid ::invoke (vec ~args))
-           (vec ~args)))
+     (if (w/next-event-matches? ~aid ::invoke)
+       (:payload (w/advance-history-cursor))
+       (do
+         (w/save-activity-event ~aid ::invoke (vec ~args))
+         (vec ~args)))
 
-       (let [result# (cond
-                       (w/next-event-matches ::success)
-                       (:payload (w/advance-history-cursor))
+     (let [result# (cond
+                     (w/next-event-matches? ~aid ::success)
+                     (:payload (w/advance-history-cursor))
 
-                       (w/next-event-matches ::failure)
-                       (throw (:payload (w/advance-history-cursor)))
+                     (w/next-event-matches? ~aid ::failure)
+                     (throw (:payload (w/advance-history-cursor)))
 
-                       :else
-                       (do
-                         (let [b# ~body]
-                           (w/save-activity-event ~aid ::success b#) ;; can call ~body twice!
-                           b#)))]
-         result#)
-       ;; mark activity success, store result
-       (catch Exception e#
-         ;; save error, mark activity failed
-         (throw
-           (if (w/next-event-matches ::failure)
-             (:payload (w/advance-history-cursor))
-             (do
-               (w/save-activity-event ~aid ::failure e#)
-               e#)))))))
+                     :else
+                     (do
+                       (let [b# ~body]
+                         (w/save-activity-event ~aid ::success b#) ;; can call ~body twice!
+                         b#)))]
+       result#)
+     ;; mark activity success, store result
+     (catch Exception e#
+       ;; save error, mark activity failed
+       (throw
+         (if (w/next-event-matches? ~aid ::failure)
+           (:payload (w/advance-history-cursor))
+           (do
+             (w/save-activity-event ~aid ::failure e#)
+             e#))))))
 
 (defmacro stub-function
   "Stubs and registers a single function as an activity"
