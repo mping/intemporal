@@ -112,7 +112,7 @@
 (defn retry
   "Retries `f` with given `runid`, possibly resuming execution if `f` didn't reach a terminal state"
   [store f runid]
-  (let [fsym (symbol f)
+  (let [fsym (s/lookup-workflow s/memstore runid)
         wid  fsym]
     (with-bindings {#'current-workflow-run (e/make-workflow-execution store wid runid)}
       (let [invoke-evt (e/-advance-history-cursor current-workflow-run)]
