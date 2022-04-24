@@ -15,8 +15,7 @@
   (-save-workflow-event! [this event-type payload] "Saves a workflow event")
   (-save-activity-event! [this activity-id event-type payload] "Saves an activity event")
   (-reset-history-cursor [this] "Resets the events cursor")
-  (-current-cursor-event [this] "Current event")
-  (-next-event-matches [this type] "check if next event matches")
+  (-next-event [this] "Gets next event")
   (-advance-history-cursor [this] "Advance-only cursor for the events of this workflow run"))
 
 ;;;;;
@@ -36,17 +35,14 @@
 
   (-reset-history-cursor [this]
     (swap! state assoc :events-cursor nil))
-  (-current-cursor-event [this]
-    (get @state :events-cursor))
-  (-next-event-matches [this type]
+  (-next-event [this]
     (let [evt    (get @state :events-cursor)
           nxt    (cond
                    (= evt ::none) nil
                    (some? evt) (s/next-event store workflow-id run-id (:id evt))
-                   :else (s/next-event store workflow-id run-id))
-          match? (and (some? nxt)
-                   (= (:type nxt) type))]
-      match?))
+                   :else (s/next-event store workflow-id run-id))]
+      nxt))
+
   (-advance-history-cursor [this]
     (let [evt (get @state :events-cursor)
           res (cond

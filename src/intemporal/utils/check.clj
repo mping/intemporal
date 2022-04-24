@@ -1,5 +1,7 @@
-(ns intemporal.utils.check)
+(ns intemporal.utils.check
+  (:require [intemporal.error :as error])
+  (:import [intemporal.error ExceptionError]))
 
 (defmacro check [cond message & args]
   `(when-not ~cond
-     (throw (IllegalArgumentException. (format ~message ~@args)))))
+     (throw (error/workflow-error (format ~message ~@args) {}))))

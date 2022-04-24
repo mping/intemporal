@@ -1,4 +1,4 @@
-(ns intemporal.example
+(ns intemporal.example.compensation
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
             [intemporal.store :as s]))
