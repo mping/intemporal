@@ -1,7 +1,8 @@
 (ns intemporal.example.protocol-activity
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
-            [intemporal.store :as s]))
+            [intemporal.store :as s])
+  (:import [intemporal.annotations ActivityOptions]))
 
 (defprotocol HttpClient
   :extend-via-metadata true
@@ -28,19 +29,18 @@
     (doGet [this url] (maybe "200 OK" 5))
     (doHead [this url] (maybe "200 OK" 5))))
 
-;;
-;; fns with metadata
-;; configure retry policy, idempotency, etc
-(defn- -get [this url] (maybe "200 OK" 5))
-(defn- -head [this url] (maybe "200 OK" 5))
+(defrecord MyHttpClient []
+  HttpClient
+  ;; (Ab)use annotations to pass activity options
+  (^{ActivityOptions {:retry true}} doGet [this url])
+  (doHead [this url]))
 
-(def example-impl-via-meta
-  (with-meta {:extended-via-metadata :true!}
-    {`doGet  (with-meta -get {:retry :always})
-     `doHead (with-meta -head {:retry :always})}))
+;; TODO read annotations when registering protocol
+(seq (.getAnnotations (.getMethod MyHttpClient "doGet" (into-array Class [Object]))))
+
 ;;;;
 ;; activities registration
-(a/register-protocol HttpClient example-impl-via-meta)
+(a/register-protocol HttpClient example-impl)
 
 ;;;;
 ;; workflow registration

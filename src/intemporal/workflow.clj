@@ -112,15 +112,15 @@
 (defn retry
   "Retries `f` with given `runid`, possibly resuming execution if `f` didn't reach a terminal state"
   [store f runid]
-  (let [fsym (s/lookup-workflow s/memstore runid)
-        wid  fsym]
+  (let [[wid wvar] (s/lookup-workflow s/memstore runid)]
+
     (with-bindings {#'current-workflow-run (e/make-workflow-execution store wid runid)}
       (let [invoke-evt (e/-advance-history-cursor current-workflow-run)]
         (when-not (some? invoke-evt)
-          (throw (IllegalArgumentException. (format "%s: runid %s not found" fsym runid))))
+          (throw (IllegalArgumentException. (format "%s: runid %s not found" wid runid))))
 
         (when-not (= (:type invoke-evt) ::invoke)
-          (throw (IllegalArgumentException. (format "%s: event for run %s is not ::invoke" fsym runid))))
+          (throw (IllegalArgumentException. (format "%s: event for run %s is not ::invoke" wid runid))))
 
         (e/-reset-history-cursor current-workflow-run)
         (apply f (:payload invoke-evt))))))
