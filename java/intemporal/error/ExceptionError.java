@@ -3,6 +3,9 @@ package intemporal.error;
 import clojure.lang.IExceptionInfo;
 import clojure.lang.IPersistentMap;
 
+/**
+ * Represents internal workflow/acvitity errors that shouldn't be caught.
+ */
 public class ExceptionError extends Error implements IExceptionInfo {
     public final IPersistentMap data;
 

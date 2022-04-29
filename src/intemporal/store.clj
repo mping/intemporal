@@ -45,7 +45,7 @@
         (if-let [wid (->> (:workflow-events @store)
                        (filter (fn [[wid runs]] (contains? (into #{} (keys runs)) runid)))
                        (ffirst))]
-          [wid (get @store [:workflows wid])]))
+          [wid (get-in @store [:workflows wid])]))
       (lookup-workflow-run [this wid runid]
         {:workflow        (get-in @store [:workflows wid])
          :workflow-events (get-in @store [:workflow-events wid runid])})

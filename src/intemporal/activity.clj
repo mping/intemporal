@@ -24,7 +24,7 @@
 ;;;;
 ;; activity stubbing
 
-(def ^:__private registry (atom {}))
+(def ^:private registry (atom {}))
 
 (defn- fn->fnid [f]
   (check (symbol? f) "'%s' should be a symbol" f)
@@ -48,30 +48,25 @@
                                 (name k)))]
       (set/subset? signames metanames))))
 
+(defn- get-registered-protocol
+  "Gets the registered class protocol object"
+  [klass]
+  (get @registry klass))
+
 (defn register-protocol
   "Registers an activity implementation for `proto` via `object`"
   [proto object]
-  (let [protocol (:on-interface proto)]
-    (check (some? protocol) "'%s' Should be a protocol" proto)
-    (check (.isInterface ^Class protocol) "'%s' Should be a protocol")
+  (let [klass (:on-interface proto)]
+    (check (some? klass) "'%s' Should be a protocol" proto)
+    (check (.isInterface ^Class klass) "'%s' Should be a protocol")
     (check (or (satisfies-via-meta? proto object)
-             (satisfies? proto object)) "Object '%s' should implement protocol '%s' but doesn't" object protocol)
-    (check (or (nil? (get @registry protocol))
-             (= object (get @registry protocol))) "'%s': An implemention for is already registered for the protocol" protocol)
+             (satisfies? proto object)) "Object '%s' should implement protocol '%s' but doesn't" object klass)
+    (check (or (nil? (get-registered-protocol klass))
+             (= object (get-registered-protocol klass))) "'%s': An implemention for is already registered for the protocol" klass)
 
     ;; TODO read fn metadatas if exist
-    (swap! registry assoc (.getCanonicalName protocol) object)
+    (swap! registry assoc (.getCanonicalName klass) object)
     nil))
-
-(defmacro register-function
-  "Registers a function implementation for `f`"
-  [f]
-  (let [cname (fn->fnid f)]
-    (swap! registry assoc cname f)
-    ;; don't return the swap! result to prevent print-dup issues:
-    ;; Syntax error compiling fn* at (src/intemporal/example.clj:40:1).
-    ;; Can't embed object in code, maybe print-dup not defined: intemporal.example$reify__10664@32878806
-    true))
 
 (defn get-protocol-impl
   "Gets an implementation for `proto`"
@@ -115,6 +110,21 @@
              (w/save-activity-event ~aid ::failure e#)
              e#))))))
 
+(defn- get-registered-function
+  "Gets the registered function for `fid`"
+  [fid]
+  (get @registry fid))
+
+(defmacro register-function
+  "Registers a function implementation for `f`"
+  [f]
+  (let [fid (fn->fnid f)]
+    (swap! registry assoc fid f)
+    ;; don't return the swap! result to prevent print-dup issues:
+    ;; Syntax error compiling fn* at (src/intemporal/example.clj:40:1).
+    ;; Can't embed object in code, maybe print-dup not defined: intemporal.example$reify__10664@32878806
+    true))
+
 (defmacro stub-function
   "Stubs and registers a single function as an activity"
   [f]
@@ -124,9 +134,9 @@
         fname    (gensym (str "stub-" (or (:name (meta resolved)) "fn") "-"))]
 
     (check (or
-             (nil? (get @registry fid))
-             (= (get @registry fid) f))
-      "Stubbed function '%s' doesn't match registered function '%s'" (get @registry fid) f)
+             (nil? (get-registered-function fid))
+             (= (get-registered-function fid) f))
+      "Stubbed function '%s' doesn't match registered function '%s'" (get-registered-function fid) f)
     (swap! registry assoc fid f)
 
     ;; return the proxy fn
@@ -140,9 +150,7 @@
   [proto]
   (check (symbol? proto) "'%s': Protocol should be a symbol, use `(:require [...])` or a namespace-local protocol for the definition" proto)
   (let [resolved     (resolve-protocol proto)
-        proto-str (str)
         proto-var    (var-get (resolve proto))
-        on-klass     (:on proto-var)
         curr-ns      (name (ns-name *ns*))
         proto-ns     (namespace (symbol (subs (str (:var proto-var)) 2)))
         in-proto-ns? (= curr-ns proto-ns)
