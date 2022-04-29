@@ -16,6 +16,7 @@
   ```
   "
   (:require [clojure.string :as str]
+            [clojure.set :as set]
             [intemporal.utils.check :refer [check]]
             [intemporal.workflow :as w]
             [intemporal.error :refer [workflow-error]]))
@@ -23,7 +24,7 @@
 ;;;;
 ;; activity stubbing
 
-(def ^:private registry (atom {}))
+(def ^:__private registry (atom {}))
 
 (defn- fn->fnid [f]
   (check (symbol? f) "'%s' should be a symbol" f)
@@ -40,16 +41,25 @@
     (check (.isInterface ^Class proto) " '%s': Activity should be implemented via a valid `defprotocol`, but it is not an interface" proto)
     proto))
 
+(defn- satisfies-via-meta? [proto object]
+  (when (:extend-via-metadata proto)
+    (let [signames  (->> proto :sigs keys (map name) (into #{}))
+          metanames (into #{} (for [[k _] (meta object)]
+                                (name k)))]
+      (set/subset? signames metanames))))
+
 (defn register-protocol
   "Registers an activity implementation for `proto` via `object`"
   [proto object]
   (let [protocol (:on-interface proto)]
     (check (some? protocol) "'%s' Should be a protocol" proto)
     (check (.isInterface ^Class protocol) "'%s' Should be a protocol")
-    (check (instance? protocol object) "'%s' Should implement `proto` but doesn't" object)
+    (check (or (satisfies-via-meta? proto object)
+             (satisfies? proto object)) "Object '%s' should implement protocol '%s' but doesn't" object protocol)
     (check (or (nil? (get @registry protocol))
              (= object (get @registry protocol))) "'%s': An implemention for is already registered for the protocol" protocol)
 
+    ;; TODO read fn metadatas if exist
     (swap! registry assoc (.getCanonicalName protocol) object)
     nil))
 
@@ -58,7 +68,7 @@
   [f]
   (let [cname (fn->fnid f)]
     (swap! registry assoc cname f)
-    ;; don't return the swap! result to prevent print-dup issues
+    ;; don't return the swap! result to prevent print-dup issues:
     ;; Syntax error compiling fn* at (src/intemporal/example.clj:40:1).
     ;; Can't embed object in code, maybe print-dup not defined: intemporal.example$reify__10664@32878806
     true))
@@ -67,28 +77,15 @@
   "Gets an implementation for `proto`"
   [^Class proto]
   (let [impl (get @registry (.getCanonicalName proto))]
-    (check (some? impl) "No activity registered for '%s', known protocols: %s" proto (type proto) (keys @registry))
+    (check (some? impl)
+      "No activity registered for '%s', known protocols: %s" proto (type proto) (keys @registry))
     impl))
-
-(defn- qualify
-  "Maps a Class and a name to a namespace-like string (eg: \"my.ns\""
-  [klass n]
-  (-> (str klass)
-    (subs 0 (.lastIndexOf (str klass) "."))
-    (symbol (str n))))
-
-(defn- class->var
-  "Maps a Class to a var-like string (eg \"#'my.ns/Class)\""
-  [^Class klass]
-  (let [parts (str/split (.getCanonicalName klass) #"\.")]
-    (str "#'" (str/join "." (butlast parts)) "/" (last parts))))
 
 (defmacro with-traced-activity
   "Traces activity with given `aid` by executing `body`, persisting events for ::invoke, ::success or ::failure"
   [aid args body]
   `(try
      ;; mark activity pending
-
      (if (w/next-event-matches? ~aid ::invoke)
        (:payload (w/advance-history-cursor))
        (do
@@ -142,13 +139,20 @@
   "Requires a stub for activity `proto`. To be used in worfklows"
   [proto]
   (check (symbol? proto) "'%s': Protocol should be a symbol, use `(:require [...])` or a namespace-local protocol for the definition" proto)
-  (let [resolved  (resolve-protocol proto)
-        proto-var (var-get (eval (read-string (class->var resolved))))
-        on-klass  (:on proto-var)
-        sig+args  (for [[sig val] (:sigs proto-var)
-                        :let [arglist (:arglists val)]]
-                    [(name sig) arglist (qualify on-klass (name sig))])]
-
+  (let [resolved     (resolve-protocol proto)
+        proto-str (str)
+        proto-var    (var-get (resolve proto))
+        on-klass     (:on proto-var)
+        curr-ns      (name (ns-name *ns*))
+        proto-ns     (namespace (symbol (subs (str (:var proto-var)) 2)))
+        in-proto-ns? (= curr-ns proto-ns)
+        sig+args     (-> (for [[sig val] (:sigs proto-var)
+                               :let [arglist (:arglists val)
+                                     qname   (if in-proto-ns?
+                                               (name sig)
+                                               (str (namespace proto) "/" (name sig)))]]
+                           [(name sig) arglist (symbol qname)])
+                       (doall))]
     `(reify ~proto
        ~@(for [[mname arglist qname] sig+args
                :let [sname (symbol mname)
@@ -157,6 +161,5 @@
            `(~sname [this# ~@args]
              (let [impl# (get-protocol-impl ~resolved)
                    aid#  '~qname]
-
                (with-traced-activity aid# [~@args]
                  (~qname impl# ~@args))))))))
