@@ -92,8 +92,10 @@
                      (:payload (w/advance-history-cursor))
 
                      (w/next-event-matches? ~aid ::failure)
+                     ;; TODO check retry policy
                      (throw (:payload (w/advance-history-cursor)))
 
+                     ;; TODO check divergent event
                      :else
                      (do
                        (let [b# ~body]

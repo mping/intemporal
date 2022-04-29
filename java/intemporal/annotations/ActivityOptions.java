@@ -1,5 +1,7 @@
 package intemporal.annotations;
 
+import clojure.lang.Keyword;
+
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
 
