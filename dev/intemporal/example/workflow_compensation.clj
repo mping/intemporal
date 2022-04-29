@@ -1,7 +1,10 @@
-(ns intemporal.example.compensation
+(ns intemporal.example.workflow-compensation
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
-            [intemporal.store :as s]))
+            [intemporal.store :as s]
+            [intemporal.example.protocol-activity :as pa]))
+
+(macroexpand-1 '(a/stub-protocol pa/HttpClient))
 
 (defprotocol TripBookingActivities
   (reserve-car [this name])
