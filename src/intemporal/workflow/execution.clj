@@ -16,7 +16,8 @@
   (-save-activity-event! [this activity-id event-type payload] "Saves an activity event")
   (-reset-history-cursor [this] "Resets the events cursor")
   (-next-event [this] "Gets next event")
-  (-advance-history-cursor [this] "Advance-only cursor for the events of this workflow run"))
+  (-advance-history-cursor [this] "Advance-only cursor for the events of this workflow run")
+  (-delete-history-forward [this] "Deletes all susequent events"))
 
 ;;;;;
 ;; defines a worfklow execution
@@ -52,7 +53,11 @@
       ;; mark nil as ::none, effectively ensuring next calls won't return any saved event
       (swap! state assoc :events-cursor (or res ::none))
       (println "[history] current event:" res)
-      res)))
+      res))
+  (-delete-history-forward [this]
+    (when-let [evt (get @state :events-cursor)]
+      (println "[history] deleting all events starting from" evt)
+      (s/expunge-events store workflow-id run-id (:id evt)))))
 
 (defn make-workflow-execution
   "Makes a new workflow run for the given workflow id"

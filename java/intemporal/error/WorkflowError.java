@@ -6,14 +6,14 @@ import clojure.lang.IPersistentMap;
 /**
  * Represents internal workflow/acvitity errors that shouldn't be caught.
  */
-public class ExceptionError extends Error implements IExceptionInfo {
+public class WorkflowError extends Error implements IExceptionInfo {
     public final IPersistentMap data;
 
-    public ExceptionError(String s, IPersistentMap data) {
+    public WorkflowError(String s, IPersistentMap data) {
         this(s, data, (Throwable) null);
     }
 
-    public ExceptionError(String s, IPersistentMap data, Throwable throwable) {
+    public WorkflowError(String s, IPersistentMap data, Throwable throwable) {
         super(s, throwable);
         if (data != null) {
             this.data = data;

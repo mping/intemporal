@@ -57,7 +57,10 @@
 (w/register-workflow s/memstore simpleflow)
 
 ;; call workflow
-(simpleflow "bla")
+(try
+  (simpleflow "bla")
+  (catch Exception _
+    (println "ACTIVITY FAILED")))
 
 (-> (:workflow-events @s/memstore)
   (last)
