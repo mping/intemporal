@@ -12,6 +12,7 @@
   (lookup-workflow-run [this wid runid] "Gets data for a given run")
   (next-event [this wid runid]
               [this wid runid currevt-id] "Gets the first or next event for a give runid, and optional event id")
+  (expunge-events [this wid runid evtid] "Expunges all events after `id`")
   (save-workflow-definition [this wid sym])
   (save-activity-definition [this aid sym])
   (save-workflow-event [this wid runid etype data])
@@ -57,6 +58,14 @@
         (->> (get-in @store [:workflow-events wid runid])
              (drop-while #(<= (:id %) currevt-id))
              first))
+      (expunge-events [this wid runid evtid]
+        (swap! store (fn [m]
+                       (let [to-keep (->> (get-in @store [:workflow-events wid runid])
+                                       (take-while #(<= (:id %) evtid))
+                                       (into []))]
+                         (-> m
+                           (assoc-in [:workflow-events wid runid] to-keep))))))
+
       ;;;;
       ;; persist definitions
       (save-workflow-definition [this wid fvar]

@@ -100,8 +100,7 @@
                       (if-not ~'retry
                         (throw (:payload (w/advance-history-cursor)))
                         (do
-                          ;; TODO delete curr event and all next events
-                          (println "RETRYING")
+                          (w/delete-history-forward)
                           (let [b# ~body]
                             ;; can jump to catch block
                             (w/save-activity-event ~aid ::success b#)

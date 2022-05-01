@@ -39,6 +39,9 @@
     (println (format "[store] match found? %s (%s etype %s)" match? uid event-type))
     match?))
 
+(defn delete-history-forward []
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (e/-delete-history-forward current-workflow-run))
 
 (defn advance-history-cursor []
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
@@ -113,7 +116,8 @@
 (defn retry
   "Retries `f` with given `runid`, possibly resuming execution if `f` didn't reach a terminal state"
   [store f runid]
-  (let [[wid wvar] (s/lookup-workflow s/memstore runid)]
+  (let [[wid _wvar] (s/lookup-workflow s/memstore runid)]
+    (check (some? wid) "No workflow found for runid %s" runid)
 
     (with-bindings {#'current-workflow-run (e/make-workflow-execution store wid runid)}
       (let [invoke-evt (e/-advance-history-cursor current-workflow-run)]
