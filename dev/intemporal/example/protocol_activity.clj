@@ -32,15 +32,14 @@
 (defrecord MyHttpClient []
   HttpClient
   ;; (Ab)use annotations to pass activity options
-  (^{ActivityOptions {:retry true}} doGet [this url])
+  (^{ActivityOptions {:retry true}} doGet [this url](maybe url 5))
   (doHead [this url]))
-
-;; TODO read annotations when registering protocol
-(seq (.getAnnotations (.getMethod MyHttpClient "doGet" (into-array Class [Object]))))
 
 ;;;;
 ;; activities registration
 (a/register-protocol HttpClient example-impl)
+;;
+(a/register-protocol HttpClient (->MyHttpClient))
 
 ;;;;
 ;; workflow registration
@@ -50,6 +49,7 @@
   (let [stub (a/stub-protocol HttpClient)]
     (try
       (doGet stub "carr")
+      #_
       (catch Exception _
         :failed))))
 
@@ -73,6 +73,7 @@
   (def run-uuid rid)
   (s/lookup-workflow-run s/memstore wname rid))
 
+(println run-uuid)
 (comment
   (w/retry s/memstore #'simpleflow run-uuid)
 

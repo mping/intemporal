@@ -5,8 +5,8 @@
   (:import [java.lang.annotation Retention RetentionPolicy]
            [intemporal.annotations ActivityOptions]))
 
-(defn hello-world [& args]
-  (apply println "hello, " args)
+(defn ^{:retry true} hello-world [& args]
+  (println "hello, " args)
   "kthxbye")
 
 ;;;;
@@ -47,8 +47,3 @@
 
   ;;TODO fix
   (s/lookup-workflow s/memstore run-uuid))
-
-
-;; annotation on type
-(defprotocol SomeProto
-  (hello [this]))

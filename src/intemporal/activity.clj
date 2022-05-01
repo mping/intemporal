@@ -15,11 +15,11 @@
   (e/register-protocol HttpActivity (->MyHttpActivity (get-pool))
   ```
   "
-  (:require [clojure.string :as str]
-            [clojure.set :as set]
+  (:require [clojure.set :as set]
             [intemporal.utils.check :refer [check]]
             [intemporal.workflow :as w]
-            [intemporal.error :refer [workflow-error]]))
+            [intemporal.error :refer [workflow-error]])
+  (:import [intemporal.annotations ActivityOptions]))
 
 ;;;;
 ;; activity stubbing
@@ -78,39 +78,62 @@
 
 (defmacro with-traced-activity
   "Traces activity with given `aid` by executing `body`, persisting events for ::invoke, ::success or ::failure"
-  [aid args body]
-  `(try
-     ;; mark activity pending
-     (if (w/next-event-matches? ~aid ::invoke)
-       (:payload (w/advance-history-cursor))
-       (do
-         (w/save-activity-event ~aid ::invoke (vec ~args))
-         (vec ~args)))
+  ([aid args body]
+   `(with-traced-activity ~aid ~args {} ~body))
+  ([aid args opts body]
+   `(try
+      ;; mark activity pending
+      (if (w/next-event-matches? ~aid ::invoke)
+        (:payload (w/advance-history-cursor))
+        (do
+          (w/save-activity-event ~aid ::invoke (vec ~args))
+          (vec ~args)))
 
-     (let [result# (cond
-                     (w/next-event-matches? ~aid ::success)
-                     (:payload (w/advance-history-cursor))
+      (let [{:keys [~'retry]} ~opts
+            result# (cond
+                      ;; we're replaying
+                      (w/next-event-matches? ~aid ::success)
+                      (:payload (w/advance-history-cursor))
 
-                     (w/next-event-matches? ~aid ::failure)
-                     ;; TODO check retry policy
-                     (throw (:payload (w/advance-history-cursor)))
+                      ;; failed but can't retry
+                      (w/next-event-matches? ~aid ::failure)
+                      (if-not ~'retry
+                        (throw (:payload (w/advance-history-cursor)))
+                        (do
+                          ;; TODO delete curr event and all next events
+                          (println "RETRYING")
+                          (let [b# ~body]
+                            ;; can jump to catch block
+                            (w/save-activity-event ~aid ::success b#)
+                            b#)))
 
-                     ;; TODO check divergent event
-                     :else
-                     (do
-                       (let [b# ~body]
-                         (w/save-activity-event ~aid ::success b#) ;; can call ~body twice!
-                         b#)))]
-       result#)
-     ;; mark activity success, store result
-     (catch Exception e#
-       ;; save error, mark activity failed
-       (throw
-         (if (w/next-event-matches? ~aid ::failure)
-           (:payload (w/advance-history-cursor))
-           (do
-             (w/save-activity-event ~aid ::failure e#)
-             e#))))))
+                      :else
+                      (do
+                        (let [b# ~body]
+                          ;; can jump to catch block
+                          (w/save-activity-event ~aid ::success b#)
+                          b#)))]
+        result#)
+      ;; mark activity success, store result
+      (catch Exception e#
+        ;; save error, mark activity failed
+        (throw
+          (if (w/next-event-matches? ~aid ::failure)
+            (:payload (w/advance-history-cursor))
+            (do
+              (w/save-activity-event ~aid ::failure e#)
+              e#)))))))
+
+(defn get-activity-options
+  "Gets activity options for the given object, if any"
+  [proto proto-impl method]
+  (when (record? proto-impl)
+    (let [arglists (first (get-in proto [:sigs method :arglists]))
+          argarray (into-array Class (repeatedly (dec (count arglists)) (constantly Object)))
+          rclass   (class proto-impl)]
+      (when-let [meth (.getMethod rclass (name method) argarray)]
+        (when-let [annot (first (.getAnnotationsByType meth ActivityOptions))]
+          {:retry (.retry annot)})))))
 
 (defn- get-registered-function
   "Gets the registered function for `fid`"
@@ -133,7 +156,8 @@
   (let [fid      (fn->fnid f)
         resolved (resolve f)
         qname    (subs (str resolved) 2)                    ;; poor mans' removing the var #'
-        fname    (gensym (str "stub-" (or (:name (meta resolved)) "fn") "-"))]
+        fname    (gensym (str "stub-" (or (:name (meta resolved)) "fn") "-"))
+        act-opts (select-keys (meta resolved) [:retry])]
 
     (check (or
              (nil? (get-registered-function fid))
@@ -144,7 +168,7 @@
     ;; return the proxy fn
     `(fn ~fname [& args#]
        (let [aid# (symbol ~qname)]
-         (with-traced-activity aid# args#
+         (with-traced-activity aid# args# ~act-opts
            (apply ~f args#))))))
 
 (defmacro stub-protocol
@@ -170,6 +194,7 @@
            ;; implement ~sname
            `(~sname [this# ~@args]
              (let [impl# (get-protocol-impl ~resolved)
-                   aid#  '~qname]
-               (with-traced-activity aid# [~@args]
+                   aid#  '~qname
+                   act-opts# (get-activity-options ~proto impl# (keyword ~mname))]
+               (with-traced-activity aid# [~@args] act-opts#
                  (~qname impl# ~@args))))))))
