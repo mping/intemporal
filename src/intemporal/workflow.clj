@@ -25,19 +25,20 @@
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (e/-save-activity-event! current-workflow-run activity-id event-type payload))
 
+(defn next-event []
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (let [nxt (e/-next-event current-workflow-run)]
+    nxt))
+
 (defn next-event-matches? [uid event-type]
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (let [nxt (e/-next-event current-workflow-run)
         match? (and (some? nxt)
-                (= (:type nxt) event-type)
-                (= (:uid nxt) uid))]
+                 (= (:type nxt) event-type)
+                 (= (:uid nxt) uid))]
     (println (format "[store] match found? %s (%s etype %s)" match? uid event-type))
     match?))
 
-(defn next-event-nil? []
-  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
-  (let [nxt (e/-next-event current-workflow-run)]
-    (nil? nxt)))
 
 (defn advance-history-cursor []
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
