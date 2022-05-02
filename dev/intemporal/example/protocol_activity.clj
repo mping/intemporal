@@ -26,14 +26,14 @@
 ;; basic protocol function
 (def example-impl
   (reify HttpClient
-    (doGet [this url] (maybe "200 OK" 5))
-    (doHead [this url] (maybe "200 OK" 5))))
+    (doGet [this _url] (maybe "200 OK" 5))
+    (doHead [this _url] (maybe "200 OK" 5))))
 
 (defrecord MyHttpClient []
   HttpClient
   ;; (Ab)use annotations to pass activity options
   (^{ActivityOptions {:retry true}} doGet [this url](maybe url 5))
-  (doHead [this url]))
+  (doHead [this _url]))
 
 ;;;;
 ;; activities registration
@@ -47,7 +47,7 @@
 (defn simpleflow
   [n]
   (let [stub (a/stub-protocol HttpClient)]
-    (doGet stub "carr")))
+    (doGet stub (str n "carr"))))
 
 (s/clear-events s/memstore)
 (w/register-workflow s/memstore simpleflow)
@@ -58,12 +58,7 @@
   (catch Exception _
     (println "ACTIVITY FAILED")))
 
-(-> (:workflow-events @s/memstore)
-  (last)
-  (last)
-  (last)
-  (last)
-  (clojure.pprint/print-table))
+(println (s/events->table s/memstore))
 
 (declare run-uuid)
 (let [wevs (-> (deref s/memstore) :workflow-events)

@@ -1,9 +1,7 @@
 (ns intemporal.example.hello-world
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
-            [intemporal.store :as s])
-  (:import [java.lang.annotation Retention RetentionPolicy]
-           [intemporal.annotations ActivityOptions]))
+            [intemporal.store :as s]))
 
 (defn ^{:retry true} hello-world [& args]
   (println "hello, " args)
@@ -28,12 +26,7 @@
 ;; call workflow
 (simpleflow "bla")
 
-(-> (:workflow-events @s/memstore)
-  (last)
-  (last)
-  (last)
-  (last)
-  (clojure.pprint/print-table))
+(println (s/events->table s/memstore))
 
 (declare run-uuid)
 (let [wevs (-> (deref s/memstore) :workflow-events)

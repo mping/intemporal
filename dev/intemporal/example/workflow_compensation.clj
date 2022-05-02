@@ -1,10 +1,7 @@
 (ns intemporal.example.workflow-compensation
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
-            [intemporal.store :as s]
-            [intemporal.example.protocol-activity :as pa]))
-
-(macroexpand-1 '(a/stub-protocol pa/HttpClient))
+            [intemporal.store :as s]))
 
 (defprotocol TripBookingActivities
   (reserve-car [this name])
@@ -81,12 +78,7 @@
 (s/clear-events s/memstore)
 (book-trip "bla")
 
-(-> (:workflow-events @s/memstore)
-  (last)
-  (last)
-  (last)
-  (last)
-  (clojure.pprint/print-table))
+(println (s/events->table s/memstore))
 
 (declare run-uuid)
 (let [wevs (-> s/memstore (deref) :workflow-events)
