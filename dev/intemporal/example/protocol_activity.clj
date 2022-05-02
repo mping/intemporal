@@ -47,11 +47,7 @@
 (defn simpleflow
   [n]
   (let [stub (a/stub-protocol HttpClient)]
-    (try
-      (doGet stub "carr")
-      #_
-      (catch Exception _
-        :failed))))
+    (doGet stub "carr")))
 
 (s/clear-events s/memstore)
 (w/register-workflow s/memstore simpleflow)
