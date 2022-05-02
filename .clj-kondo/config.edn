@@ -1,3 +1,4 @@
 {:lint-as {intemporal.workflow/defn-workflow clojure.core/defn}
- :linters {:unresolved-symbol
-           {:exclude [(clojure.test/is [thrown-ex-info-type?])]}}}
+ :linters {:unresolved-symbol {:exclude [(clojure.test/is [thrown-ex-info-type?])]}
+           :unused-binding    {:exclude-unused-as true
+                               :exclude-destructured-as true}}}

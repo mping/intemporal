@@ -1,5 +1,6 @@
 (ns intemporal.store
-  (:require [intemporal.utils.check :refer [check]])
+  (:require [clojure.pprint :as pprint]
+            [intemporal.utils.check :refer [check]])
   (:import [clojure.lang IDeref]))
 
 
@@ -8,10 +9,11 @@
   (clear [this] "Resets the store")
   (clear-events [this] "Resets all events")
   (serializable? [this arg] "Indicates if `arg` can be serialized onto the store")
+  (events->table [this] "Returns a tabular for of workflow events")
   (lookup-workflow [this runid] "Gets the workflow associated with the runid")
   (lookup-workflow-run [this wid runid] "Gets data for a given run")
   (next-event [this wid runid]
-              [this wid runid currevt-id] "Gets the first or next event for a give runid, and optional event id")
+    [this wid runid currevt-id] "Gets the first or next event for a give runid, and optional event id")
   (expunge-events [this wid runid evtid] "Expunges all events after `id`")
   (save-workflow-definition [this wid sym])
   (save-activity-definition [this aid sym])
@@ -42,10 +44,19 @@
       (clear [this] (reset! store seed))
       (clear-events [this] (swap! store assoc :workflow-events {}))
       (serializable? [this _arg] true)
+      (events->table [this]
+        (let [all-events  (->> (get @store :workflow-events)
+                            (vals)
+                            (map last)
+                            (map last)
+                            (flatten))]
+          (with-out-str
+            (pprint/print-table all-events))))
+      ;; main stuff
       (lookup-workflow [this runid]
-        (if-let [wid (->> (:workflow-events @store)
-                       (filter (fn [[wid runs]] (contains? (into #{} (keys runs)) runid)))
-                       (ffirst))]
+        (when-let [wid (->> (:workflow-events @store)
+                         (filter (fn [[_wid runs]] (contains? (into #{} (keys runs)) runid)))
+                         (ffirst))]
           [wid (get-in @store [:workflows wid])]))
       (lookup-workflow-run [this wid runid]
         {:workflow        (get-in @store [:workflows wid])
@@ -53,11 +64,11 @@
 
       (next-event [this wid runid]
         (->> (get-in @store [:workflow-events wid runid])
-             first))
+          first))
       (next-event [this wid runid currevt-id]
         (->> (get-in @store [:workflow-events wid runid])
-             (drop-while #(<= (:id %) currevt-id))
-             first))
+          (drop-while #(<= (:id %) currevt-id))
+          first))
       (expunge-events [this wid runid evtid]
         (swap! store (fn [m]
                        (let [to-keep (->> (get-in @store [:workflow-events wid runid])

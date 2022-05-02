@@ -1,7 +1,6 @@
 (ns intemporal.workflow.execution
   "Defines the IWorkflowExecution protocol."
-  (:require [intemporal.store :as s]
-            [intemporal.error :refer [workflow-error]])
+  (:require [intemporal.store :as s])
   (:import [java.util UUID]))
 
 (defprotocol IWorkflowExecution
