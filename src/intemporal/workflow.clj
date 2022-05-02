@@ -30,10 +30,9 @@
   (let [nxt (e/-next-event current-workflow-run)]
     nxt))
 
-(defn next-event-matches? [uid event-type]
+(defn event-matches? [nxt uid event-type]
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
-  (let [nxt (e/-next-event current-workflow-run)
-        match? (and (some? nxt)
+  (let [match? (and (some? nxt)
                  (= (:type nxt) event-type)
                  (= (:uid nxt) uid))]
     (println (format "[store] match found? %s (%s etype %s)" match? uid event-type))
@@ -82,19 +81,20 @@
           (let [astore (var-get (resolve store))]
             (with-bindings {#'current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))}
 
-              (let [vargs (if (next-event-matches? wid ::invoke)
+              (let [vargs (if (event-matches? (next-event) wid ::invoke)
                             (:payload (advance-history-cursor))
                             (do
                               (save-workflow-event ::invoke args)
                               (into [] args)))]
                 (try
-                  (let [result (apply f vargs)]
+                  (let [result (apply f vargs)
+                        nxt    (next-event)]
                     ;; if it throws we go to the catch
                     (cond
-                      (next-event-matches? wid ::success)
+                      (event-matches? nxt wid ::success)
                       (:payload (advance-history-cursor))
 
-                      (next-event-matches? wid ::failure)
+                      (event-matches? nxt wid ::failure)
                       (throw (:payload (advance-history-cursor))) ;; goes to catch
 
                       :else
@@ -102,7 +102,7 @@
                         (save-workflow-event ::success result)
                         result)))
                   (catch Exception e
-                    (if (next-event-matches? wid ::failure)
+                    (if (event-matches? (next-event) wid ::failure)
                       (:payload (advance-history-cursor))
                       (do
                         (save-workflow-event ::failure e)

@@ -83,41 +83,42 @@
   ([aid args opts body]
    `(try
       ;; mark activity pending
-      (if (w/next-event-matches? ~aid ::invoke)
+      (if (w/event-matches? (w/next-event) ~aid ::invoke)
         (:payload (w/advance-history-cursor))
         (do
           (w/save-activity-event ~aid ::invoke (vec ~args))
           (vec ~args)))
 
       (let [{:keys [~'retry]} ~opts
-            result# (cond
-                      ;; we're replaying
-                      (w/next-event-matches? ~aid ::success)
-                      (:payload (w/advance-history-cursor))
+            next-evt# (w/next-event)
+            result#   (cond
+                        ;; we're replaying
+                        (w/event-matches? next-evt# ~aid ::success)
+                        (:payload (w/advance-history-cursor))
 
-                      ;; failed but can't retry
-                      (w/next-event-matches? ~aid ::failure)
-                      (if-not ~'retry
-                        (throw (:payload (w/advance-history-cursor)))
+                        ;; failed but can't retry
+                        (w/event-matches? next-evt# ~aid ::failure)
+                        (if-not ~'retry
+                          (throw (:payload (w/advance-history-cursor)))
+                          (do
+                            (w/delete-history-forward)
+                            (let [b# ~body]
+                              ;; can jump to catch block
+                              (w/save-activity-event ~aid ::success b#)
+                              b#)))
+
+                        :else
                         (do
-                          (w/delete-history-forward)
                           (let [b# ~body]
                             ;; can jump to catch block
                             (w/save-activity-event ~aid ::success b#)
-                            b#)))
-
-                      :else
-                      (do
-                        (let [b# ~body]
-                          ;; can jump to catch block
-                          (w/save-activity-event ~aid ::success b#)
-                          b#)))]
+                            b#)))]
         result#)
       ;; mark activity success, store result
       (catch Exception e#
         ;; save error, mark activity failed
         (throw
-          (if (w/next-event-matches? ~aid ::failure)
+          (if (w/event-matches? (w/next-event) ~aid ::failure)
             (:payload (w/advance-history-cursor))
             (do
               (w/save-activity-event ~aid ::failure e#)
@@ -181,19 +182,20 @@
         in-proto-ns? (= curr-ns proto-ns)
         sig+args     (-> (for [[sig val] (:sigs proto-var)
                                :let [arglist (:arglists val)
-                                     qname   (if in-proto-ns?
+                                     qname   (str (name proto-ns) "/" (name sig))
+                                     invname (if in-proto-ns?
                                                (name sig)
                                                (str (namespace proto) "/" (name sig)))]]
-                           [(name sig) arglist (symbol qname)])
+                           [(name sig) arglist (symbol invname) (symbol qname)])
                        (doall))]
     `(reify ~proto
-       ~@(for [[mname arglist qname] sig+args
+       ~@(for [[mname arglist invname qname] sig+args
                :let [sname (symbol mname)
                      args  (rest (first arglist))]]
            ;; implement ~sname
            `(~sname [this# ~@args]
-             (let [impl# (get-protocol-impl ~resolved)
-                   aid#  '~qname
+             (let [impl#     (get-protocol-impl ~resolved)
+                   aid#      '~qname
                    act-opts# (get-activity-options ~proto impl# (keyword ~mname))]
                (with-traced-activity aid# [~@args] act-opts#
-                 (~qname impl# ~@args))))))))
+                 (~invname impl# ~@args))))))))
