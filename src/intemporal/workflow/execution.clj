@@ -28,14 +28,14 @@
     (:compensations @state))
   (-add-compensation [_ compensation-fn]
     (swap! state update-in [:compensations] conj compensation-fn))
-  (-save-workflow-event! [this event-type payload]
+  (-save-workflow-event! [_ event-type payload]
     (s/save-workflow-event store workflow-id run-id event-type payload))
-  (-save-activity-event! [this activity-id event-type payload]
+  (-save-activity-event! [_ activity-id event-type payload]
     (s/save-activity-event store workflow-id run-id activity-id event-type payload))
 
-  (-reset-history-cursor [this]
+  (-reset-history-cursor [_]
     (swap! state assoc :events-cursor nil))
-  (-next-event [this]
+  (-next-event [_]
     (let [evt    (get @state :events-cursor)
           nxt    (cond
                    (= evt ::none) nil
@@ -43,7 +43,7 @@
                    :else (s/next-event store workflow-id run-id))]
       nxt))
 
-  (-advance-history-cursor [this]
+  (-advance-history-cursor [_]
     (let [evt (get @state :events-cursor)
           res (cond
                 (= evt ::none) nil
@@ -53,7 +53,7 @@
       (swap! state assoc :events-cursor (or res ::none))
       (println "[history] current event:" res)
       res))
-  (-delete-history-forward [this]
+  (-delete-history-forward [_]
     (when-let [evt (get @state :events-cursor)]
       (println "[history] deleting all events starting from" evt)
       (s/expunge-events store workflow-id run-id (:id evt)))))

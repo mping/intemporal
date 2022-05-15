@@ -3,7 +3,7 @@
             [intemporal.activity :as a]
             [intemporal.store :as s]))
 
-(defn ^{:retry true} hello-world [& args]
+(defn ^{:idempotent true} hello-world [& args]
   (println "hello, " args)
   "kthxbye")
 

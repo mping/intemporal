@@ -26,14 +26,14 @@
 ;; basic protocol function
 (def example-impl
   (reify HttpClient
-    (doGet [this _url] (maybe "200 OK" 5))
-    (doHead [this _url] (maybe "200 OK" 5))))
+    (doGet [_ _url] (maybe "200 OK" 5))
+    (doHead [_ _url] (maybe "200 OK" 5))))
 
 (defrecord MyHttpClient []
   HttpClient
   ;; (Ab)use annotations to pass activity options
-  (^{ActivityOptions {:retry true}} doGet [this url](maybe url 5))
-  (doHead [this _url]))
+  (^{ActivityOptions {:idempotent true}} doGet [_ url](maybe url 5))
+  (doHead [_ _url]))
 
 ;;;;
 ;; activities registration
