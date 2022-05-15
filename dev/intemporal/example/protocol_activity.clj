@@ -2,6 +2,7 @@
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
             [intemporal.store :as s])
+  #_:clj-kondo/ignore
   (:import [intemporal.annotations ActivityOptions]))
 
 (defprotocol HttpClient
