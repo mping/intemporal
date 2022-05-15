@@ -15,25 +15,22 @@
     (.setStackTrace e (into-array StackTraceElement []))
     e))
 
-(defn- maybe
-  ([val]
-   (maybe val 5))
-  ([val ok-chance-0-10]
-   (let [r (rand-int 10)]
-     (when (> r ok-chance-0-10)
+(defmacro maybe [& body]
+  `(let [r# (rand-int 10)]
+     (when (> r# 5)
        (throw EmptyException))
-     val)))
+     ~@body))
 
 ;; basic protocol function
 (def example-impl
   (reify HttpClient
-    (doGet [_ _url] (maybe "200 OK" 5))
-    (doHead [_ _url] (maybe "200 OK" 5))))
+    (doGet [_ _url] (maybe "200 OK"))
+    (doHead [_ _url] (maybe "200 OK"))))
 
 (defrecord MyHttpClient []
   HttpClient
   ;; (Ab)use annotations to pass activity options
-  (^{ActivityOptions {:idempotent true}} doGet [_ url](maybe url 5))
+  (^{ActivityOptions {:idempotent true}} doGet [_ url] (maybe url 5))
   (doHead [_ _url]))
 
 ;;;;
@@ -71,6 +68,7 @@
 (println run-uuid)
 (comment
   (w/retry s/memstore #'simpleflow run-uuid)
+  (println (s/events->table s/memstore))
 
   ;;TODO fix
   (s/lookup-workflow s/memstore run-uuid))

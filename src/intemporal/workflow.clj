@@ -114,7 +114,7 @@
        nil)))
 
 (defn retry
-  "Retries `f` with given `runid`, possibly resuming execution if `f` didn't reach a terminal state"
+  "Retries `f` with given `runid`, possibly resuming execution if `f` didn't reach a terminal state."
   [store f runid]
   (let [[wid _wvar] (s/lookup-workflow s/memstore runid)]
     (check (some? wid) "No workflow found for runid %s" runid)
@@ -125,7 +125,7 @@
           (throw (IllegalArgumentException. (format "%s: runid %s not found" wid runid))))
 
         (when-not (= (:type invoke-evt) ::invoke)
-          (throw (IllegalArgumentException. (format "%s: event for run %s is not ::invoke" wid runid))))
+          (throw (IllegalArgumentException. (format "%s: event for run %s is %s, should be ::invoke" wid invoke-evt runid))))
 
         (e/-reset-history-cursor current-workflow-run)
         (apply f (:payload invoke-evt))))))

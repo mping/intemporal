@@ -17,21 +17,19 @@
     (.setStackTrace e (into-array StackTraceElement []))
     e))
 
-(defn- maybe
-  ([val]
-   (maybe val 5))
-  ([val ok-chance-0-10]
-   (let [r (rand-int 10)]
-     (when (> r ok-chance-0-10)
+(defmacro maybe8 [& body]
+  `(let [r# (rand-int 10)]
+     (when (> r# 8)
        (throw EmptyException))
-     val)))
+     ~@body))
+
 
 (def example-impl
   (reify TripBookingActivities
-    (reserve-car [this name] (maybe "car-xxx" 9))
-    (book-hotel [this name] (maybe "hotel-yyy" 5))
-    (book-flight [this name] (maybe "flight-zzz" 4))
-    (^{ActivityOptions {:idempotent true}} cancel-car [this id name] (println "!cancel car" id name))
+    (reserve-car [this name] (maybe8 "car-xxx"))
+    (book-hotel [this name] (maybe8 "hotel-yyy"))
+    (book-flight [this name] (maybe8 "flight-zzz"))
+    (^{ActivityOptions {:idempotent true}} cancel-car [this id name]  (println "!cancel car" id name))
     (^{ActivityOptions {:idempotent true}} cancel-hotel [this id name] (println "!cancel hotel" id name))
     (^{ActivityOptions {:idempotent true}} cancel-flight [this id name] (println "!cancel flight" id name))))
 

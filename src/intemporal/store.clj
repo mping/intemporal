@@ -73,7 +73,13 @@
         (swap! store (fn [m]
                        (let [to-keep (->> (get-in @store [:workflow-events wid runid])
                                        (take-while #(<= (:id %) evtid))
-                                       (into []))]
+                                       (into []))
+                             #_#_ ;; mark as deleted
+                             to-keep (->> (get-in @store [:workflow-events wid runid])
+                                       (mapv (fn [evt]
+                                               (if (<= (:id evt) evtid)
+                                                 evt
+                                                 (assoc evt :deleted? true)))))]
                          (-> m
                            (assoc-in [:workflow-events wid runid] to-keep))))))
 

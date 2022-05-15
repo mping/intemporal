@@ -1,6 +1,5 @@
 (ns workflow.core-test
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.workflow :as w]))
+  (:require [clojure.test :refer [deftest is testing]]))
 
 (deftest a-test
   (testing "FIXME, I fail."
