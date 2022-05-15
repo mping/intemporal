@@ -33,10 +33,10 @@
       [wname kvs] (first wevs)
       rid  (-> kvs keys first)]
   (def run-uuid rid)
-  (s/lookup-workflow-run s/memstore wname rid))
+  (s/list-workflow-run s/memstore wname rid))
 
 (comment
   (w/retry s/memstore #'simpleflow run-uuid)
 
   ;;TODO fix
-  (s/lookup-workflow s/memstore run-uuid))
+  (s/list-workflow s/memstore run-uuid))

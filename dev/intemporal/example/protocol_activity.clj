@@ -7,8 +7,8 @@
 
 (defprotocol HttpClient
   :extend-via-metadata true
-  (doGet [this url])
-  (doHead [this url]))
+  (doHead [this id] "Can be called multiple times")
+  (doPost [this id] "Should only be called once"))
 
 (def EmptyException
   (let [e (RuntimeException. "Spurious error")]
@@ -24,14 +24,14 @@
 ;; basic protocol function
 (def example-impl
   (reify HttpClient
-    (doGet [_ _url] (maybe "200 OK"))
+    (doPost [_ _url] (maybe "200 OK"))
     (doHead [_ _url] (maybe "200 OK"))))
 
 (defrecord MyHttpClient []
   HttpClient
   ;; (Ab)use annotations to pass activity options
-  (^{ActivityOptions {:idempotent true}} doGet [_ url] (maybe url 5))
-  (doHead [_ _url]))
+  (^{ActivityOptions {:idempotent false}} doPost [_ id] (maybe id))
+  (^{ActivityOptions {:idempotent true}} doHead [_ id] (maybe id)))
 
 ;;;;
 ;; activities registration
@@ -45,7 +45,8 @@
 (defn simpleflow
   [n]
   (let [stub (a/stub-protocol HttpClient)]
-    (doGet stub (str n "carr"))))
+    (doHead stub (str n "carr"))
+    (doPost stub (str n "carr"))))
 
 (s/clear-events s/memstore)
 (w/register-workflow s/memstore simpleflow)
@@ -63,7 +64,7 @@
       [wname kvs] (first wevs)
       rid  (-> kvs keys first)]
   (def run-uuid rid)
-  (s/lookup-workflow-run s/memstore wname rid))
+  (s/list-workflow-run s/memstore wname rid {:all? true}))
 
 (println run-uuid)
 (comment
@@ -71,4 +72,4 @@
   (println (s/events->table s/memstore))
 
   ;;TODO fix
-  (s/lookup-workflow s/memstore run-uuid))
+  (s/list-workflow s/memstore run-uuid))

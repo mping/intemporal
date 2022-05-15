@@ -1,6 +1,7 @@
 (ns intemporal.workflow.execution
   "Defines the IWorkflowExecution protocol."
-  (:require [intemporal.store :as s])
+  (:require [intemporal.store :as s]
+            [clojure.tools.logging :as log])
   (:import [java.util UUID]))
 
 (defprotocol IWorkflowExecution
@@ -14,6 +15,7 @@
   (-save-workflow-event! [this event-type payload] "Saves a workflow event")
   (-save-activity-event! [this activity-id event-type payload] "Saves an activity event")
   (-reset-history-cursor [this] "Resets the events cursor")
+  (-current-event [this] "Gets current event")
   (-next-event [this] "Gets next event")
   (-advance-history-cursor [this] "Advance-only cursor for the events of this workflow run")
   (-delete-history-forward [this] "Deletes all susequent events"))
@@ -35,6 +37,8 @@
 
   (-reset-history-cursor [_]
     (swap! state assoc :events-cursor nil))
+  (-current-event [_]
+    (get @state :events-cursor))
   (-next-event [_]
     (let [evt    (get @state :events-cursor)
           nxt    (cond
@@ -51,11 +55,11 @@
                 :else (s/next-event store workflow-id run-id))]
       ;; mark nil as ::none, effectively ensuring next calls won't return any saved event
       (swap! state assoc :events-cursor (or res ::none))
-      (println "[history] current event:" res)
+      (log/debugf "current event: %s" res)
       res))
   (-delete-history-forward [_]
     (when-let [evt (get @state :events-cursor)]
-      (println "[history] deleting all events starting from" evt)
+      (log/debugf "[history] deleting all events starting from %s" evt)
       (s/expunge-events store workflow-id run-id (:id evt)))))
 
 (defn make-workflow-execution
