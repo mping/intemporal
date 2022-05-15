@@ -17,8 +17,7 @@
   "
   (:require [clojure.set :as set]
             [intemporal.utils.check :refer [check]]
-            [intemporal.workflow :as w]
-            [intemporal.error :refer [workflow-error]])
+            [intemporal.workflow :as w])
   (:import [intemporal.annotations ActivityOptions]))
 
 ;;;;
