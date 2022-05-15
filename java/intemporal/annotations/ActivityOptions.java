@@ -12,5 +12,5 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 @Retention(value=RUNTIME)
 public @interface ActivityOptions {
 
-    boolean retry() default false;
+    boolean idempotent() default false;
 }

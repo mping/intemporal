@@ -1,7 +1,8 @@
 (ns intemporal.example.workflow-compensation
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
-            [intemporal.store :as s]))
+            [intemporal.store :as s])
+  (:import [intemporal.annotations ActivityOptions]))
 
 (defprotocol TripBookingActivities
   (reserve-car [this name])
@@ -30,9 +31,9 @@
     (reserve-car [this name] (maybe "car-xxx" 9))
     (book-hotel [this name] (maybe "hotel-yyy" 5))
     (book-flight [this name] (maybe "flight-zzz" 4))
-    (cancel-car [this id name] (println "!cancel car" id name))
-    (cancel-hotel [this id name] (println "!cancel hotel" id name))
-    (cancel-flight [this id name] (println "!cancel flight" id name))))
+    (^{ActivityOptions {:idempotent true}} cancel-car [this id name] (println "!cancel car" id name))
+    (^{ActivityOptions {:idempotent true}} cancel-hotel [this id name] (println "!cancel hotel" id name))
+    (^{ActivityOptions {:idempotent true}} cancel-flight [this id name] (println "!cancel flight" id name))))
 
 ;; functions don't need registration, they are registered on stub
 (defn send-email [name body]

@@ -89,7 +89,7 @@
           (w/save-activity-event ~aid ::invoke (vec ~args))
           (vec ~args)))
 
-      (let [{:keys [~'retry]} ~opts
+      (let [{:keys [~'idempotent]} ~opts
             next-evt# (w/next-event)
             result#   (cond
                         ;; we're replaying
@@ -98,9 +98,10 @@
 
                         ;; failed but can't retry
                         (w/event-matches? next-evt# ~aid ::failure)
-                        (if-not ~'retry
+                        (if-not ~'idempotent
                           (throw (:payload (w/advance-history-cursor)))
                           (do
+                            (println "it's idempotent, lets go")
                             (w/delete-history-forward)
                             (let [b# ~body]
                               ;; can jump to catch block
@@ -133,7 +134,7 @@
           rclass   (class proto-impl)]
       (when-let [meth (.getMethod rclass (name method) argarray)]
         (when-let [annot (first (.getAnnotationsByType meth ActivityOptions))]
-          {:retry (.retry annot)})))))
+          {:idempotent (.idempotent annot)})))))
 
 (defn- get-registered-function
   "Gets the registered function for `fid`"
@@ -157,7 +158,7 @@
         resolved (resolve f)
         qname    (subs (str resolved) 2)                    ;; poor mans' removing the var #'
         fname    (gensym (str "stub-" (or (:name (meta resolved)) "fn") "-"))
-        act-opts (select-keys (meta resolved) [:retry])]
+        act-opts (select-keys (meta resolved) [:idempotent])]
 
     (check (or
              (nil? (get-registered-function fid))
