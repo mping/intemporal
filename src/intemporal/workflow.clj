@@ -2,7 +2,8 @@
   "Main namespace. A worfklow definition is a function that is proxied to save its arguments and result/error."
   (:require [intemporal.store :as s]
             [intemporal.workflow.execution :as e]
-            [intemporal.utils.check :refer [check]]))
+            [intemporal.utils.check :refer [check]]
+            [clojure.tools.logging :as log]))
 
 ;; holds the data for the current workflow
 ;; is a dynamic var so we can rebind each time the workflow function is called
@@ -30,12 +31,17 @@
   (let [nxt (e/-next-event current-workflow-run)]
     nxt))
 
+(defn current-event []
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (let [nxt (e/-current-event current-workflow-run)]
+    nxt))
+
 (defn event-matches? [nxt uid event-type]
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (let [match? (and (some? nxt)
                  (= (:type nxt) event-type)
                  (= (:uid nxt) uid))]
-    (println (format "[store] match found? %s (%s etype %s)" match? uid event-type))
+    (log/debugf "[store] match found? %s (aid: %s, etype: %s)" match? uid event-type)
     match?))
 
 (defn delete-history-forward []
@@ -116,7 +122,7 @@
 (defn retry
   "Retries `f` with given `runid`, possibly resuming execution if `f` didn't reach a terminal state."
   [store f runid]
-  (let [[wid _wvar] (s/lookup-workflow s/memstore runid)]
+  (let [[wid _wvar] (s/list-workflow s/memstore runid)]
     (check (some? wid) "No workflow found for runid %s" runid)
 
     (with-bindings {#'current-workflow-run (e/make-workflow-execution store wid runid)}

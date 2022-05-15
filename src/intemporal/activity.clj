@@ -89,18 +89,17 @@
           (vec ~args)))
 
       (let [{:keys [~'idempotent]} ~opts
-            next-evt# (w/next-event)
+            curr-evt# (w/next-event)
             result#   (cond
                         ;; we're replaying
-                        (w/event-matches? next-evt# ~aid ::success)
+                        (w/event-matches? curr-evt# ~aid ::success)
                         (:payload (w/advance-history-cursor))
 
                         ;; failed but can't retry
-                        (w/event-matches? next-evt# ~aid ::failure)
+                        (w/event-matches? curr-evt# ~aid ::failure)
                         (if-not ~'idempotent
                           (throw (:payload (w/advance-history-cursor)))
                           (do
-                            (println "it's idempotent, lets go")
                             (w/delete-history-forward)
                             (let [b# ~body]
                               ;; can jump to catch block
@@ -110,7 +109,7 @@
                         :else
                         (do
                           (let [b# ~body]
-                            ;; can jump to catch block
+                            ;; can jump to catch block if it throws
                             (w/save-activity-event ~aid ::success b#)
                             b#)))]
         result#)
@@ -118,8 +117,15 @@
       (catch Exception e#
         ;; save error, mark activity failed
         (throw
-          (if (w/event-matches? (w/next-event) ~aid ::failure)
+          (cond
+            #_#_
+            (w/event-matches? (w/next-event) ~aid ::failure)
             (:payload (w/advance-history-cursor))
+
+            (w/event-matches? (w/current-event) ~aid ::failure)
+            e#
+
+            :else
             (do
               (w/save-activity-event ~aid ::failure e#)
               e#)))))))
