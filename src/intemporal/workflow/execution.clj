@@ -14,9 +14,9 @@
   ;; db access
   (-save-workflow-event! [this event-type payload] "Saves a workflow event")
   (-save-activity-event! [this activity-id event-type payload] "Saves an activity event")
-  (-reset-history-cursor [this] "Resets the events cursor")
   (-current-event [this] "Gets current event")
   (-next-event [this] "Gets next event")
+  (-reset-history-cursor [this] "Resets the events cursor")
   (-advance-history-cursor [this] "Advance-only cursor for the events of this workflow run")
   (-delete-history-forward [this] "Deletes all susequent events"))
 
@@ -34,9 +34,6 @@
     (s/save-workflow-event store workflow-id run-id event-type payload))
   (-save-activity-event! [_ activity-id event-type payload]
     (s/save-activity-event store workflow-id run-id activity-id event-type payload))
-
-  (-reset-history-cursor [_]
-    (swap! state assoc :events-cursor nil))
   (-current-event [_]
     (get @state :events-cursor))
   (-next-event [_]
@@ -47,6 +44,8 @@
                    :else (s/next-event store workflow-id run-id))]
       nxt))
 
+  (-reset-history-cursor [_]
+      (swap! state assoc :events-cursor nil))
   (-advance-history-cursor [_]
     (let [evt (get @state :events-cursor)
           res (cond
@@ -55,7 +54,7 @@
                 :else (s/next-event store workflow-id run-id))]
       ;; mark nil as ::none, effectively ensuring next calls won't return any saved event
       (swap! state assoc :events-cursor (or res ::none))
-      (log/debugf "current event: %s" res)
+      (log/debugf "[history] current event: %s" res)
       res))
   (-delete-history-forward [_]
     (when-let [evt (get @state :events-cursor)]

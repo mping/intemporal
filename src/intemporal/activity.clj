@@ -59,11 +59,12 @@
     (check (some? klass) "'%s' Should be a protocol" proto)
     (check (.isInterface ^Class klass) "'%s' Should be a protocol")
     (check (or (satisfies-via-meta? proto object)
-             (satisfies? proto object)) "Object '%s' should implement protocol '%s' but doesn't" object klass)
+               (satisfies? proto object))
+      "Object '%s' should implement protocol '%s' but doesn't" object klass)
     (check (or (nil? (get-registered-protocol klass))
-             (= object (get-registered-protocol klass))) "'%s': An implemention for is already registered for the protocol" klass)
+               (= object (get-registered-protocol klass)))
+      "'%s': An implemention for is already registered for the protocol" klass)
 
-    ;; TODO read fn metadatas if exist
     (swap! registry assoc (.getCanonicalName klass) object)
     nil))
 
@@ -71,8 +72,7 @@
   "Gets an implementation for `proto`"
   [^Class proto]
   (let [impl (get @registry (.getCanonicalName proto))]
-    (check (some? impl)
-      "No activity registered for '%s', known protocols: %s" proto (type proto) (keys @registry))
+    (check (some? impl) "No activity registered for '%s', known protocols: %s" proto (type proto) (keys @registry))
     impl))
 
 (defmacro with-traced-activity
@@ -106,6 +106,7 @@
                               (w/save-activity-event ~aid ::success b#)
                               b#)))
 
+                        ;; TODO handle divergence
                         :else
                         (do
                           (let [b# ~body]
@@ -122,6 +123,7 @@
             (w/event-matches? (w/next-event) ~aid ::failure)
             (:payload (w/advance-history-cursor))
 
+            ;; are we catching because we threw something expected?
             (w/event-matches? (w/current-event) ~aid ::failure)
             e#
 
@@ -161,13 +163,13 @@
   [f]
   (let [fid      (fn->fnid f)
         resolved (resolve f)
-        qname    (subs (str resolved) 2)                    ;; poor mans' removing the var #'
+        ;; poor mans' removing the var #'
+        qname    (subs (str resolved) 2)
         fname    (gensym (str "stub-" (or (:name (meta resolved)) "fn") "-"))
         act-opts (select-keys (meta resolved) [:idempotent])]
 
-    (check (or
-             (nil? (get-registered-function fid))
-             (= (get-registered-function fid) f))
+    (check (or (nil? (get-registered-function fid))
+               (= (get-registered-function fid) f))
       "Stubbed function '%s' doesn't match registered function '%s'" (get-registered-function fid) f)
     (swap! registry assoc fid f)
 

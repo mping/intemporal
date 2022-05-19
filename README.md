@@ -1,5 +1,7 @@
 # intemporal
 
+## (in)temporal - NOT temporal
+
 A Clojure library in the spirit of temporal.io or uber cadence.
 
 ## Usage
