@@ -79,40 +79,41 @@
   Replaces the function var by a proxy that saves execution to the store."
   [store fsym]
   (let [fvar (resolve fsym)
-        wid  (sym->workflow-id fsym)]
+        wid  (sym->workflow-id fsym)
+        astore (var-get (resolve store))]
     (check (bound? fvar) "%s: Should be bound" fsym)
     (alter-var-root fvar
       (fn [f]
         (fn proxy-workflow [& args]
-          (let [astore (var-get (resolve store))]
-            (with-bindings {#'current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))}
+          (with-bindings {#'current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))}
+            (let [vargs (if (event-matches? (next-event) wid ::invoke)
+                          (:payload (advance-history-cursor))
+                          (do
+                            (save-workflow-event ::invoke args)
+                            (into [] args)))]
+              (try
+                (let [result (apply f vargs)
+                      nxt    (next-event)]
+                  ;; if it throws we go to the catch
+                  (cond
+                    (event-matches? nxt wid ::success)
+                    (:payload (advance-history-cursor))
 
-              (let [vargs (if (event-matches? (next-event) wid ::invoke)
-                            (:payload (advance-history-cursor))
-                            (do
-                              (save-workflow-event ::invoke args)
-                              (into [] args)))]
-                (try
-                  (let [result (apply f vargs)
-                        nxt    (next-event)]
-                    ;; if it throws we go to the catch
-                    (cond
-                      (event-matches? nxt wid ::success)
-                      (:payload (advance-history-cursor))
+                    (event-matches? nxt wid ::failure)
+                    (throw (:payload (advance-history-cursor))) ;; goes to catch
 
-                      (event-matches? nxt wid ::failure)
-                      (throw (:payload (advance-history-cursor))) ;; goes to catch
+                    ;; TODO handle divergence
 
-                      :else
-                      (do
-                        (save-workflow-event ::success result)
-                        result)))
-                  (catch Exception e
-                    (if (event-matches? (next-event) wid ::failure)
-                      (:payload (advance-history-cursor))
-                      (do
-                        (save-workflow-event ::failure e)
-                        (throw e)))))))))))
+                    :else
+                    (do
+                      (save-workflow-event ::success result)
+                      result)))
+                (catch Exception e
+                  (if (event-matches? (next-event) wid ::failure)
+                    (:payload (advance-history-cursor))
+                    (do
+                      (save-workflow-event ::failure e)
+                      (throw e))))))))))
 
     `(do
        (check (satisfies? s/WorkflowStore ~store) "%s does not implement WorkflowStore" ~store)
@@ -124,6 +125,7 @@
   [store f runid]
   (let [[wid _wvar] (s/list-workflow s/memstore runid)]
     (check (some? wid) "No workflow found for runid %s" runid)
+    ;; TODO check if the workflow reached a terminal state yet
 
     (with-bindings {#'current-workflow-run (e/make-workflow-execution store wid runid)}
       (let [invoke-evt (e/-advance-history-cursor current-workflow-run)]

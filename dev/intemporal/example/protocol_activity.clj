@@ -53,9 +53,9 @@
 
 ;; call workflow
 (try
-  (simpleflow "bla")
+  (simpleflow "foo")
   (catch Exception _
-    (println "ACTIVITY FAILED")))
+    (println "Workflow failed!")))
 
 (println (s/events->table s/memstore))
 

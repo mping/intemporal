@@ -13,8 +13,8 @@
   (events->table [this] "Returns a tabular form of workflow events")
   (list-workflow [this runid] "Gets the workflow associated with the runid")
   (list-workflow-run [this wid runid] [this wid runid opts] "Gets data for a given run")
-  (next-event [this wid runid] [this wid runid currevt-id] "Gets the first or next event for a give runid, and optional event id")
-  (expunge-events [this wid runid evtid] "Expunges all events after `id`")
+  (next-event [this wid runid] [this wid runid evtid] "Gets the first or next event for a give runid, and optional event id")
+  (expunge-events [this wid runid evtid] "Expunges all events after `evtid`")
   (save-workflow-definition [this wid sym] "Saves the workflow definition")
   (save-activity-definition [this aid sym] "Saves the activity definition")
   (save-workflow-event [this wid runid etype data] "Saves an workflow event")
@@ -72,10 +72,10 @@
         (->> (get-in @store [:workflow-events wid runid])
           (filter (complement :deleted?))
           first))
-      (next-event [this wid runid currevt-id]
+      (next-event [this wid runid evtid]
         (->> (get-in @store [:workflow-events wid runid])
           (drop-while :deleted?)
-          (drop-while #(<= (:id %) currevt-id))
+          (drop-while #(<= (:id %) evtid))
           first))
       (expunge-events [this wid runid evtid]
         (swap! store (fn [m]

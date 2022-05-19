@@ -1,4 +1,4 @@
-(ns intemporal.example.workflow-compensation
+(ns intemporal.example.saga
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
             [intemporal.store :as s])
@@ -29,6 +29,7 @@
     (reserve-car [this name] (maybe8 "car-xxx"))
     (book-hotel [this name] (maybe8 "hotel-yyy"))
     (book-flight [this name] (maybe8 "flight-zzz"))
+    ;; ideally compensations should be idempotent to allow for failsafe retry
     (^{ActivityOptions {:idempotent true}} cancel-car [this id name]  (println "!cancel car" id name))
     (^{ActivityOptions {:idempotent true}} cancel-hotel [this id name] (println "!cancel hotel" id name))
     (^{ActivityOptions {:idempotent true}} cancel-flight [this id name] (println "!cancel flight" id name))))
@@ -65,17 +66,21 @@
         (email-stub "user@user.com" "trip confirmed")
         :ok)
       ;; LOL this catch can catch stub exceptions such as "not running within a workflow"
-      (catch Exception _
+      (catch Exception e
         (w/compensate)
         (email-stub "user@user.com" "trip failed")
-        :failed+compensated))))
+        (throw e)))))
 
 ;; should actually register
 ;; requires a store to keep track of actual execution
 (w/register-workflow s/memstore book-trip)
 
 (s/clear-events s/memstore)
-(book-trip "bla")
+;; call workflow
+(try
+  (book-trip "foo")
+  (catch Exception _
+    (println "Workflow failed!")))
 
 (println (s/events->table s/memstore))
 
