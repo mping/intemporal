@@ -45,7 +45,7 @@
       nxt))
 
   (-reset-history-cursor [_]
-      (swap! state assoc :events-cursor nil))
+    (swap! state assoc :events-cursor nil))
   (-advance-history-cursor [_]
     (let [evt (get @state :events-cursor)
           res (cond

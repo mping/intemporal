@@ -6,6 +6,8 @@
 
 
 ;; event spec
+
+
 (s/def ::id number?)
 (s/def ::payload any?)
 (s/def ::type #{::w/invoke ::w/failure ::w/success
@@ -14,16 +16,14 @@
 (s/def ::deleted? (s/nilable boolean?))
 (s/def ::date #(instance? LocalDateTime %))
 (s/def ::event (s/keys :req-un [::id ::payload ::type ::uid ::deleted?]
-                 :opt-un [::date]))
+                       :opt-un [::date]))
 
 (defmulti -alike? (fn [a _] (type a)))
 (defmethod -alike? Exception [a b]
-  (println "type a" (type a))
-  (println "type b"  b)
   (= (type a)
-    (if (= Class (type b))
-        b
-        (type b))))
+     (if (= Class (type b))
+       b
+       (type b))))
 (defmethod -alike? Object [a b]
   (= a b))
 (defmethod -alike? nil [a b]
@@ -34,5 +34,5 @@
   [m expected]
   (reduce (fn [acc [k v]]
             (and acc (-alike? (get m k) v)))
-    true
-    expected))
+          true
+          expected))
