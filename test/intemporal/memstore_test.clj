@@ -7,7 +7,6 @@
             [clojure.spec.alpha :as s])
   (:import [java.util UUID]))
 
-
 (def impl store/memstore)
 
 (use-fixtures :each (fn [f] (store/clear impl) (f)))
@@ -41,7 +40,7 @@
                 wevents  (:workflow-events run-data)]
 
             (testing "workflow var is correct"
-              (is (= #'intemporal.store-test/workflow-fn wflow)))
+              (is (= #'intemporal.memstore-test/workflow-fn wflow)))
 
             (testing "workflow events"
               (let [[e1 e2 e3 e4] wevents]
@@ -85,8 +84,8 @@
 
                   (testing "Expunged events can be filtered out"
                     (is (= 2 (->> (store/list-workflow-run impl wid runid {:all? false})
-                               (:workflow-events)
-                               (count)))))
+                                  (:workflow-events)
+                                  (count)))))
                   (testing "Expunged events will be shown by default"
                     (is (= 4 (->> (store/list-workflow-run impl wid runid)
                                   (:workflow-events)

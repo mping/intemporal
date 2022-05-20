@@ -4,7 +4,6 @@
   (:import [clojure.lang IDeref]
            [java.time LocalDateTime]))
 
-
 (defprotocol WorkflowStore
   :extend-via-metadata true
   (clear [this] "Resets the store")
@@ -32,8 +31,8 @@
                                        (let [path     [:workflow-events wid runid]
                                              run-evts (get-in m path [])
                                              new-evt  (assoc evt :id (swap! idcounter inc)
-                                                        :deleted? nil
-                                                        :date (LocalDateTime/now))
+                                                             :deleted? nil
+                                                             :date (LocalDateTime/now))
                                              new-evts (conj run-evts new-evt)]
                                          (assoc-in m path new-evts)))))]
 
@@ -48,17 +47,17 @@
       (serializable? [this _arg] true)
       (events->table [this]
         (let [all-events (->> (get @store :workflow-events)
-                           (vals)
-                           (map last)
-                           (map last)
-                           (flatten))]
+                              (vals)
+                              (map last)
+                              (map last)
+                              (flatten))]
           (with-out-str
             (pprint/print-table all-events))))
       ;; main stuff
       (list-workflow [this runid]
         (when-let [wid (->> (:workflow-events @store)
-                         (filter (fn [[_wid runs]] (contains? (into #{} (keys runs)) runid)))
-                         (ffirst))]
+                            (filter (fn [[_wid runs]] (contains? (into #{} (keys runs)) runid)))
+                            (ffirst))]
           [wid (get-in @store [:workflows wid])]))
       (list-workflow-run [this wid runid]
         {:workflow        (get-in @store [:workflows wid])
@@ -70,25 +69,25 @@
             (assoc res :workflow-events (filter (complement :deleted?) workflow-events)))))
       (next-event [this wid runid]
         (->> (get-in @store [:workflow-events wid runid])
-          (filter (complement :deleted?))
-          first))
+             (filter (complement :deleted?))
+             first))
       (next-event [this wid runid evtid]
         (->> (get-in @store [:workflow-events wid runid])
-          (drop-while :deleted?)
-          (drop-while #(<= (:id %) evtid))
-          first))
+             (drop-while :deleted?)
+             (drop-while #(<= (:id %) evtid))
+             first))
       (expunge-events [this wid runid evtid]
         (swap! store (fn [m]
                        (let [#_#_to-keep (->> (get-in @store [:workflow-events wid runid])
-                                           (take-while #(<= (:id %) evtid))
-                                           (into []))
+                                              (take-while #(<= (:id %) evtid))
+                                              (into []))
                              to-keep (->> (get-in @store [:workflow-events wid runid])
-                                       (mapv (fn [evt]
-                                               (if (<= (:id evt) evtid)
-                                                 evt
-                                                 (assoc evt :deleted? true)))))]
+                                          (mapv (fn [evt]
+                                                  (if (<= (:id evt) evtid)
+                                                    evt
+                                                    (assoc evt :deleted? true)))))]
                          (-> m
-                           (assoc-in [:workflow-events wid runid] to-keep))))))
+                             (assoc-in [:workflow-events wid runid] to-keep))))))
 
       ;;;;
       ;; persist definitions
@@ -96,8 +95,8 @@
         (check (var? fvar) "%s: is not a var, type is %s" fvar (type fvar))
         (swap! store (fn [m]
                        (-> m
-                         (assoc-in [:workflows wid] fvar)
-                         (assoc-in [:workflow-events wid] {})))))
+                           (assoc-in [:workflows wid] fvar)
+                           (assoc-in [:workflow-events wid] {})))))
       (save-activity-definition [this aid fvar]
         (check (bound? fvar) "%s: is not a bounded var, type is %s" fvar (type fvar))
         (swap! store assoc-in [:activities aid] fvar))

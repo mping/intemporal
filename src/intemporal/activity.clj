@@ -32,7 +32,6 @@
         cname    (symbol resolved)]
     (str cname)))
 
-
 (defn- resolve-protocol
   [sym]
   (let [proto (-> sym resolve var-get :on-interface)]
@@ -60,10 +59,10 @@
     (check (.isInterface ^Class klass) "'%s' Should be a protocol")
     (check (or (satisfies-via-meta? proto object)
                (satisfies? proto object))
-      "Object '%s' should implement protocol '%s' but doesn't" object klass)
+           "Object '%s' should implement protocol '%s' but doesn't" object klass)
     (check (or (nil? (get-registered-protocol klass))
                (= object (get-registered-protocol klass)))
-      "'%s': An implemention for is already registered for the protocol" klass)
+           "'%s': An implemention for is already registered for the protocol" klass)
 
     (swap! registry assoc (.getCanonicalName klass) object)
     nil))
@@ -118,19 +117,18 @@
       (catch Exception e#
         ;; save error, mark activity failed
         (throw
-          (cond
-            #_#_
-            (w/event-matches? (w/next-event) ~aid ::failure)
-            (:payload (w/advance-history-cursor))
+         (cond
+           #_#_(w/event-matches? (w/next-event) ~aid ::failure)
+             (:payload (w/advance-history-cursor))
 
             ;; are we catching because we threw something expected?
-            (w/event-matches? (w/current-event) ~aid ::failure)
-            e#
+           (w/event-matches? (w/current-event) ~aid ::failure)
+           e#
 
-            :else
-            (do
-              (w/save-activity-event ~aid ::failure e#)
-              e#)))))))
+           :else
+           (do
+             (w/save-activity-event ~aid ::failure e#)
+             e#)))))))
 
 (defn get-activity-options
   "Gets activity options for the given object, if any"
@@ -170,7 +168,7 @@
 
     (check (or (nil? (get-registered-function fid))
                (= (get-registered-function fid) f))
-      "Stubbed function '%s' doesn't match registered function '%s'" (get-registered-function fid) f)
+           "Stubbed function '%s' doesn't match registered function '%s'" (get-registered-function fid) f)
     (swap! registry assoc fid f)
 
     ;; return the proxy fn
@@ -195,15 +193,15 @@
                                                (name sig)
                                                (str (namespace proto) "/" (name sig)))]]
                            [(name sig) arglist (symbol invname) (symbol qname)])
-                       (doall))]
+                         (doall))]
     `(reify ~proto
        ~@(for [[mname arglist invname qname] sig+args
                :let [sname (symbol mname)
                      args  (rest (first arglist))]]
            ;; implement ~sname
            `(~sname [this# ~@args]
-             (let [impl#     (get-protocol-impl ~resolved)
-                   aid#      '~qname
-                   act-opts# (get-activity-options ~proto impl# (keyword ~mname))]
-               (with-traced-activity aid# [~@args] act-opts#
-                 (~invname impl# ~@args))))))))
+                    (let [impl#     (get-protocol-impl ~resolved)
+                          aid#      '~qname
+                          act-opts# (get-activity-options ~proto impl# (keyword ~mname))]
+                      (with-traced-activity aid# [~@args] act-opts#
+                        (~invname impl# ~@args))))))))

@@ -39,8 +39,8 @@
 (defn event-matches? [nxt uid event-type]
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (let [match? (and (some? nxt)
-                 (= (:type nxt) event-type)
-                 (= (:uid nxt) uid))]
+                    (= (:type nxt) event-type)
+                    (= (:uid nxt) uid))]
     (log/debugf "[store] match found? %s (aid: %s, etype: %s)" match? uid event-type)
     match?))
 
@@ -84,37 +84,37 @@
         astore (var-get (resolve store))]
     (check (bound? fvar) "%s: Should be bound" fsym)
     (alter-var-root fvar
-      (fn [f]
-        (fn proxy-workflow [& args]
-          (with-bindings {#'current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))}
-            (let [vargs (if (event-matches? (next-event) wid ::invoke)
-                          (:payload (advance-history-cursor))
-                          (do
-                            (save-workflow-event ::invoke args)
-                            (into [] args)))]
-              (try
-                (let [result (apply f vargs)
-                      nxt    (next-event)]
+                    (fn [f]
+                      (fn proxy-workflow [& args]
+                        (with-bindings {#'current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))}
+                          (let [vargs (if (event-matches? (next-event) wid ::invoke)
+                                        (:payload (advance-history-cursor))
+                                        (do
+                                          (save-workflow-event ::invoke args)
+                                          (into [] args)))]
+                            (try
+                              (let [result (apply f vargs)
+                                    nxt    (next-event)]
                   ;; if it throws we go to the catch
-                  (cond
-                    (event-matches? nxt wid ::success)
-                    (:payload (advance-history-cursor))
+                                (cond
+                                  (event-matches? nxt wid ::success)
+                                  (:payload (advance-history-cursor))
 
-                    (event-matches? nxt wid ::failure)
-                    (throw (:payload (advance-history-cursor))) ;; goes to catch
+                                  (event-matches? nxt wid ::failure)
+                                  (throw (:payload (advance-history-cursor))) ;; goes to catch
 
                     ;; TODO handle divergence
 
-                    :else
-                    (do
-                      (save-workflow-event ::success result)
-                      result)))
-                (catch Exception e
-                  (if (event-matches? (next-event) wid ::failure)
-                    (:payload (advance-history-cursor))
-                    (do
-                      (save-workflow-event ::failure e)
-                      (throw e))))))))))
+                                  :else
+                                  (do
+                                    (save-workflow-event ::success result)
+                                    result)))
+                              (catch Exception e
+                                (if (event-matches? (next-event) wid ::failure)
+                                  (:payload (advance-history-cursor))
+                                  (do
+                                    (save-workflow-event ::failure e)
+                                    (throw e))))))))))
 
     `(do
        (check (satisfies? s/WorkflowStore ~store) "%s does not implement WorkflowStore" ~store)
