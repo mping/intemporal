@@ -1,5 +1,7 @@
 # intemporal
 
+![example workflow](https://github.com/mping/intemporal/actions/workflows/clojure.yml/badge.svg)
+
 ## (in)temporal - NOT temporal
 
 A Clojure library in the spirit of temporal.io or uber cadence.
