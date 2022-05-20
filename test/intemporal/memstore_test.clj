@@ -1,4 +1,4 @@
-(ns intemporal.store-test
+(ns intemporal.memstore-test
   (:require [clojure.test :refer :all]
             [intemporal.store :as store]
             [intemporal.workflow :as w]

@@ -78,6 +78,7 @@
   "Registers function `fsym`, using `store` to keep track of executions.
   Replaces the function var by a proxy that saves execution to the store."
   [store fsym]
+  ;; TODO throw if already registered
   (let [fvar (resolve fsym)
         wid  (sym->workflow-id fsym)
         astore (var-get (resolve store))]
