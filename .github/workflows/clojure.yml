@@ -10,4 +10,5 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Lint and test
-      run: lein with-profile +test do cljfmt check, difftest
+      #run: lein with-profile +test do cljfmt check, difftest
+      run: lein with-profile +test do check, test
