@@ -41,7 +41,7 @@
   (let [match? (and (some? nxt)
                     (= (:type nxt) event-type)
                     (= (:uid nxt) uid))]
-    (log/debugf "[store] match found? %s (aid: %s, etype: %s)" match? uid event-type)
+    (log/debugf "[store] match? %s [%s %s]" match? event-type uid)
     match?))
 
 (defn delete-history-forward []
