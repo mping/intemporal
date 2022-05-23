@@ -37,7 +37,7 @@
     (stub arg)))
 
 (deftest activity-with-workflow-test
-  (store/clear store/memstore)
+  (store/clear-events store/memstore)
   (w/register-workflow store/memstore wflow)
 
   (testing "Can call stubbed activity functions within a workflow function"
