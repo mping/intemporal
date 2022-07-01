@@ -5,7 +5,7 @@
             [intemporal.utils.check :refer [check]]
             [clojure.tools.logging :as log]))
 
-;; holds the data for the current workflow
+;; holds the data for the current workflow, including the store used for persistence
 ;; is a dynamic var so we can rebind each time the workflow function is called
 (def ^:dynamic current-workflow-run nil)
 
