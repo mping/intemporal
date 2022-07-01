@@ -7,16 +7,19 @@
             [intemporal.test-utils :as u])
   (:import [intemporal.annotations ActivityOptions]))
 
+;; activities
+;; define an activity protocol, and respective impl
 (defprotocol ActivityProtoExample
   (foo [this bar]))
-
-(defn identity-activity-fn [arg]
-  arg)
 
 (defrecord MyProtoImpl []
   ActivityProtoExample
   ;; (Ab)use annotations to pass activity options
   (^{ActivityOptions {:idempotent true}} foo [_ bar] bar))
+
+;; a function will work too
+(defn identity-activity-fn [arg]
+  arg)
 
 (deftest activity-test
   (testing "Can register activity functions"
@@ -32,6 +35,8 @@
       (let [stub (a/stub-function identity-activity-fn)]
         (is (thrown? Error (stub "some-val")))))))
 
+;; workflow
+;; stubbing
 (defn wflow [arg]
   (let [stub (a/stub-function identity-activity-fn)]
     (stub arg)))

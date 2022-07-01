@@ -7,13 +7,16 @@
 (defprotocol WorkflowStore
   :extend-via-metadata true
   (clear [this] "Resets the store")
-  (clear-events [this] "Resets all events")
   (serializable? [this arg] "Indicates if `arg` can be serialized onto the store")
-  (events->table [this] "Returns a tabular form of workflow events")
+  ;; queries
   (list-workflow [this runid] "Gets the workflow associated with the runid")
   (list-workflow-run [this wid runid] [this wid runid opts] "Gets data for a given run")
+  ;; event handling
+  (clear-events [this] "Resets all events")
   (next-event [this wid runid] [this wid runid evtid] "Gets the first or next event for a give runid, and optional event id")
   (expunge-events [this wid runid evtid] "Expunges all events after `evtid`")
+  (events->table [this] "Returns a tabular form of workflow events")
+  ;; persist metadata
   (save-workflow-definition [this wid sym] "Saves the workflow definition")
   (save-activity-definition [this aid sym] "Saves the activity definition")
   (save-workflow-event [this wid runid etype data] "Saves an workflow event")

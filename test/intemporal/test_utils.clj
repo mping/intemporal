@@ -18,6 +18,7 @@
 (s/def ::event (s/keys :req-un [::id ::payload ::type ::uid ::deleted?]
                        :opt-un [::date]))
 
+;; comparison of similar objects (lenient with extra keys)
 (defmulti -alike? (fn [a _] (type a)))
 (defmethod -alike? Exception [a b]
   (= (type a)
