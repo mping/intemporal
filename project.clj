@@ -8,8 +8,8 @@
   :dependencies [[org.clojure/clojure "1.11.1"]
                  [org.clojure/tools.logging "1.2.4"]]
   :java-source-paths ["java"]
-  :profiles {:dev  {:source-paths ["dev"]
-                    :dependencies [[ch.qos.logback/logback-classic "1.2.11"]
-                                   [tortue/spy "2.3.0"]]}}
+  :profiles {:dev {:source-paths ["dev"]
+                   :dependencies [[ch.qos.logback/logback-classic "1.2.11"]
+                                  [tortue/spy "2.9.0"]]}}
   :aliases {"coverage" ["with-profile" "+test," "cloverage"]}
   :repl-options {:init-ns intemporal.workflow})

@@ -86,6 +86,7 @@
     (alter-var-root fvar
                     (fn [f]
                       (fn proxy-workflow [& args]
+                        ;; the current-workflow-run will hold the store where all data will be saved
                         (with-bindings {#'current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))}
                           (let [vargs (if (event-matches? (next-event) wid ::invoke)
                                         (:payload (advance-history-cursor))
