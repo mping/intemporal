@@ -64,7 +64,7 @@
                (= object (get-registered-protocol klass)))
            "'%s': An implemention for is already registered for the protocol" klass)
 
-    (swap! registry assoc (.getCanonicalName klass) object)
+    (swap! registry assoc (.getCanonicalName ^Class klass) object)
     nil))
 
 (defn get-protocol-impl
@@ -139,7 +139,7 @@
           rclass   (class proto-impl)]
       (when-let [meth (.getMethod rclass (name method) argarray)]
         (when-let [annot (first (.getAnnotationsByType meth ActivityOptions))]
-          {:idempotent (.idempotent annot)})))))
+          {:idempotent (.idempotent ^ActivityOptions annot)})))))
 
 (defn- get-registered-function
   "Gets the registered function for `fid`"

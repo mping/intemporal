@@ -57,13 +57,13 @@
           (is (uuid? rid)))
 
         (testing "Store lookup by runid"
-          (let [[w sym] (store/list-workflow store/memstore rid)]
+          (let [[w sym] (store/find-workflow store/memstore rid)]
             (println w sym)
             (is (= w 'intemporal.activity-test/wflow))
             (is (= sym #'wflow))))
 
-        (testing "Store lookup by runid and workflow id"
-          (let [data (store/list-workflow-run store/memstore 'intemporal.activity-test/wflow rid)
+        (testing "Store lookup by runid"
+          (let [data (store/find-workflow-run store/memstore rid)
                 {:keys [workflow workflow-events]} data]
             (is (= #'intemporal.activity-test/wflow workflow))
             (is (= 4 (count workflow-events)))

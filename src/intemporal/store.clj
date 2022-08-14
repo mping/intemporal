@@ -6,13 +6,13 @@
 
 (defprotocol WorkflowStore
   :extend-via-metadata true
-  (clear [this] "Resets the store")
+  (clear [this] "Expunges EVERYTHING")
   (serializable? [this arg] "Indicates if `arg` can be serialized onto the store")
   ;; queries
-  (list-workflow [this runid] "Gets the workflow associated with the runid")
-  (list-workflow-run [this wid runid] [this wid runid opts] "Gets data for a given run")
+  (find-workflow [this runid] "Gets the workflow associated with the runid. Returns a tuple `[symbol var]`, ie `['wflow #'wflow-var]`")
+  (find-workflow-run [this runid] [this runid opts] "Gets data for a given run")
   ;; event handling
-  (clear-events [this] "Resets all events")
+  (clear-events [this] "Expunges ALL events")
   (next-event [this wid runid] [this wid runid evtid] "Gets the first or next event for a give runid, and optional event id")
   (expunge-events [this wid runid evtid] "Expunges all events after `evtid`")
   (events->table [this] "Returns a tabular form of workflow events")
@@ -46,30 +46,27 @@
 
       WorkflowStore
       (clear [this] (reset! store seed))
-      (clear-events [this] (swap! store assoc :workflow-events {}))
       (serializable? [this _arg] true)
-      (events->table [this]
-        (let [all-events (->> (get @store :workflow-events)
-                              (vals)
-                              (map last)
-                              (map last)
-                              (flatten))]
-          (with-out-str
-            (pprint/print-table all-events))))
+
       ;; main stuff
-      (list-workflow [this runid]
+      (find-workflow [this runid]
         (when-let [wid (->> (:workflow-events @store)
                             (filter (fn [[_wid runs]] (contains? (into #{} (keys runs)) runid)))
                             (ffirst))]
           [wid (get-in @store [:workflows wid])]))
-      (list-workflow-run [this wid runid]
-        {:workflow        (get-in @store [:workflows wid])
-         :workflow-events (get-in @store [:workflow-events wid runid])})
-      (list-workflow-run [this wid runid {:keys [all?] :or {all? true}}]
-        (let [{:keys [workflow-events] :as res} (list-workflow-run this wid runid)]
+      ;; queries
+      (find-workflow-run [this runid]
+        (when-let [[wid _] (find-workflow this runid)]
+          {:workflow        (get-in @store [:workflows wid])
+           :workflow-events (get-in @store [:workflow-events wid runid])}))
+      (find-workflow-run [this runid {:keys [all?] :or {all? true}}]
+        (let [{:keys [workflow-events] :as res} (find-workflow-run this runid)]
           (if all?
             res
             (assoc res :workflow-events (filter (complement :deleted?) workflow-events)))))
+
+      ;; event handling
+      (clear-events [this] (swap! store assoc :workflow-events {}))
       (next-event [this wid runid]
         (->> (get-in @store [:workflow-events wid runid])
              (filter (complement :deleted?))
@@ -91,9 +88,16 @@
                                                     (assoc evt :deleted? true)))))]
                          (-> m
                              (assoc-in [:workflow-events wid runid] to-keep))))))
+      (events->table [this]
+        (let [all-events (->> (get @store :workflow-events)
+                              (vals)
+                              (map last)
+                              (map last)
+                              (flatten))]
+          (with-out-str
+            (pprint/print-table all-events))))
 
-      ;;;;
-      ;; persist definitions
+      ;; metadata
       (save-workflow-definition [this wid fvar]
         (check (var? fvar) "%s: is not a var, type is %s" fvar (type fvar))
         (swap! store (fn [m]
@@ -103,7 +107,6 @@
       (save-activity-definition [this aid fvar]
         (check (bound? fvar) "%s: is not a bounded var, type is %s" fvar (type fvar))
         (swap! store assoc-in [:activities aid] fvar))
-      ;;;;
       ;; persist runtime evts
       (save-workflow-event [this wid runid etype data]
         (check (serializable? this data) "'%s' cannot be serialized")

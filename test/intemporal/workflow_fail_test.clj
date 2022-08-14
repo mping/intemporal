@@ -54,7 +54,7 @@
         (testing "Store lookup by runid and workflow id"
           (let [wsym 'intemporal.workflow-fail-test/my-workflow
                 rid  (latest-rid wsym)
-                data (store/list-workflow-run store/memstore wsym rid)
+                data (store/find-workflow-run store/memstore rid)
                 {:keys [workflow workflow-events]} data]
 
             ;; TODO why? (is (= #'intemporal.workflow-fail-test/my-workflow workflow))
@@ -141,7 +141,7 @@
       (testing "Cancellation event was called through compensation"
         (let [wsym 'intemporal.workflow-fail-test/my-compensated-workflow
               rid  (latest-rid wsym)
-              data (store/list-workflow-run store/memstore wsym rid)
+              data (store/find-workflow-run store/memstore rid)
               {:keys [workflow workflow-events]} data]
 
           (comment

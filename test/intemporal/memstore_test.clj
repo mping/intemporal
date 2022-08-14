@@ -34,8 +34,8 @@
         (store/save-activity-event impl wid runid aid ::a/success "ares")
         (store/save-workflow-event impl wid runid ::w/success "wres")
 
-        (testing "list-workflow-run should work"
-          (let [run-data (store/list-workflow-run impl wid runid)
+        (testing "find-workflow-run should work"
+          (let [run-data (store/find-workflow-run impl runid)
                 wflow    (:workflow run-data)
                 wevents  (:workflow-events run-data)]
 
@@ -83,10 +83,10 @@
                   (store/expunge-events impl wid runid (:id nxt2))
 
                   (testing "Expunged events can be filtered out"
-                    (is (= 2 (->> (store/list-workflow-run impl wid runid {:all? false})
+                    (is (= 2 (->> (store/find-workflow-run impl runid {:all? false})
                                   (:workflow-events)
                                   (count)))))
                   (testing "Expunged events will be shown by default"
-                    (is (= 4 (->> (store/list-workflow-run impl wid runid)
+                    (is (= 4 (->> (store/find-workflow-run impl runid)
                                   (:workflow-events)
                                   (count))))))))))))))
