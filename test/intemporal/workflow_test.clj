@@ -51,7 +51,7 @@
 
     (testing "Store history"
       (let [rid  (latest-rid)
-            data (store/list-workflow-run store/memstore 'intemporal.workflow-test/my-workflow rid)
+            data (store/find-workflow-run store/memstore rid)
             {:keys [workflow workflow-events]} data]
 
         ;; TODO why?
