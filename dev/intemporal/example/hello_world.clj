@@ -11,7 +11,6 @@
   "kthxbye")
 
 
-
 ;;;;
 ;; activities registration
 ;; completely optional
@@ -43,5 +42,4 @@
 (comment
   (w/retry memstore #'simpleflow run-uuid)
 
-  ;;TODO fix
   (s/find-workflow memstore run-uuid))

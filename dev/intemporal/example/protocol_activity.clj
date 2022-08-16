@@ -39,7 +39,8 @@
 ;;;;
 ;; activities registration
 (a/register-protocol HttpClient example-impl)
-;;
+;; a record will also work
+;; records allow decorating fns with annotations (eg ActivityOptions)
 (a/register-protocol HttpClient (->MyHttpClient))
 
 ;;;;
@@ -74,5 +75,4 @@
   (w/retry memstore #'simpleflow run-uuid)
   (println (s/events->table memstore))
 
-  ;;TODO fix
   (s/find-workflow memstore run-uuid))
