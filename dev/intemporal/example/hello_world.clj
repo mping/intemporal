@@ -1,11 +1,16 @@
 (ns intemporal.example.hello-world
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
-            [intemporal.store :as s]))
+            [intemporal.store :as s]
+            [intemporal.store.memory :as m]))
+
+(def memstore (m/memory-store))
 
 (defn ^{:idempotent true} hello-world [& args]
   (println "hello, " args)
   "kthxbye")
+
+
 
 ;;;;
 ;; activities registration
@@ -19,24 +24,24 @@
   (let [hello-stub (a/stub-function hello-world)]
     (hello-stub n "foo" "bar")))
 
-(s/clear-events s/memstore)
-(w/register-workflow s/memstore simpleflow)
+(s/clear-events memstore)
+(w/register-workflow memstore simpleflow)
 
 ;;;;
 ;; call workflow
 (simpleflow "bla")
 
-(println (s/events->table s/memstore))
+(println (s/events->table memstore))
 
 (declare run-uuid)
-(let [wevs (-> (deref s/memstore) :workflow-events)
+(let [wevs (-> (deref memstore) :workflow-events)
       [wname kvs] (first wevs)
       rid  (-> kvs keys first)]
   (def run-uuid rid)
-  (s/find-workflow-run s/memstore rid))
+  (s/find-workflow-run memstore rid))
 
 (comment
-  (w/retry s/memstore #'simpleflow run-uuid)
+  (w/retry memstore #'simpleflow run-uuid)
 
   ;;TODO fix
-  (s/find-workflow s/memstore run-uuid))
+  (s/find-workflow memstore run-uuid))

@@ -1,8 +1,11 @@
 (ns intemporal.example.saga
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
-            [intemporal.store :as s])
+            [intemporal.store :as s]
+            [intemporal.store.memory :as m])
   (:import [intemporal.annotations ActivityOptions]))
+
+(def memstore (m/memory-store))
 
 (defprotocol TripBookingActivities
   (reserve-car [this name])
@@ -73,23 +76,23 @@
 
 ;; should actually register
 ;; requires a store to keep track of actual execution
-(w/register-workflow s/memstore book-trip)
+(w/register-workflow memstore book-trip)
 
-(s/clear-events s/memstore)
+(s/clear-events memstore)
 ;; call workflow
 (try
   (book-trip "foo")
   (catch Exception _
     (println "Workflow failed!")))
 
-(println (s/events->table s/memstore))
+(println (s/events->table memstore))
 
 (declare run-uuid)
-(let [wevs (-> s/memstore (deref) :workflow-events)
+(let [wevs (-> memstore (deref) :workflow-events)
       [wname kvs] (first wevs)
       rid  (-> kvs keys first)]
   (def run-uuid rid)
-  (s/find-workflow-run s/memstore rid))
+  (s/find-workflow-run memstore rid))
 
 (comment
-  (w/retry s/memstore #'book-trip run-uuid))
+  (w/retry memstore #'book-trip run-uuid))

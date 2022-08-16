@@ -5,9 +5,12 @@
             [intemporal.workflow :as w]
             [intemporal.store :as store]
             [intemporal.test-utils :as u]
+            [intemporal.store.memory :as m]
             [spy.core :as spy]
             [spy.assert :as assert])
   (:import [intemporal.annotations ActivityOptions]))
+
+(def memstore (m/memory-store))
 
 (defprotocol ActivityProtoExample
   (run [this arg])
@@ -34,10 +37,10 @@
         (cancel stub)
         (throw e)))))
 
-(w/register-workflow store/memstore my-workflow)
+(w/register-workflow memstore my-workflow)
 
 (defn- latest-rid [sym]
-  (let [events (@store/memstore :workflow-events)
+  (let [events (@memstore :workflow-events)
         kvs    (get events sym)
         rid    (-> kvs keys first)]
     rid))
@@ -45,7 +48,7 @@
 (deftest workflow-retry-test
 
   (testing "Workflow fails if activity throws"
-    (store/clear-events store/memstore)
+    (store/clear-events memstore)
 
     (with-redefs [run-side-effect (fn [v] (throw (RuntimeException. "error")))]
       (is (thrown? Exception (my-workflow "xx")))
@@ -54,7 +57,7 @@
         (testing "Store lookup by runid and workflow id"
           (let [wsym 'intemporal.workflow-fail-test/my-workflow
                 rid  (latest-rid wsym)
-                data (store/find-workflow-run store/memstore rid)
+                data (store/find-workflow-run memstore rid)
                 {:keys [workflow workflow-events]} data]
 
             ;; TODO why? (is (= #'intemporal.workflow-fail-test/my-workflow workflow))
@@ -106,7 +109,7 @@
 
   (testing "Workflow can be replayed and completed successfully"
     (let [rid (latest-rid 'intemporal.workflow-fail-test/my-workflow)]
-      (is (= :side-effect (w/retry store/memstore my-workflow rid))))))
+      (is (= :side-effect (w/retry memstore my-workflow rid))))))
 
 
 ;;;;
@@ -124,12 +127,12 @@
         (w/compensate)
         (throw e)))))
 
-(w/register-workflow store/memstore my-compensated-workflow)
+(w/register-workflow memstore my-compensated-workflow)
 
 (deftest workflow-compensate-test
 
   (testing "Workflow fails if activity throws"
-    (store/clear-events store/memstore)
+    (store/clear-events memstore)
 
     (with-redefs [run-side-effect      (fn [v] (throw (RuntimeException. "error")))
                   stateless-compensate (spy/stub)]
@@ -141,7 +144,7 @@
       (testing "Cancellation event was called through compensation"
         (let [wsym 'intemporal.workflow-fail-test/my-compensated-workflow
               rid  (latest-rid wsym)
-              data (store/find-workflow-run store/memstore rid)
+              data (store/find-workflow-run memstore rid)
               {:keys [workflow workflow-events]} data]
 
           (comment

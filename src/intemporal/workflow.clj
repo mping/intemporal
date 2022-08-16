@@ -125,7 +125,7 @@
 (defn retry
   "Retries `f` with given `runid`, possibly resuming execution if `f` didn't reach a terminal state."
   [store f runid]
-  (let [[wid _wvar] (s/find-workflow s/memstore runid)]
+  (let [[wid _wvar] (s/find-workflow store runid)]
     (check (some? wid) "No workflow found for runid %s" runid)
     ;; TODO check if the workflow reached a terminal state yet
 

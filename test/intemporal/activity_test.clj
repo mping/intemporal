@@ -4,8 +4,11 @@
             [intemporal.activity :as a]
             [intemporal.workflow :as w]
             [intemporal.store :as store]
-            [intemporal.test-utils :as u])
+            [intemporal.test-utils :as u]
+            [intemporal.store.memory :as m])
   (:import [intemporal.annotations ActivityOptions]))
+
+(def memstore (m/memory-store))
 
 ;; activities
 ;; define an activity protocol, and respective impl
@@ -42,14 +45,14 @@
     (stub arg)))
 
 (deftest activity-with-workflow-test
-  (store/clear-events store/memstore)
-  (w/register-workflow store/memstore wflow)
+  (store/clear-events memstore)
+  (w/register-workflow memstore wflow)
 
   (testing "Can call stubbed activity functions within a workflow function"
     (is (= "xx" (wflow "xx")))
 
     (testing "Workflow history is OK"
-      (let [events (@store/memstore :workflow-events)
+      (let [events (@memstore :workflow-events)
             kvs    (get events 'intemporal.activity-test/wflow)
             rid    (-> kvs keys first)]
 
@@ -57,13 +60,13 @@
           (is (uuid? rid)))
 
         (testing "Store lookup by runid"
-          (let [[w sym] (store/find-workflow store/memstore rid)]
+          (let [[w sym] (store/find-workflow memstore rid)]
             (println w sym)
             (is (= w 'intemporal.activity-test/wflow))
             (is (= sym #'wflow))))
 
         (testing "Store lookup by runid"
-          (let [data (store/find-workflow-run store/memstore rid)
+          (let [data (store/find-workflow-run memstore rid)
                 {:keys [workflow workflow-events]} data]
             (is (= #'intemporal.activity-test/wflow workflow))
             (is (= 4 (count workflow-events)))
