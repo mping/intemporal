@@ -4,10 +4,11 @@
             [intemporal.workflow :as w]
             [intemporal.activity :as a]
             [intemporal.test-utils :as u]
+            [intemporal.store.memory :as m]
             [clojure.spec.alpha :as s])
   (:import [java.util UUID]))
 
-(def impl store/memstore)
+(def impl (m/memory-store))
 
 (use-fixtures :each (fn [f] (store/clear impl) (f)))
 

@@ -1,9 +1,12 @@
 (ns intemporal.example.protocol-activity
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
-            [intemporal.store :as s])
+            [intemporal.store :as s]
+            [intemporal.store.memory :as m])
   #_:clj-kondo/ignore
   (:import [intemporal.annotations ActivityOptions]))
+
+(def memstore (m/memory-store))
 
 (defprotocol HttpClient
   :extend-via-metadata true
@@ -48,8 +51,8 @@
     (doHead stub (str n "carr"))
     (doPost stub (str n "carr"))))
 
-(s/clear-events s/memstore)
-(w/register-workflow s/memstore simpleflow)
+(s/clear-events memstore)
+(w/register-workflow memstore simpleflow)
 
 ;; call workflow
 (try
@@ -57,19 +60,19 @@
   (catch Exception _
     (println "Workflow failed!")))
 
-(println (s/events->table s/memstore))
+(println (s/events->table memstore))
 
 (declare run-uuid)
-(let [wevs (-> (deref s/memstore) :workflow-events)
+(let [wevs (-> (deref memstore) :workflow-events)
       [wname kvs] (first wevs)
       rid  (-> kvs keys first)]
   (def run-uuid rid)
-  (s/find-workflow-run s/memstore rid {:all? true}))
+  (s/find-workflow-run memstore rid {:all? true}))
 
 (println run-uuid)
 (comment
-  (w/retry s/memstore #'simpleflow run-uuid)
-  (println (s/events->table s/memstore))
+  (w/retry memstore #'simpleflow run-uuid)
+  (println (s/events->table memstore))
 
   ;;TODO fix
-  (s/find-workflow s/memstore run-uuid))
+  (s/find-workflow memstore run-uuid))

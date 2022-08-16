@@ -5,9 +5,12 @@
             [intemporal.workflow :as w]
             [intemporal.store :as store]
             [intemporal.test-utils :as u]
+            [intemporal.store.memory :as m]
             [spy.core :as spy]
             [spy.assert :as assert])
   (:import [intemporal.annotations ActivityOptions]))
+
+(def memstore (m/memory-store))
 
 (defprotocol ActivityProtoExample
   (run [this arg])
@@ -34,10 +37,10 @@
         (cancel stub)
         (throw e)))))
 
-(w/register-workflow store/memstore my-workflow)
+(w/register-workflow memstore my-workflow)
 
 (defn- latest-rid []
-  (let [events (@store/memstore :workflow-events)
+  (let [events (@memstore :workflow-events)
         kvs    (get events 'intemporal.workflow-test/my-workflow)
         rid    (-> kvs keys first)]
     rid))
@@ -45,13 +48,13 @@
 (deftest workflow-basic-test
 
   (testing "Happy path"
-    (store/clear-events store/memstore)
+    (store/clear-events memstore)
 
     (is (= :side-effect (my-workflow "xx")))
 
     (testing "Store history"
       (let [rid  (latest-rid)
-            data (store/find-workflow-run store/memstore rid)
+            data (store/find-workflow-run memstore rid)
             {:keys [workflow workflow-events]} data]
 
         ;; TODO why?
