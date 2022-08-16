@@ -28,6 +28,7 @@
       (deref [this] @store)
 
       s/WorkflowStore
+      (id [this] "memory-store")
       (clear [this] (reset! store seed))
       (serializable? [this _arg] true)
 
@@ -47,7 +48,11 @@
           (if all?
             res
             (assoc res :workflow-events (filter (complement :deleted?) workflow-events)))))
-
+      (list-workflow-runs [this]
+        (let [all-wids (->> @store :workflows keys)]
+          (reduce (fn [acc wid] (into acc (->> @store :workflow-events wid keys))) [] all-wids)))
+      (list-workflow-runs [this wid]
+        (->> @store :workflow-events wid keys))
       ;; event handling
       (clear-events [this] (swap! store assoc :workflow-events {}))
       (next-event [this wid runid]
@@ -92,8 +97,8 @@
         (swap! store assoc-in [:activities aid] fvar))
       ;; persist runtime evts
       (save-workflow-event [this wid runid etype data]
-        (check (s/serializable? this data) "'%s' cannot be serialized")
+        (check (s/serializable? this data) "'%s' cannot be serialized by %s store" data (s/id this))
         (persist-event wid runid {:type etype :uid wid :payload data}))
       (save-activity-event [this wid runid aid etype data]
-        (check (s/serializable? this data) "'%s' cannot be serialized" data)
+        (check (s/serializable? this data) "'%s' cannot be serialized by %s store" data (s/id this))
         (persist-event wid runid {:type etype :uid aid :payload data})))))
