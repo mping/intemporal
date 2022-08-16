@@ -5,9 +5,7 @@
             [intemporal.workflow :as w]
             [intemporal.store :as store]
             [intemporal.test-utils :as u]
-            [intemporal.store.memory :as m]
-            [spy.core :as spy]
-            [spy.assert :as assert])
+            [intemporal.store.memory :as m])
   (:import [intemporal.annotations ActivityOptions]))
 
 (def memstore (m/memory-store))
