@@ -78,7 +78,7 @@
   "Registers function `fsym`, using `store` to keep track of executions.
   Replaces the function var by a proxy that saves execution to the store."
   [store fsym]
-  ;; TODO throw if already registered
+  ;; TODO: throw if already registered
   (let [fvar (resolve fsym)
         wid  (sym->workflow-id fsym)
         astore (var-get (resolve store))]
@@ -96,7 +96,7 @@
                             (try
                               (let [result (apply f vargs)
                                     nxt    (next-event)]
-                  ;; if it throws we go to the catch
+                                ;; if it throws we go to the catch
                                 (cond
                                   (event-matches? nxt wid ::success)
                                   (:payload (advance-history-cursor))
@@ -104,13 +104,14 @@
                                   (event-matches? nxt wid ::failure)
                                   (throw (:payload (advance-history-cursor))) ;; goes to catch
 
-                    ;; TODO handle divergence
+                                  ;; TODO handle divergence
 
                                   :else
                                   (do
                                     (save-workflow-event ::success result)
                                     result)))
                               (catch Exception e
+                                ;; did we just replay a throw?
                                 (if (event-matches? (next-event) wid ::failure)
                                   (:payload (advance-history-cursor))
                                   (do
@@ -118,7 +119,7 @@
                                     (throw e))))))))))
 
     `(do
-       (check (satisfies? s/WorkflowStore ~store) "%s does not implement WorkflowStore" ~store)
+       (check (satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
        (s/save-workflow-definition ~store '~wid ~fvar)
        nil)))
 
@@ -127,7 +128,7 @@
   [store f runid]
   (let [[wid _wvar] (s/find-workflow store runid)]
     (check (some? wid) "No workflow found for runid %s" runid)
-    ;; TODO check if the workflow reached a terminal state yet
+    ;; TODO: check if the workflow reached a terminal state yet
 
     (with-bindings {#'current-workflow-run (e/make-workflow-execution store wid runid)}
       (let [invoke-evt (e/-advance-history-cursor current-workflow-run)]

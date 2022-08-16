@@ -35,7 +35,20 @@
         (store/save-activity-event impl wid runid aid ::a/success "ares")
         (store/save-workflow-event impl wid runid ::w/success "wres")
 
-        (testing "find-workflow-run should work"
+        (testing "list-workflow-runs"
+          (testing "list all"
+            (let [all-runs (store/list-workflow-runs impl)]
+              (is (= all-runs [runid]))))
+
+          (testing "list by workflow"
+            (let [wflow-runs (store/list-workflow-runs impl 'workflow-fn)]
+              (is (= wflow-runs [runid]))))
+
+          (testing "list by non existing workflow"
+            (let [wflow-runs (store/list-workflow-runs impl 'xxx)]
+              (is (= wflow-runs nil)))))
+
+        (testing "find-workflow-run"
           (let [run-data (store/find-workflow-run impl runid)
                 wflow    (:workflow run-data)
                 wevents  (:workflow-events run-data)]
