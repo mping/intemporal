@@ -1,4 +1,6 @@
-(ns intemporal.store)
+(ns intemporal.store
+  (:require [clojure.spec.alpha :as s])
+  (:import [java.time LocalDateTime]))
 
 (defprotocol WorkflowStore
   :extend-via-metadata true
@@ -19,4 +21,29 @@
   (save-activity-definition [this aid sym] "Saves the activity definition")
   (save-workflow-event [this wid runid etype data] "Saves an workflow event")
   (save-activity-event [this wid runid aid etype data] "Saves an activity event"))
+
+
+;; spec
+(s/def :intemporal.store.event/type #{:intemporal.workflow/invoke
+                                      :intemporal.workflow/failure
+                                      :intemporal.workflow/success
+                                      :intemporal.activity/invoke
+                                      :intemporal.activity/failure
+                                      :intemporal.activity/success})
+
+(s/def :intemporal.store.event/uid symbol?)
+(s/def :intemporal.store.event/payload any?)
+(s/def :intemporal.store.event/id nat-int?)
+(s/def :intemporal.store.event/deleted? (s/nilable boolean?))
+(s/def :intemporal.store.event/timestamp #(instance? LocalDateTime %))
+
+(s/def ::event (s/keys :req-un [:intemporal.store.event/type
+                                :intemporal.store.event/uid
+                                :intemporal.store.event/payload
+                                :intemporal.store.event/id
+                                :intemporal.store.event/timestamp]
+                       :opt-un [:intemporal.store.event/deleted?]))
+
+(s/def ::worfklow (s/tuple symbol? var?))
+(s/def ::activity (s/tuple symbol? var?))
 

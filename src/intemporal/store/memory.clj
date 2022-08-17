@@ -1,7 +1,7 @@
 (ns intemporal.store.memory
-  (:require [intemporal.store :as s]
-            [intemporal.utils.check :refer [check]]
-            [clojure.pprint :as pprint])
+  (:require [clojure.pprint :as pprint]
+            [intemporal.store :as s]
+            [intemporal.utils.check :refer [check]])
   (:import [clojure.lang IDeref]
            [java.time LocalDateTime]))
 
@@ -18,7 +18,7 @@
                                              run-evts (get-in m path [])
                                              new-evt  (assoc evt :id (swap! idcounter inc)
                                                                  :deleted? nil
-                                                                 :date (LocalDateTime/now))
+                                                                 :timestamp (LocalDateTime/now))
                                              new-evts (conj run-evts new-evt)]
                                          (assoc-in m path new-evts)))))]
 

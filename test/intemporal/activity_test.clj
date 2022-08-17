@@ -75,7 +75,7 @@
               (let [[e1 e2 e3 e4] workflow-events]
 
                 (testing "all events are valid"
-                  (is (every? #(s/valid? ::u/event %) workflow-events)))
+                  (is (every? #(s/valid? ::store/event %) workflow-events)))
 
                 (testing "workflow invoke"
                   (is (= ::w/invoke (:type e1)))

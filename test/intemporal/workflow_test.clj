@@ -63,7 +63,7 @@
           (let [[e1 e2 e3 e4 e5 e6] workflow-events]
 
             (testing "all events are valid"
-              (is (every? #(s/valid? ::u/event %) workflow-events)))
+              (is (every? #(s/valid? ::store/event %) workflow-events)))
 
             (testing "workflow invoke"
               (is (u/alike? e1
