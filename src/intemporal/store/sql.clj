@@ -3,24 +3,81 @@
             [cognitect.transit :as transit]
             [intemporal.store :as s]
             [intemporal.utils.check :refer [check]]
-            [next.jdbc :as jdbc])
+            [migratus.core :as migratus]
+            [next.jdbc :as jdbc]
+            [next.jdbc.result-set :as rs])
   (:import [clojure.lang IDeref]
            [java.io ByteArrayInputStream ByteArrayOutputStream]
            [java.time LocalDateTime]))
 
-(defn- persist-event [ds wid runid evt]
-  #_(swap! store (fn [m]
-                   (let [path     [:workflow-events wid runid]
-                         run-evts (get-in m path [])
-                         new-evt  (assoc evt :id (swap! idcounter inc)
-                                             :deleted? nil
-                                             :timestamp (LocalDateTime/now))
-                         new-evts (conj run-evts new-evt)]
-                     (assoc-in m path new-evts)))))
+(defn assert-workflow-invoke! [t]
+  (assert (= ":intemporal.workflow/invoke" t)
+    (format "Type of first event should be :intemporal.workflow/invoke, got %s" t)))
 
-(defn- truncate [ds table])
+;;;;
+;; serde
 
-(defn sql-store [ds serializer]
+(defn- serialize ^"[B" [obj]
+  (let [out    (ByteArrayOutputStream.)
+        writer (transit/writer out :msgpack)]
+    (with-open [_ out]
+      (transit/write writer obj)
+      (.toByteArray out))))
+
+(defn- deserialize [^"[B" ba]
+  (let [in     (ByteArrayInputStream. ba)
+        reader (transit/reader in :msgpack)]
+    (with-open [_ in]
+      (transit/read reader))))
+
+(defn event->event-map [{:events/keys [id run type uid payload deleted timestamp] :as dbevt}]
+  {:id id
+   :type (keyword (.substring ^String type 1))
+   :uid (symbol uid)
+   :payload (deserialize payload)
+   :timestamp (LocalDateTime/parse timestamp)
+   :deleted? (not (or (nil? deleted) (zero? deleted)))})
+
+;;;;
+;; migrations
+
+(defn- make-config [ds]
+  {:store                :database
+   :migration-dir        "migrations/"
+   :migration-table-name "migrations"
+   :db                   {:datasource ds}})
+
+(comment
+  (def db-spec (jdbc/get-datasource {:dbtype "sqlite" :dbname "test/sqlstore.db"}))
+  (migratus/completed-list (make-config db-spec))
+  (migratus/migrate (make-config db-spec))
+  (migratus/rollback (make-config db-spec))
+  (migratus/reset (make-config db-spec)))
+
+(defn migrate!
+  "Run table migrations on top of the supplied db spec"
+  [dbspec]
+  (migratus/migrate (make-config dbspec)))
+
+;;;
+;; main
+
+(defn- persist-event [tx wid runid {:keys [type uid payload] :as evt}]
+  (let [query (str "insert into events "
+                "(runid, type, uid, payload, deleted, timestamp)"
+                "values (?, ?, ?, ?, ?, ?)")]
+    (jdbc/execute-one! tx [query runid type uid (serialize payload) false (LocalDateTime/now)])))
+
+(defn- truncate [tx table]
+  (cond
+    (= "metadata" (name table)) (jdbc/execute-one! tx ["delete from metadata"])
+    (= "events" (name table)) (jdbc/execute-one! tx ["delete from events"])
+    :else (throw (IllegalArgumentException. (format "Unknown table:" table)))))
+
+
+(defn sql-store
+  "Make a new SQL backed store."
+  [ds]
   (reify
     IDeref
     (deref [this] this)
@@ -30,88 +87,102 @@
       (format "sql-store@%s" ds))
     (clear [this]
       (jdbc/with-transaction [tx ds]
-        (truncate tx :worfklow_events)
-        (truncate tx :activities)
-        (truncate tx :worfklows)))
-    (serializable? [this _arg]
-      true)
+        (truncate tx :metadata)
+        (truncate tx :events)))
 
     ;; main stuff
-    (find-workflow [this runid])
-    ;; returns [symbol var]
+    (find-workflow [this runid]
+      (jdbc/with-transaction [tx ds]
+        (when-let [{uid  :events/uid
+                    type :events/type} (jdbc/execute-one! tx ["select uid,type from events where runid=? order by timestamp asc limit 1" runid])]
+          (assert-workflow-invoke! type)
+          (let [{var :metadata/var} (jdbc/execute-one! "select var from metadata where type=? and uid=?" "workflow" uid)]
+            [(symbol uid) (resolve (symbol var))]))))
+
     ;; queries
     (find-workflow-run [this runid]
       (jdbc/with-transaction [tx ds]
-        #_
-        (when-let [[wid _] (s/find-workflow this runid)]
-          {:workflow        nil                             ; select from workflows where wid=?
-           :workflow-events nil})))                         ; select from workflow_events where wid=? and runid=?
+        (when-let [{uid  :events/uid
+                    type :events/type} (jdbc/execute-one! tx ["select uid,type from events where runid=? order by timestamp asc limit 1" runid])]
+          (assert-workflow-invoke! type)
+          (let [{var :metadata/var} (jdbc/execute-one! tx ["select var from metadata where type=? and uid=?" "workflow" uid])
+                events  (jdbc/execute! tx ["select * From events where runid=?" runid])]
+            {:workflow        (resolve (symbol var))
+             :workflow-events (mapv event->event-map events)}))))
+
     (find-workflow-run [this runid {:keys [all?] :or {all? true}}]
-      #_
-      (let [{:keys [workflow-events] :as res} (s/find-workflow-run this runid)]
-        (if all?
-          res
-          (assoc res :workflow-events (filter (complement :deleted?) workflow-events)))))
+      (jdbc/with-transaction [tx ds]
+        (when-let [{uid  :events/uid
+                    type :events/type} (jdbc/execute-one! tx ["select uid,type from events where runid=? order by timestamp asc limit 1" runid])]
+          (assert-workflow-invoke! type)
+          (let [{var :metadata/var} (jdbc/execute-one! tx ["select var from metadata where type=? and uid=?" "workflow" uid])
+                eventsq (if all?
+                          "select * From events where runid=?"
+                          "select * From events where runid=? and (deleted is false or deleted is null)")
+                events  (jdbc/execute! tx [eventsq runid])]
+            {:workflow        (resolve (symbol var))
+             :workflow-events (mapv event->event-map events)}))))
     (list-workflow-runs [this]
-      #_
-      (let [all-wids (->> @store :workflows keys)]
-        (reduce (fn [acc wid] (into acc (->> @store :workflow-events wid keys))) [] all-wids)))
+      (jdbc/with-transaction [tx ds]
+        (->> (jdbc/execute! tx ["select distinct runid from events"])
+          (mapv (comp parse-uuid :events/runid)))))
     (list-workflow-runs [this wid]
-      #_
-      (->> @store :workflow-events wid keys))
+      (jdbc/with-transaction [tx ds]
+        (->> (jdbc/execute! tx ["select distinct runid from events where uid=?" wid])
+          (mapv (comp parse-uuid :events/runid)))))
 
     ;; event handling
     (clear-events [this]
-      (truncate ds :workflow_events))
+      (jdbc/with-transaction [tx ds]
+        (truncate tx :metadata)
+        (truncate tx :events)))
     (next-event [this wid runid]
-      #_
-      (->> (get-in @store [:workflow-events wid runid])
-           (filter (complement :deleted?))
-           first))
+      (jdbc/with-transaction [tx ds]
+        ;; TODO validate wid
+        (->> (jdbc/execute-one! tx [(str "select * from events where runid=? and (deleted is false or deleted is null) "
+                                         "order by id asc limit 1")
+                                    runid])
+             (event->event-map))))
     (next-event [this wid runid evtid]
-      #_
-      (->> (get-in @store [:workflow-events wid runid])
-           (drop-while :deleted?)
-           (drop-while #(<= (:id %) evtid))
-           first))
+      (jdbc/with-transaction [tx ds]
+        ;; TODO validate wid
+        (->> (jdbc/execute-one! tx [(str "select * from events where runid=? and (deleted is false or deleted is null) "
+                                         "and id > ? order by id asc limit 1")
+                                    runid evtid])
+          (event->event-map))))
     (expunge-events [this wid runid evtid]
       ;; soft delete from workflow events
       ;; where id > evtid
+      (jdbc/with-transaction [tx ds]
+        ;; TODO validate wid
+        (jdbc/execute! tx ["update events set deleted=true where runid=? and id > ?" runid evtid])))
 
-      #_
-      (swap! store (fn [m]
-                     (let [to-keep (->> (get-in @store [:workflow-events wid runid])
-                                        (mapv (fn [evt]
-                                                (if (<= (:id evt) evtid)
-                                                  evt
-                                                  (assoc evt :deleted? true)))))]
-                       (-> m
-                           (assoc-in [:workflow-events wid runid] to-keep))))))
     (events->table [this]
-      #_
-      (let [all-events (->> (get @store :workflow-events)
-                            (vals)
-                            (map last)
-                            (map last)
-                            (flatten))]
+      (jdbc/with-transaction [tx ds]
+        (let [all-events (->> (jdbc/execute! tx ["select * from events order by runid asc, timestamp asc"]))]
+          (with-out-str
+            (pprint/print-table all-events)))))
+    (registrations->table [this]
+      (jdbc/with-transaction [tx ds]
         (with-out-str
-          (pprint/print-table all-events))))
+          (pprint/print-table (jdbc/execute! tx ["select * from metadata"])))))
+
 
     ;; metadata
     (save-workflow-definition [this wid fvar]
       (check (var? fvar) "%s: is not a var, type is %s" fvar (type fvar))
-      #_
-      (swap! store (fn [m]
-                     (-> m
-                         (assoc-in [:workflows wid] fvar)
-                         (assoc-in [:workflow-events wid] {})))))
+      (jdbc/with-transaction [tx ds]
+        (jdbc/execute-one! tx ["insert into metadata(uid,var,type) values(?,?,?)" wid (symbol fvar) "workflow"])))
+
     (save-activity-definition [this aid fvar]
-      (check (bound? fvar) "%s: is not a bounded var, type is %s" fvar (type fvar)))
-      ;(swap! store assoc-in [:activities aid] fvar))
+      (check (bound? fvar) "%s: is not a bounded var, type is %s" fvar (type fvar))
+      (jdbc/with-transaction [tx ds]
+        (jdbc/execute-one! tx ["insert into metadata(uid,var,type) values(?,?,?)" aid (symbol fvar) "activity"])))
+
     ;; persist runtime evts
     (save-workflow-event [this wid runid etype data]
-      (check (s/serializable? this data) "'%s' cannot be serialized by %s store" data (s/id this))
-      (persist-event ds wid runid {:type etype :uid wid :payload data}))
+      (jdbc/with-transaction [tx ds]
+        (persist-event tx wid runid {:type etype :uid wid :payload data})))
     (save-activity-event [this wid runid aid etype data]
-      (check (s/serializable? this data) "'%s' cannot be serialized by %s store" data (s/id this))
-      (persist-event ds wid runid {:type etype :uid aid :payload data}))))
+      (jdbc/with-transaction [tx ds]
+        (persist-event tx wid runid {:type etype :uid aid :payload data})))))

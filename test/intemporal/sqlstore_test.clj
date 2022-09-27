@@ -1,16 +1,22 @@
-(ns intemporal.memstore-test
+(ns intemporal.sqlstore-test
   (:require [clojure.test :refer :all]
+            [clojure.spec.alpha :as s]
+            [next.jdbc :as jdbc]
             [intemporal.store :as store]
             [intemporal.workflow :as w]
             [intemporal.activity :as a]
             [intemporal.test-utils :as u]
-            [intemporal.store.memory :as m]
-            [clojure.spec.alpha :as s])
-  (:import [java.util UUID]))
+            [intemporal.store.sql :as sql])
 
-(def impl (m/memory-store))
+  (:import [java.util UUID]
+           [java.io File]))
+
+(def ds (jdbc/get-datasource {:dbtype "sqlite" :dbname "test/sqlstore.db"}))
+(def impl (sql/sql-store ds))
 
 (use-fixtures :each (fn [f]
+                      (.delete (File. "test/sqlstore.db"))
+                      (sql/migrate! ds)
                       (store/clear impl)
                       (f)
                       (println (store/events->table impl))
@@ -58,7 +64,7 @@
                 wevents  (:workflow-events run-data)]
 
             (testing "workflow var is correct"
-              (is (= #'intemporal.memstore-test/workflow-fn wflow)))
+              (is (= #'intemporal.sqlstore-test/workflow-fn wflow)))
 
             (testing "workflow events"
               (let [[e1 e2 e3 e4] wevents]
@@ -94,8 +100,8 @@
               (let [nxt (store/next-event impl wid runid)
                     nxt2 (store/next-event impl wid runid (:id nxt))]
 
-                (is (u/alike? nxt {:type ::w/invoke :uid 'workflow-fn :deleted? nil}))
-                (is (u/alike? nxt2 {:type ::a/invoke :uid 'activity-fn :deleted? nil}))
+                (is (u/alike? nxt {:type ::w/invoke :uid 'workflow-fn :deleted? false}))
+                (is (u/alike? nxt2 {:type ::a/invoke :uid 'activity-fn :deleted? false}))
 
                 (testing "Expunging events"
                   (store/expunge-events impl wid runid (:id nxt2))

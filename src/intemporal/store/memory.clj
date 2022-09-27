@@ -30,7 +30,6 @@
       s/WorkflowStore
       (id [this] "memory-store")
       (clear [this] (reset! store seed))
-      (serializable? [this _arg] true)
 
       ;; main stuff
       (find-workflow [this runid]
@@ -84,6 +83,13 @@
                               (flatten))]
           (with-out-str
             (pprint/print-table all-events))))
+      (registrations->table [this]
+        (let [wflows (for [[k v] (get @store :workflows)]
+                       {:type "workflow" :id k :var v})
+              activs (for [[k v] (get @store :workflows)]
+                       {:type "activity" :id k :var v})]
+          (with-out-str
+            (pprint/print-table (concat wflows activs)))))
 
       ;; metadata
       (save-workflow-definition [this wid fvar]
@@ -97,8 +103,6 @@
         (swap! store assoc-in [:activities aid] fvar))
       ;; persist runtime evts
       (save-workflow-event [this wid runid etype data]
-        (check (s/serializable? this data) "'%s' cannot be serialized by %s store" data (s/id this))
         (persist-event wid runid {:type etype :uid wid :payload data}))
       (save-activity-event [this wid runid aid etype data]
-        (check (s/serializable? this data) "'%s' cannot be serialized by %s store" data (s/id this))
         (persist-event wid runid {:type etype :uid aid :payload data})))))
