@@ -74,5 +74,5 @@ Examples:
 
 - [X] Activites + Workflows
 - [x] Idempotency handling
-- [ ] SQL store
+- [x] SQL store
 - [ ] function versioning

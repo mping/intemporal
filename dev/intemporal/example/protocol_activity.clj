@@ -75,4 +75,9 @@
   (w/retry memstore #'simpleflow run-uuid)
   (println (s/events->table memstore))
 
-  (s/find-workflow memstore run-uuid))
+  (s/find-workflow memstore run-uuid)
+
+  (pr @memstore)
+  (clojure.pprint/print-table (:workflows @memstore))
+  (clojure.pprint/print-table (:activities @memstore))
+  (clojure.pprint/print-table (:workflow-events @memstore)))
