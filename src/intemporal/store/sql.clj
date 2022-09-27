@@ -4,8 +4,7 @@
             [intemporal.store :as s]
             [intemporal.utils.check :refer [check]]
             [migratus.core :as migratus]
-            [next.jdbc :as jdbc]
-            [next.jdbc.result-set :as rs])
+            [next.jdbc :as jdbc])
   (:import [clojure.lang IDeref]
            [java.io ByteArrayInputStream ByteArrayOutputStream]
            [java.time LocalDateTime]))
@@ -30,7 +29,7 @@
     (with-open [_ in]
       (transit/read reader))))
 
-(defn event->event-map [{:events/keys [id run type uid payload deleted timestamp] :as dbevt}]
+(defn event->event-map [{:events/keys [id _run type uid payload deleted timestamp] :as dbevt}]
   {:id id
    :type (keyword (.substring ^String type 1))
    :uid (symbol uid)
@@ -62,7 +61,7 @@
 ;;;
 ;; main
 
-(defn- persist-event [tx wid runid {:keys [type uid payload] :as evt}]
+(defn- persist-event [tx _wid runid {:keys [type uid payload] :as evt}]
   (let [query (str "insert into events "
                 "(runid, type, uid, payload, deleted, timestamp)"
                 "values (?, ?, ?, ?, ?, ?)")]
@@ -72,8 +71,7 @@
   (cond
     (= "metadata" (name table)) (jdbc/execute-one! tx ["delete from metadata"])
     (= "events" (name table)) (jdbc/execute-one! tx ["delete from events"])
-    :else (throw (IllegalArgumentException. (format "Unknown table:" table)))))
-
+    :else (throw (IllegalArgumentException. (format "Unknown table: %s" table)))))
 
 (defn sql-store
   "Make a new SQL backed store."
