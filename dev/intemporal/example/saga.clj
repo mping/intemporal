@@ -8,10 +8,10 @@
   (:import [intemporal.annotations ActivityOptions]))
 
 (def store (m/memory-store))
-(comment
-  (def ds (jdbc/get-datasource {:dbtype "sqlite" :dbname "test/devstore.db"}))
-  (sql/migrate! ds)
-  (def store (sql/sql-store ds)))
+(comment)
+(def ds (jdbc/get-datasource {:dbtype "sqlite" :dbname "test/devstore.db"}))
+(sql/migrate! ds)
+(def store (sql/sql-store ds))
 
 (defprotocol TripBookingActivities
   (reserve-car [this name])

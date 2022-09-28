@@ -38,11 +38,12 @@
     (testing "Event persistence"
       (let [runid (UUID/randomUUID)
             wid   'workflow-fn
-            aid   'activity-fn]
+            aid   'activity-fn
+            ex    (RuntimeException. "some error")]
 
         (store/save-workflow-event impl wid runid ::w/invoke "warg")
         (store/save-activity-event impl wid runid aid ::a/invoke "aarg")
-        (store/save-activity-event impl wid runid aid ::a/success "ares")
+        (store/save-activity-event impl wid runid aid ::a/failure ex)
         (store/save-workflow-event impl wid runid ::w/success "wres")
 
         (testing "list-workflow-runs"
@@ -85,9 +86,11 @@
                   (is (nil? (:deleted e2))))
 
                 (testing "activity success"
-                  (is (= ::a/success (:type e3)))
+                  (is (= ::a/failure (:type e3)))
                   (is (= 'activity-fn (:uid e3)))
-                  (is (= "ares" (:payload e3)))
+                  (testing "Throwable serde"
+                    (is (= (Throwable->map ex)
+                           (Throwable->map (:payload e3)))))
                   (is (nil? (:deleted e3))))
 
                 (testing "workflow success"

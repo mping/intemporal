@@ -12,7 +12,7 @@
   :dependencies [[org.clojure/clojure "1.11.1"]
                  [org.clojure/tools.logging "1.2.4"]
                  ;; sql store
-                 [com.cognitect/transit-clj "1.0.329"]
+                 [com.taoensso/nippy "3.2.0"]
                  [com.github.seancorfield/next.jdbc "1.3.828"]
                  [org.xerial/sqlite-jdbc "3.39.3.0"]
                  [migratus "1.4.4"]]
