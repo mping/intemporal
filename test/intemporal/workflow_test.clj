@@ -5,10 +5,19 @@
             [intemporal.workflow :as w]
             [intemporal.store :as store]
             [intemporal.test-utils :as u]
-            [intemporal.store.memory :as m])
+            [intemporal.store.memory :as m]
+            [intemporal.test-utils :as tu])
   (:import [intemporal.annotations ActivityOptions]))
 
-(def memstore (m/memory-store))
+(comment
+  ;; TODO parameterize
+  (def store (m/memory-store)))
+(def store (tu/make-sql-store))
+
+(use-fixtures :each (fn [f]
+                      (f)
+                      (println (store/events->table store))
+                      (println (store/registrations->table store))))
 
 (defprotocol ActivityProtoExample
   (run [this arg])
@@ -35,24 +44,18 @@
         (cancel stub)
         (throw e)))))
 
-(w/register-workflow memstore my-workflow)
-
-(defn- latest-rid []
-  (let [events (@memstore :workflow-events)
-        kvs    (get events 'intemporal.workflow-test/my-workflow)
-        rid    (-> kvs keys first)]
-    rid))
+(w/register-workflow store my-workflow)
 
 (deftest workflow-basic-test
 
   (testing "Happy path"
-    (store/clear-events memstore)
+    (store/clear-events store)
 
     (is (= :side-effect (my-workflow "xx")))
 
     (testing "Store history"
-      (let [rid  (latest-rid)
-            data (store/find-workflow-run memstore rid)
+      (let [[rid] (store/list-workflow-runs store)
+            data (store/find-workflow-run store rid)
             {:keys [workflow workflow-events]} data]
 
         ;; TODO why?
