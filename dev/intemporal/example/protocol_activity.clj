@@ -64,20 +64,11 @@
 (println (s/events->table memstore))
 
 (declare run-uuid)
-(let [wevs (-> (deref memstore) :workflow-events)
-      [wname kvs] (first wevs)
-      rid  (-> kvs keys first)]
-  (def run-uuid rid)
-  (s/find-workflow-run memstore rid {:all? true}))
+(let [[id] (s/list-workflow-runs memstore)]
+  (def run-uuid id))
 
-(println run-uuid)
 (comment
+  ;; you can retry a workflow that failed
+  ;; the engine will replay until the first failure and resume from there
   (w/retry memstore #'simpleflow run-uuid)
-  (println (s/events->table memstore))
-
-  (s/find-workflow memstore run-uuid)
-
-  (pr @memstore)
-  (clojure.pprint/print-table (:workflows @memstore))
-  (clojure.pprint/print-table (:activities @memstore))
-  (clojure.pprint/print-table (:workflow-events @memstore)))
+  (println (s/events->table memstore)))
