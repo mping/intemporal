@@ -88,8 +88,7 @@
                     type :events/type} (jdbc/execute-one! tx ["select uid,type from events where runid=? order by timestamp asc limit 1" (str runid)])]
           (assert-workflow-invoke! type)
           (let [{var :metadata/var} (jdbc/execute-one! "select var from metadata where type=? and uid=?" "workflow" uid)]
-            ;; if the workflow was not registered, fall back to the supplied uid
-            [(symbol uid) (resolve (symbol (or var uid)))]))))
+            [(symbol uid) (resolve (symbol var))]))))
 
     ;; queries
     (find-workflow-run [this runid]
@@ -99,8 +98,7 @@
           (assert-workflow-invoke! type)
           (let [{var :metadata/var} (jdbc/execute-one! tx ["select var from metadata where type=? and uid=?" "workflow" uid])
                 events  (jdbc/execute! tx ["select * From events where runid=?" (str runid)])]
-            ;; if the workflow was not registered, fall back to the supplied uid
-            {:workflow        (resolve (symbol (or var uid)))
+            {:workflow        (resolve (symbol var))
              :workflow-events (mapv event->event-map events)}))))
 
     (find-workflow-run [this runid {:keys [all?] :or {all? true}}]
@@ -113,8 +111,7 @@
                           "select * From events where runid=?"
                           "select * From events where runid=? and (deleted is false or deleted is null)")
                 events  (jdbc/execute! tx [eventsq (str runid)])]
-            ;; if the workflow was not registered, fall back to the supplied uid
-            {:workflow        (resolve (symbol (or var uid)))
+            {:workflow        (resolve (symbol var))
              :workflow-events (mapv event->event-map events)}))))
     (list-workflow-runs [this]
       (jdbc/with-transaction [tx ds]
@@ -122,13 +119,12 @@
           (mapv (comp parse-uuid :events/runid)))))
     (list-workflow-runs [this wid]
       (jdbc/with-transaction [tx ds]
-        (->> (jdbc/execute! tx ["select distinct runid from events where uid=?" wid])
+        (->> (jdbc/execute! tx ["select distinct runid from events where uid=?" (str wid)])
           (mapv (comp parse-uuid :events/runid)))))
 
     ;; event handling
     (clear-events [this]
       (jdbc/with-transaction [tx ds]
-        (truncate tx :metadata)
         (truncate tx :events)))
     (next-event [this wid runid]
       (jdbc/with-transaction [tx ds]
@@ -167,12 +163,12 @@
     (save-workflow-definition [this wid fvar]
       (check (var? fvar) "%s: is not a var, type is %s" fvar (type fvar))
       (jdbc/with-transaction [tx ds]
-        (jdbc/execute-one! tx ["insert into metadata(uid,var,type) values(?,?,?)" wid (symbol fvar) "workflow"])))
+        (jdbc/execute-one! tx ["insert into metadata(uid,var,type) values(?,?,?)" (str wid) (symbol fvar) "workflow"])))
 
     (save-activity-definition [this aid fvar]
       (check (bound? fvar) "%s: is not a bounded var, type is %s" fvar (type fvar))
       (jdbc/with-transaction [tx ds]
-        (jdbc/execute-one! tx ["insert into metadata(uid,var,type) values(?,?,?)" aid (symbol fvar) "activity"])))
+        (jdbc/execute-one! tx ["insert into metadata(uid,var,type) values(?,?,?)" (str aid) (symbol fvar) "activity"])))
 
     ;; persist runtime evts
     (save-workflow-event [this wid runid etype data]
