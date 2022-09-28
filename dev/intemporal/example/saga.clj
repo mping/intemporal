@@ -7,9 +7,11 @@
             [next.jdbc :as jdbc])
   (:import [intemporal.annotations ActivityOptions]))
 
-(def store (m/memory-store))
-(comment)
-(def ds (jdbc/get-datasource {:dbtype "sqlite" :dbname "test/devstore.db"}))
+
+(comment
+  (def store (m/memory-store)))
+
+(def ds (jdbc/get-datasource {:dbtype "sqlite" :dbname "/tmp/devstore.db"}))
 (sql/migrate! ds)
 (def store (sql/sql-store ds))
 
@@ -94,11 +96,12 @@
 (println (s/events->table store))
 
 (declare run-uuid)
-(let [wevs (-> store (deref) :workflow-events)
-      [wname kvs] (first wevs)
-      rid  (-> kvs keys first)]
-  (def run-uuid rid)
-  (s/find-workflow-run store rid))
+(let [[id] (s/list-workflow-runs store)]
+  (def run-uuid id))
 
 (comment
-  (w/retry store #'book-trip run-uuid))
+  ;; you can retry a workflow that failed
+  ;; BUT because there is compensation the retry won't actually happen
+  ;; TODO is this desired?
+  (w/retry store #'book-trip run-uuid)
+  (println (s/events->table store)))

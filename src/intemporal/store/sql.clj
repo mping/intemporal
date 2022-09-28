@@ -87,7 +87,7 @@
         (when-let [{uid  :events/uid
                     type :events/type} (jdbc/execute-one! tx ["select uid,type from events where runid=? order by timestamp asc limit 1" (str runid)])]
           (assert-workflow-invoke! type)
-          (let [{var :metadata/var} (jdbc/execute-one! "select var from metadata where type=? and uid=?" "workflow" uid)]
+          (let [{var :metadata/var} (jdbc/execute-one! tx ["select var from metadata where type=? and uid=?" "workflow" uid])]
             [(symbol uid) (resolve (symbol var))]))))
 
     ;; queries
