@@ -30,12 +30,13 @@
       (transit/read reader))))
 
 (defn event->event-map [{:events/keys [id _run type uid payload deleted timestamp] :as dbevt}]
-  {:id id
-   :type (keyword (.substring ^String type 1))
-   :uid (symbol uid)
-   :payload (deserialize payload)
-   :timestamp (LocalDateTime/parse timestamp)
-   :deleted? (not (or (nil? deleted) (zero? deleted)))})
+  (when dbevt
+    {:id        id
+     :type      (keyword (.substring ^String type 1))
+     :uid       (symbol uid)
+     :payload   (deserialize payload)
+     :timestamp (LocalDateTime/parse timestamp)
+     :deleted?  (not (or (nil? deleted) (zero? deleted)))}))
 
 ;;;;
 ;; migrations
@@ -157,7 +158,8 @@
 
     (events->table [this]
       (jdbc/with-transaction [tx ds]
-        (let [all-events (->> (jdbc/execute! tx ["select * from events order by runid asc, timestamp asc"]))]
+        (let [all-events (->> (jdbc/execute! tx ["select * from events order by runid asc, timestamp asc"])
+                              (mapv (fn [e] (assoc e :events/payload (deserialize (:events/payload e))))))]
           (with-out-str
             (pprint/print-table all-events)))))
     (registrations->table [this]

@@ -2,10 +2,16 @@
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
             [intemporal.store :as s]
-            [intemporal.store.memory :as m])
+            [intemporal.store.memory :as m]
+            [intemporal.store.sql :as sql]
+            [next.jdbc :as jdbc])
   (:import [intemporal.annotations ActivityOptions]))
 
-(def memstore (m/memory-store))
+(def store (m/memory-store))
+(comment
+  (def ds (jdbc/get-datasource {:dbtype "sqlite" :dbname "test/devstore.db"}))
+  (sql/migrate! ds)
+  (def store (sql/sql-store ds)))
 
 (defprotocol TripBookingActivities
   (reserve-car [this name])
@@ -33,7 +39,7 @@
     (book-hotel [this name] (maybe8 "hotel-yyy"))
     (book-flight [this name] (maybe8 "flight-zzz"))
     ;; ideally compensations should be idempotent to allow for failsafe retry
-    (^{ActivityOptions {:idempotent true}} cancel-car [this id name]  (println "!cancel car" id name))
+    (^{ActivityOptions {:idempotent true}} cancel-car [this id name] (println "!cancel car" id name))
     (^{ActivityOptions {:idempotent true}} cancel-hotel [this id name] (println "!cancel hotel" id name))
     (^{ActivityOptions {:idempotent true}} cancel-flight [this id name] (println "!cancel flight" id name))))
 
@@ -76,23 +82,23 @@
 
 ;; should actually register
 ;; requires a store to keep track of actual execution
-(w/register-workflow memstore book-trip)
+(w/register-workflow store book-trip)
 
-(s/clear-events memstore)
+(s/clear-events store)
 ;; call workflow
 (try
   (book-trip "foo")
-  (catch Exception _
+  (catch Exception e
     (println "Workflow failed!")))
 
-(println (s/events->table memstore))
+(println (s/events->table store))
 
 (declare run-uuid)
-(let [wevs (-> memstore (deref) :workflow-events)
+(let [wevs (-> store (deref) :workflow-events)
       [wname kvs] (first wevs)
       rid  (-> kvs keys first)]
   (def run-uuid rid)
-  (s/find-workflow-run memstore rid))
+  (s/find-workflow-run store rid))
 
 (comment
-  (w/retry memstore #'book-trip run-uuid))
+  (w/retry store #'book-trip run-uuid))
