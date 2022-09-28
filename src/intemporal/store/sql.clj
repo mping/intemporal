@@ -1,6 +1,7 @@
 (ns intemporal.store.sql
   (:require [clojure.pprint :as pprint]
             [cognitect.transit :as transit]
+            [taoensso.nippy :as nippy]
             [intemporal.store :as s]
             [intemporal.utils.check :refer [check]]
             [migratus.core :as migratus]
@@ -17,17 +18,11 @@
 ;; serde
 
 (defn- serialize ^"[B" [obj]
-  (let [out    (ByteArrayOutputStream.)
-        writer (transit/writer out :msgpack)]
-    (with-open [_ out]
-      (transit/write writer obj)
-      (.toByteArray out))))
+  (nippy/freeze obj))
+
 
 (defn- deserialize [^"[B" ba]
-  (let [in     (ByteArrayInputStream. ba)
-        reader (transit/reader in :msgpack)]
-    (with-open [_ in]
-      (transit/read reader))))
+  (nippy/thaw ba))
 
 (defn event->event-map [{:events/keys [id _run type uid payload deleted timestamp] :as dbevt}]
   (when dbevt

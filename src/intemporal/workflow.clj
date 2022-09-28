@@ -112,6 +112,7 @@
                                     result)))
                               (catch Exception e
                                 ;; did we just replay a throw?
+                                ;; TODO should match the exception too?
                                 (if (event-matches? (next-event) wid ::failure)
                                   (:payload (advance-history-cursor))
                                   (do
