@@ -1,13 +1,11 @@
 (ns intemporal.store.sql
   (:require [clojure.pprint :as pprint]
-            [cognitect.transit :as transit]
             [taoensso.nippy :as nippy]
             [intemporal.store :as s]
             [intemporal.utils.check :refer [check]]
             [migratus.core :as migratus]
             [next.jdbc :as jdbc])
   (:import [clojure.lang IDeref]
-           [java.io ByteArrayInputStream ByteArrayOutputStream]
            [java.time LocalDateTime]))
 
 (defn assert-workflow-invoke! [t]
