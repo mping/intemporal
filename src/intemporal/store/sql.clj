@@ -18,7 +18,6 @@
 (defn- serialize ^"[B" [obj]
   (nippy/freeze obj))
 
-
 (defn- deserialize [^"[B" ba]
   (nippy/thaw ba))
 
@@ -59,7 +58,7 @@
   (let [query (str "insert into events "
                 "(runid, type, uid, payload, deleted, timestamp)"
                 "values (?, ?, ?, ?, ?, ?)")]
-    (jdbc/execute-one! tx [query runid type uid (serialize payload) false (LocalDateTime/now)])))
+    (jdbc/execute-one! tx [query (str runid) type uid (serialize payload) false (LocalDateTime/now)])))
 
 (defn- truncate [tx table]
   (cond
@@ -86,33 +85,36 @@
     (find-workflow [this runid]
       (jdbc/with-transaction [tx ds]
         (when-let [{uid  :events/uid
-                    type :events/type} (jdbc/execute-one! tx ["select uid,type from events where runid=? order by timestamp asc limit 1" runid])]
+                    type :events/type} (jdbc/execute-one! tx ["select uid,type from events where runid=? order by timestamp asc limit 1" (str runid)])]
           (assert-workflow-invoke! type)
           (let [{var :metadata/var} (jdbc/execute-one! "select var from metadata where type=? and uid=?" "workflow" uid)]
-            [(symbol uid) (resolve (symbol var))]))))
+            ;; if the workflow was not registered, fall back to the supplied uid
+            [(symbol uid) (resolve (symbol (or var uid)))]))))
 
     ;; queries
     (find-workflow-run [this runid]
       (jdbc/with-transaction [tx ds]
         (when-let [{uid  :events/uid
-                    type :events/type} (jdbc/execute-one! tx ["select uid,type from events where runid=? order by timestamp asc limit 1" runid])]
+                    type :events/type} (jdbc/execute-one! tx ["select uid,type from events where runid=? order by timestamp asc limit 1" (str runid)])]
           (assert-workflow-invoke! type)
           (let [{var :metadata/var} (jdbc/execute-one! tx ["select var from metadata where type=? and uid=?" "workflow" uid])
-                events  (jdbc/execute! tx ["select * From events where runid=?" runid])]
-            {:workflow        (resolve (symbol var))
+                events  (jdbc/execute! tx ["select * From events where runid=?" (str runid)])]
+            ;; if the workflow was not registered, fall back to the supplied uid
+            {:workflow        (resolve (symbol (or var uid)))
              :workflow-events (mapv event->event-map events)}))))
 
     (find-workflow-run [this runid {:keys [all?] :or {all? true}}]
       (jdbc/with-transaction [tx ds]
         (when-let [{uid  :events/uid
-                    type :events/type} (jdbc/execute-one! tx ["select uid,type from events where runid=? order by timestamp asc limit 1" runid])]
+                    type :events/type} (jdbc/execute-one! tx ["select uid,type from events where runid=? order by timestamp asc limit 1" (str runid)])]
           (assert-workflow-invoke! type)
           (let [{var :metadata/var} (jdbc/execute-one! tx ["select var from metadata where type=? and uid=?" "workflow" uid])
                 eventsq (if all?
                           "select * From events where runid=?"
                           "select * From events where runid=? and (deleted is false or deleted is null)")
-                events  (jdbc/execute! tx [eventsq runid])]
-            {:workflow        (resolve (symbol var))
+                events  (jdbc/execute! tx [eventsq (str runid)])]
+            ;; if the workflow was not registered, fall back to the supplied uid
+            {:workflow        (resolve (symbol (or var uid)))
              :workflow-events (mapv event->event-map events)}))))
     (list-workflow-runs [this]
       (jdbc/with-transaction [tx ds]
@@ -133,21 +135,21 @@
         ;; TODO validate wid
         (->> (jdbc/execute-one! tx [(str "select * from events where runid=? and (deleted is false or deleted is null) "
                                          "order by id asc limit 1")
-                                    runid])
+                                    (str runid)])
              (event->event-map))))
     (next-event [this wid runid evtid]
       (jdbc/with-transaction [tx ds]
         ;; TODO validate wid
         (->> (jdbc/execute-one! tx [(str "select * from events where runid=? and (deleted is false or deleted is null) "
                                          "and id > ? order by id asc limit 1")
-                                    runid evtid])
+                                    (str runid) evtid])
           (event->event-map))))
     (expunge-events [this wid runid evtid]
       ;; soft delete from workflow events
       ;; where id > evtid
       (jdbc/with-transaction [tx ds]
         ;; TODO validate wid
-        (jdbc/execute! tx ["update events set deleted=true where runid=? and id > ?" runid evtid])))
+        (jdbc/execute! tx ["update events set deleted=true where runid=? and id > ?" (str runid) evtid])))
 
     (events->table [this]
       (jdbc/with-transaction [tx ds]

@@ -1,26 +1,19 @@
 (ns intemporal.sqlstore-test
   (:require [clojure.test :refer :all]
             [clojure.spec.alpha :as s]
-            [next.jdbc :as jdbc]
             [intemporal.store :as store]
             [intemporal.workflow :as w]
             [intemporal.activity :as a]
             [intemporal.test-utils :as u]
-            [intemporal.store.sql :as sql])
+            [intemporal.test-utils :as tu])
+  (:import [java.util UUID]))
 
-  (:import [java.util UUID]
-           [java.io File]))
-
-(def ds (jdbc/get-datasource {:dbtype "sqlite" :dbname "test/sqlstore.db"}))
-(def impl (sql/sql-store ds))
+(def store (tu/make-sql-store))
 
 (use-fixtures :each (fn [f]
-                      (.delete (File. "test/sqlstore.db"))
-                      (sql/migrate! ds)
-                      (store/clear impl)
                       (f)
-                      (println (store/events->table impl))
-                      (println (store/registrations->table impl))))
+                      (println (store/events->table store))
+                      (println (store/registrations->table store))))
 
 (defn workflow-fn [arg]
   arg)
@@ -32,8 +25,8 @@
   (testing "Basic store operations"
 
     (testing "Saving workflow definitions"
-      (store/save-workflow-definition impl 'workflow-fn #'workflow-fn)
-      (store/save-activity-definition impl 'activity-fn #'activity-fn))
+      (store/save-workflow-definition store 'workflow-fn #'workflow-fn)
+      (store/save-activity-definition store 'activity-fn #'activity-fn))
 
     (testing "Event persistence"
       (let [runid (UUID/randomUUID)
@@ -41,26 +34,26 @@
             aid   'activity-fn
             ex    (RuntimeException. "some error")]
 
-        (store/save-workflow-event impl wid runid ::w/invoke "warg")
-        (store/save-activity-event impl wid runid aid ::a/invoke "aarg")
-        (store/save-activity-event impl wid runid aid ::a/failure ex)
-        (store/save-workflow-event impl wid runid ::w/success "wres")
+        (store/save-workflow-event store wid runid ::w/invoke "warg")
+        (store/save-activity-event store wid runid aid ::a/invoke "aarg")
+        (store/save-activity-event store wid runid aid ::a/failure ex)
+        (store/save-workflow-event store wid runid ::w/success "wres")
 
         (testing "list-workflow-runs"
           (testing "list all"
-            (let [all-runs (store/list-workflow-runs impl)]
+            (let [all-runs (store/list-workflow-runs store)]
               (is (= all-runs [runid]))))
 
           (testing "list by workflow"
-            (let [wflow-runs (store/list-workflow-runs impl 'workflow-fn)]
+            (let [wflow-runs (store/list-workflow-runs store 'workflow-fn)]
               (is (= wflow-runs [runid]))))
 
           (testing "list by non existing workflow"
-            (let [wflow-runs (store/list-workflow-runs impl 'xxx)]
+            (let [wflow-runs (store/list-workflow-runs store 'xxx)]
               (is (empty? wflow-runs)))))
 
         (testing "find-workflow-run"
-          (let [run-data (store/find-workflow-run impl runid)
+          (let [run-data (store/find-workflow-run store runid)
                 wflow    (:workflow run-data)
                 wevents  (:workflow-events run-data)]
 
@@ -100,20 +93,20 @@
                   (is (nil? (:deleted e4))))))
 
             (testing "Workflow event traversal"
-              (let [nxt (store/next-event impl wid runid)
-                    nxt2 (store/next-event impl wid runid (:id nxt))]
+              (let [nxt (store/next-event store wid runid)
+                    nxt2 (store/next-event store wid runid (:id nxt))]
 
                 (is (u/alike? nxt {:type ::w/invoke :uid 'workflow-fn :deleted? false}))
                 (is (u/alike? nxt2 {:type ::a/invoke :uid 'activity-fn :deleted? false}))
 
                 (testing "Expunging events"
-                  (store/expunge-events impl wid runid (:id nxt2))
+                  (store/expunge-events store wid runid (:id nxt2))
 
                   (testing "Expunged events can be filtered out"
-                    (is (= 2 (->> (store/find-workflow-run impl runid {:all? false})
+                    (is (= 2 (->> (store/find-workflow-run store runid {:all? false})
                                   (:workflow-events)
                                   (count)))))
                   (testing "Expunged events will be shown by default"
-                    (is (= 4 (->> (store/find-workflow-run impl runid)
+                    (is (= 4 (->> (store/find-workflow-run store runid)
                                   (:workflow-events)
                                   (count))))))))))))))
