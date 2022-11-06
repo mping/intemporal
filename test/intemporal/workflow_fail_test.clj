@@ -48,6 +48,10 @@
 
 (w/register-workflow store my-workflow)
 
+(defn- latest-rid [sym]
+  (let [runs (store/list-workflow-runs store sym)]
+    (last runs)))
+
 (deftest workflow-retry-test
 
   (testing "Workflow fails if activity throws"
