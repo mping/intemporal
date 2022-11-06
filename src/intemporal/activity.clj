@@ -17,8 +17,8 @@
   "
   (:require [clojure.set :as set]
             [intemporal.utils.check :refer [check]]
-            [intemporal.workflow :as w])
-  (:import [intemporal.annotations ActivityOptions]))
+            [intemporal.workflow :as w]
+            [clojure.tools.logging :as log]))
 
 ;;;;
 ;; activity stubbing
@@ -79,6 +79,7 @@
   ([aid args body]
    `(with-traced-activity ~aid ~args {} ~body))
   ([aid args opts body]
+   ;; TODO move calls to activity NS
    `(try
       ;; mark activity pending
       (if (w/event-matches? (w/next-event) ~aid ::invoke)
@@ -130,17 +131,6 @@
              (w/save-activity-event ~aid ::failure e#)
              e#)))))))
 
-(defn get-activity-options
-  "Gets activity options for the given object, if any"
-  [proto proto-impl method]
-  (when (record? proto-impl)
-    (let [arglists (first (get-in proto [:sigs method :arglists]))
-          argarray (into-array Class (repeatedly (dec (count arglists)) (constantly Object)))
-          rclass   (class proto-impl)]
-      (when-let [meth (.getMethod rclass (name method) argarray)]
-        (when-let [annot (first (.getAnnotationsByType meth ActivityOptions))]
-          {:idempotent (.idempotent ^ActivityOptions annot)})))))
-
 (defn- get-registered-function
   "Gets the registered function for `fid`"
   [fid]
@@ -158,17 +148,17 @@
 
 (defmacro stub-function
   "Stubs and registers a single function as an activity"
-  [f]
+  [f & opts]
   (let [fid      (fn->fnid f)
         resolved (resolve f)
         ;; poor mans' removing the var #'
         qname    (subs (str resolved) 2)
         fname    (gensym (str "stub-" (or (:name (meta resolved)) "fn") "-"))
-        act-opts (select-keys (meta resolved) [:idempotent])]
+        [act-opts] opts]
 
     (check (or (nil? (get-registered-function fid))
-               (= (get-registered-function fid) f))
-           "Stubbed function '%s' doesn't match registered function '%s'" (get-registered-function fid) f)
+             (= (get-registered-function fid) f))
+      "Stubbed function '%s' doesn't match registered function '%s'" (get-registered-function fid) f)
     (swap! registry assoc fid f)
 
     ;; return the proxy fn
@@ -179,7 +169,7 @@
 
 (defmacro stub-protocol
   "Requires a stub for activity `proto`. To be used in worfklows"
-  [proto]
+  [proto & opts]
   (check (symbol? proto) "'%s': Protocol should be a symbol, use `(:require [...])` or a namespace-local protocol for the definition" proto)
   (let [resolved     (resolve-protocol proto)
         proto-var    (var-get (resolve proto))
@@ -193,15 +183,16 @@
                                                (name sig)
                                                (str (namespace proto) "/" (name sig)))]]
                            [(name sig) arglist (symbol invname) (symbol qname)])
-                         (doall))]
+                       (doall))]
+
     `(reify ~proto
        ~@(for [[mname arglist invname qname] sig+args
                :let [sname (symbol mname)
                      args  (rest (first arglist))]]
            ;; implement ~sname
            `(~sname [this# ~@args]
-                    (let [impl#     (get-protocol-impl ~resolved)
-                          aid#      '~qname
-                          act-opts# (get-activity-options ~proto impl# (keyword ~mname))]
-                      (with-traced-activity aid# [~@args] act-opts#
-                        (~invname impl# ~@args))))))))
+             (let [impl#     (get-protocol-impl ~resolved)
+                   aid#      '~qname
+                   act-opts# ~(first opts)]
+               (with-traced-activity aid# [~@args] act-opts#
+                 (~invname impl# ~@args))))))))

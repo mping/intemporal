@@ -26,7 +26,6 @@ Examples:
 (require '[intemporal.workflow :as w]
          '[intemporal.activity :as a]
          '[intemporal.store :as s])
-(import '[intemporal.annotations ActivityOptions])
 
 ;; define your side-effects
 (defprotocol ActivityProtoExample
@@ -41,8 +40,8 @@ Examples:
   ActivityProtoExample
   (run [this arg] (run-side-effect arg))
   ;; we can pass additional metadata
-  (^{ActivityOptions {:idempotent true}} query [this arg] (run-side-effect arg))
-  (^{ActivityOptions {:idempotent true}} cancel [_] :cancel))
+  (query [this arg] (run-side-effect arg))
+  (cancel [_] :cancel))
 
 ;; register the activity
 (a/register-protocol ActivityProtoExample (->MyProtoImpl))
@@ -50,7 +49,7 @@ Examples:
 ;; workflow: make use of your side effects
 (defn my-workflow [arg]
   ;; activities should be stubbed
-  (let [stub (a/stub-protocol ActivityProtoExample)]
+  (let [stub (a/stub-protocol ActivityProtoExample {:idempotent true})]
     (try
       (if (query stub :query)
         (run stub :run)
@@ -75,4 +74,9 @@ Examples:
 - [X] Activites + Workflows
 - [x] Idempotency handling
 - [x] SQL store
+- [ ] Pass stub options
+  - [ ] Discard `ActivityOptions` 
+  - [ ] Protocol options
+  - [ ] Regular fn options
+- Convert to `.cljc` 
 - [ ] function versioning

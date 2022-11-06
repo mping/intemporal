@@ -6,8 +6,7 @@
             [intemporal.store :as store]
             [intemporal.test-utils :as u]
             [intemporal.store.memory :as m]
-            [intemporal.test-utils :as tu])
-  (:import [intemporal.annotations ActivityOptions]))
+            [intemporal.test-utils :as tu]))
 
 (comment
   ;; TODO parameterize
@@ -29,13 +28,13 @@
 (defrecord MyProtoImpl []
   ActivityProtoExample
   (run [this arg] (run-side-effect arg))
-  (^{ActivityOptions {:idempotent true}} query [this arg] (run-side-effect arg))
-  (^{ActivityOptions {:idempotent true}} cancel [_] :cancel))
+  (query [this arg] (run-side-effect arg))
+  (cancel [_] :cancel))
 
 (a/register-protocol ActivityProtoExample (->MyProtoImpl))
 
 (defn my-workflow [arg]
-  (let [stub (a/stub-protocol ActivityProtoExample)]
+  (let [stub (a/stub-protocol ActivityProtoExample {:idempotent true})]
     (try
       (if (query stub :query)
         (run stub :run)

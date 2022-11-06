@@ -5,8 +5,7 @@
             [intemporal.workflow :as w]
             [intemporal.store :as store]
             [intemporal.test-utils :as u]
-            [intemporal.store.memory :as m])
-  (:import [intemporal.annotations ActivityOptions]))
+            [intemporal.store.memory :as m]))
 
 (def memstore (m/memory-store))
 
@@ -17,8 +16,7 @@
 
 (defrecord MyProtoImpl []
   ActivityProtoExample
-  ;; (Ab)use annotations to pass activity options
-  (^{ActivityOptions {:idempotent true}} foo [_ bar] bar))
+  (foo [_ bar] bar))
 
 ;; a function will work too
 (defn identity-activity-fn [arg]
