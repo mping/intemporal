@@ -1,0 +1,6 @@
+{:deps {:aliases [:cljs]}
+ :builds {:lib {:asset-path "/js"
+                :modules {:main {:entries [intemporal.workflow]}}
+                :output-dir "target/js"
+                :target :browser}}
+ :nrepl {:port 8777}}

@@ -1,8 +1,10 @@
 (ns intemporal.workflow.execution
   "Defines the IWorkflowExecution protocol."
   (:require [intemporal.store :as s]
-            [clojure.tools.logging :as log])
-  (:import [java.util UUID]))
+            [taoensso.timbre :as log
+             :refer [log  trace  debug  info  warn  error  fatal  report
+                     logf tracef debugf infof warnf errorf fatalf reportf
+                     spy]]))
 
 (defprotocol IWorkflowExecution
   ;; accessors
@@ -64,7 +66,7 @@
 (defn make-workflow-execution
   "Makes a new workflow run for the given workflow id"
   ([store wid]
-   (make-workflow-execution store wid (UUID/randomUUID)))
+   (make-workflow-execution store wid (s/randomUUID)))
   ([store wid runid]
    (let [runid runid
          state (atom {:events-cursor nil

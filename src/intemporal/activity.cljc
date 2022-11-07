@@ -17,8 +17,7 @@
   "
   (:require [clojure.set :as set]
             [intemporal.utils.check :refer [check]]
-            [intemporal.workflow :as w]
-            [clojure.tools.logging :as log]))
+            [intemporal.workflow :as w]))
 
 ;;;;
 ;; activity stubbing

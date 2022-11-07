@@ -3,7 +3,11 @@
   (:require [intemporal.store :as s]
             [intemporal.workflow.execution :as e]
             [intemporal.utils.check :refer [check]]
-            [clojure.tools.logging :as log]))
+            [intemporal.utils.string :refer [fmt]]
+            [taoensso.timbre :as log
+             :refer [log  trace  debug  info  warn  error  fatal  report
+                     logf tracef debugf infof warnf errorf fatalf reportf
+                     spy]]))
 
 ;; holds the data for the current workflow, including the store used for persistence
 ;; is a dynamic var so we can rebind each time the workflow function is called
@@ -87,7 +91,7 @@
                     (fn [f]
                       (fn proxy-workflow [& args]
                         ;; the current-workflow-run will hold the store where all data will be saved
-                        (with-bindings {#'current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))}
+                        (binding [current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))]
                           (let [vargs (if (event-matches? (next-event) wid ::invoke)
                                         (:payload (advance-history-cursor))
                                         (do
@@ -130,14 +134,13 @@
   (let [[wid _wvar] (s/find-workflow store runid)]
     (check (some? wid) "No workflow found for runid %s" runid)
     ;; TODO: check if the workflow reached a terminal state yet
-
-    (with-bindings {#'current-workflow-run (e/make-workflow-execution store wid runid)}
+    (binding [current-workflow-run (e/make-workflow-execution store wid runid)]
       (let [invoke-evt (e/-advance-history-cursor current-workflow-run)]
         (when-not (some? invoke-evt)
-          (throw (IllegalArgumentException. (format "%s: runid %s not found" wid runid))))
+          (throw (ex-info (fmt "%s: runid %s not found" wid runid) {})))
 
         (when-not (= (:type invoke-evt) ::invoke)
-          (throw (IllegalArgumentException. (format "%s: event for run %s is %s, should be ::invoke" wid invoke-evt runid))))
+          (throw (ex-info (fmt "%s: event for run %s is %s, should be ::invoke" wid invoke-evt runid) {})))
 
         (e/-reset-history-cursor current-workflow-run)
         (apply f (:payload invoke-evt))))))
