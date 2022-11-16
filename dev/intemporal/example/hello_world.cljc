@@ -8,7 +8,7 @@
 
 (defn hello-world [& args]
   (println "hello, " args)
-  (throw (ex-info "XX" {:a 1}))
+  ;(throw (ex-info "XX" {:a 1}))
   "kthxbye")
 
 

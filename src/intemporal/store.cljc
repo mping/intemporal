@@ -27,6 +27,10 @@
   #?(:clj  (instance? LocalDateTime dt)
      :cljs (= js/Date (type dt))))
 
+(defn now []
+  #?(:clj  (LocalDateTime/now)
+     :cljs (js/Date.)))
+
 (defn randomUUID []
   #?(:clj  (UUID/randomUUID)
      :cljs "randomUUID!"))

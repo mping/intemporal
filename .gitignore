@@ -16,3 +16,5 @@ test/*.db
 
 .cpcache
 .shadow-cljs
+node_modules
+public

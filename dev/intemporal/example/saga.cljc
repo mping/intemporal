@@ -83,7 +83,7 @@
         (email-stub "user@user.com" "trip confirmed")
         :ok)
       ;; LOL this catch can catch stub exceptions such as "not running within a workflow"
-      (catch Exception e
+      (catch #?(:clj Exception :cljs js/Error) e
         (w/compensate)
         (email-stub "user@user.com" "trip failed")
         (throw e)))))
@@ -96,7 +96,7 @@
 ;; call workflow
 (try
   (book-trip "foo")
-  (catch Exception e
+  (catch #?(:clj Exception :cljs js/Error) e
     (println "Workflow failed!")))
 
 (println (s/events->table store))

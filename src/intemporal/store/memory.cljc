@@ -1,9 +1,9 @@
 (ns intemporal.store.memory
   (:require [clojure.pprint :as pprint]
             [intemporal.store :as s]
-            [intemporal.utils.check :refer [check]])
-  (:import [clojure.lang IDeref]
-           [java.time LocalDateTime]))
+            [intemporal.utils.check :refer [check]]
+            #?(:cljs [cljs.core :refer [IDeref]]))
+  #?(:clj (:import [clojure.lang IDeref])))
 
 (defn memory-store []
   (let [seed          {:workflows       {}
@@ -18,14 +18,14 @@
                                              run-evts (get-in m path [])
                                              new-evt  (assoc evt :id (swap! idcounter inc)
                                                                  :deleted? nil
-                                                                 :timestamp (LocalDateTime/now))
+                                                                 :timestamp (s/now))
                                              new-evts (conj run-evts new-evt)]
                                          (assoc-in m path new-evts)))))]
 
     (reify
       ;; to facilitate printing
       IDeref
-      (deref [this] @store)
+      (#?(:clj deref :cljs -deref) [this] @store)
 
       s/WorkflowStore
       (id [this] "memory-store")
@@ -99,7 +99,7 @@
                            (assoc-in [:workflows wid] fvar)
                            (assoc-in [:workflow-events wid] {})))))
       (save-activity-definition [this aid fvar]
-        (check (bound? fvar) "%s: is not a bounded var, type is %s" fvar (type fvar))
+        #?(:clj (check (bound? fvar) "%s: is not a bounded var, type is %s" fvar (type fvar)))
         (swap! store assoc-in [:activities aid] fvar))
       ;; persist runtime evts
       (save-workflow-event [this wid runid etype data]

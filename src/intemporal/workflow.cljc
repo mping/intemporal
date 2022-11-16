@@ -1,5 +1,8 @@
 (ns intemporal.workflow
   "Main namespace. A worfklow definition is a function that is proxied to save its arguments and result/error."
+  #?(:clj (:require [net.cgrand.macrovich :as macros])
+     :cljs (:require-macros [net.cgrand.macrovich :as macros]
+                            [intemporal.macros ]))
   (:require [intemporal.store :as s]
             [intemporal.workflow.execution :as e]
             [intemporal.utils.check :refer [check]]
@@ -78,55 +81,68 @@
 (defn- sym->workflow-id [sym]
   (symbol (str (ns-name *ns*)) (str sym)))
 
+(defn- proxy-workflow-fn
+  [astore wid f & args]
+  (binding [current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))]
+    (let [vargs (if (event-matches? (next-event) wid ::invoke)
+                  (:payload (advance-history-cursor))
+                  (do
+                    (save-workflow-event ::invoke args)
+                    (into [] args)))]
+      (try
+        (let [result (apply f vargs)
+              nxt    (next-event)]
+          ;; if it throws we go to the catch
+          (cond
+            (event-matches? nxt wid ::success)
+            (:payload (advance-history-cursor))
+
+            (event-matches? nxt wid ::failure)
+            (throw (:payload (advance-history-cursor))) ;; goes to catch
+
+            ;; TODO handle divergence
+            :else
+            (do
+              (save-workflow-event ::success result)
+              result)))
+        (catch #?(:clj Exception :cljs js/Error) e
+          ;; did we just replay a throw?
+          ;; TODO should match the exception too?
+          (if (event-matches? (next-event) wid ::failure)
+            (:payload (advance-history-cursor))
+            (do
+              (save-workflow-event ::failure e)
+              (throw e))))))))
+
 (defmacro register-workflow
   "Registers function `fsym`, using `store` to keep track of executions.
   Replaces the function var by a proxy that saves execution to the store."
   [store fsym]
   ;; TODO: throw if already registered
-  (let [fvar (resolve fsym)
-        wid  (sym->workflow-id fsym)
-        astore (var-get (resolve store))]
-    (check (bound? fvar) "%s: Should be bound" fsym)
-    (alter-var-root fvar
-                    (fn [f]
-                      (fn proxy-workflow [& args]
-                        ;; the current-workflow-run will hold the store where all data will be saved
-                        (binding [current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))]
-                          (let [vargs (if (event-matches? (next-event) wid ::invoke)
-                                        (:payload (advance-history-cursor))
-                                        (do
-                                          (save-workflow-event ::invoke args)
-                                          (into [] args)))]
-                            (try
-                              (let [result (apply f vargs)
-                                    nxt    (next-event)]
-                                ;; if it throws we go to the catch
-                                (cond
-                                  (event-matches? nxt wid ::success)
-                                  (:payload (advance-history-cursor))
+  (macros/case
+    :cljs
+    (let [fname (str fsym)
+          wid   (sym->workflow-id fname)]
+      `(let [f# ~fsym]
+         (set! ~fsym
+           (fn proxy-workflow# [& args#]
+             (proxy-workflow-fn ~store ~wid f# args#)))))
+             ;(apply f# args#)))
+    :clj
+    (let [fvar (resolve fsym)
+          wid  (sym->workflow-id fsym)
+          astore (var-get (resolve store))]
+      (check (bound? fvar) "%s: Should be bound" fsym)
+      (alter-var-root fvar
+                      (fn [f]
+                        (fn proxy-workflow [& args]
+                          ;; the current-workflow-run will hold the store where all data will be saved
+                          (proxy-workflow-fn astore wid f args))))
 
-                                  (event-matches? nxt wid ::failure)
-                                  (throw (:payload (advance-history-cursor))) ;; goes to catch
-
-                                  ;; TODO handle divergence
-
-                                  :else
-                                  (do
-                                    (save-workflow-event ::success result)
-                                    result)))
-                              (catch Exception e
-                                ;; did we just replay a throw?
-                                ;; TODO should match the exception too?
-                                (if (event-matches? (next-event) wid ::failure)
-                                  (:payload (advance-history-cursor))
-                                  (do
-                                    (save-workflow-event ::failure e)
-                                    (throw e))))))))))
-
-    `(do
-       (check (satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
-       (s/save-workflow-definition ~store '~wid ~fvar)
-       nil)))
+      `(do
+         (check (satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
+         (s/save-workflow-definition ~store '~wid ~fvar)
+         nil))))
 
 (defn retry
   "Retries `f` with given `runid`, possibly resuming execution if `f` didn't reach a terminal state."

@@ -55,7 +55,7 @@
 ;; call workflow
 (try
   (simpleflow "foo")
-  (catch Exception _
+  (catch #?(:clj Exception :cljs js/Error) _
     (println "Workflow failed!")))
 
 (println (s/events->table memstore))

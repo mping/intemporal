@@ -1,6 +1,7 @@
-{:deps {:aliases [:cljs]}
- :builds {:lib {:asset-path "/js"
-                :modules {:main {:entries [intemporal.workflow]}}
-                :output-dir "target/js"
-                :target :browser}}
- :nrepl {:port 8777}}
+;; shadow-cljs configuration
+{:deps {:aliases [:cljs :dev]}
+ :nrepl {:init-ns intemporal.example.dev}
+ :builds {:dev {:target :browser
+                :asset-path "."
+                :output-dir "target"
+                :modules {:dev {:entries [intemporal.example.dev]}}}}}
