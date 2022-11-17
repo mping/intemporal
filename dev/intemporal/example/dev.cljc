@@ -14,12 +14,16 @@
 
   "")
 
+(def memstore (mem/memory-store))
 
-(defn foo [] 1)
+(defn foo [] :foo)
 
-;; works in clj,cljs
-(macroexpand-1 '(a/register-function foo))
+(defn bar []
+  (let [stubbed foo]
+    (stubbed)))
 
-;(macroexpand-1 '(a/stub-function foo))
+(w/register-workflow memstore bar)
 
-(macroexpand-1 '(a/xxx))
+(bar)
+
+

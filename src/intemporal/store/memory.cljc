@@ -6,6 +6,7 @@
   #?(:clj (:import [clojure.lang IDeref])))
 
 (defn memory-store []
+
   (let [seed          {:workflows       {}
                        :activities      {}
                        :workflow-events {}}
@@ -21,6 +22,7 @@
                                                                  :timestamp (s/now))
                                              new-evts (conj run-evts new-evt)]
                                          (assoc-in m path new-evts)))))]
+
 
     (reify
       ;; to facilitate printing

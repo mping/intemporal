@@ -2,7 +2,7 @@
   "Main namespace. A worfklow definition is a function that is proxied to save its arguments and result/error."
   #?(:clj (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
-                            [intemporal.macros ]))
+                            [intemporal.macros]))
   (:require [intemporal.store :as s]
             [intemporal.workflow.execution :as e]
             [intemporal.utils.check :refer [check]]
@@ -81,8 +81,8 @@
 (defn- sym->workflow-id [sym]
   (symbol (str (ns-name *ns*)) (str sym)))
 
-(defn- proxy-workflow-fn
-  [astore wid f & args]
+(defn proxy-workflow-fn
+  [astore wid f args]
   (binding [current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))]
     (let [vargs (if (event-matches? (next-event) wid ::invoke)
                   (:payload (advance-history-cursor))
@@ -123,11 +123,17 @@
     :cljs
     (let [fname (str fsym)
           wid   (sym->workflow-id fname)]
-      `(let [f# ~fsym]
-         (set! ~fsym
-           (fn proxy-workflow# [& args#]
-             (proxy-workflow-fn ~store ~wid f# args#)))))
-             ;(apply f# args#)))
+      `(let [f#       ~fsym
+             proxied# (fn proxy-workflow# [& args#]
+                        #_
+                        (proxy-workflow-fn ~store '~wid f# args#))]
+         (set! ~fsym proxied#)
+         (do
+           1
+           (check (cljs.core/satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
+           (s/save-workflow-definition ~store '~wid proxied#)
+           nil)))
+
     :clj
     (let [fvar (resolve fsym)
           wid  (sym->workflow-id fsym)

@@ -36,6 +36,7 @@
   (defn- fn->fnid
     "Called by defmacro."
     [f]
+
     (check (symbol? f) "'%s' should be a symbol" f)
     ;; note that for cljs, the symbol is not bound yet because defmacro
     ;; is emitted in clj phase
@@ -145,11 +146,6 @@
               (do
                 (w/save-activity-event ~aid ::failure e#)
                 e#)))))))
-
-  (defmacro xxx []
-    (macros/case
-      :clj `(swap! registry assoc :clj true)
-      :cljs `(swap! registry assoc :cljs true)))
 
   (defmacro register-function
     "Registers a function implementation for `f`"
