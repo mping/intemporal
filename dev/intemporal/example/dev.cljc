@@ -29,6 +29,10 @@
   (doHead [this id] "Can be called multiple times")
   (doPost [this id] "Should only be called once"))
 
-(macroexpand-1 '(a/stub-protocol HttpClient))
+(defrecord DummyHttpClient []
+  HttpClient
+  (doHead [this id] "head")
+  (doPost [this id] "post"))
 
-;(macroexpand-1 '(a/stub-protocol s/WorkflowStore))
+(macroexpand-1 '(a/stub-protocol HttpClient (->DummyHttpClient)))
+

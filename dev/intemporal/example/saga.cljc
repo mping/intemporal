@@ -54,17 +54,11 @@
   "email sent!")
 
 ;;;;
-;; activities registration
-(a/register-protocol TripBookingActivities example-impl)
-(a/register-function send-email)
-
-
-;;;;
 ;; workflow registration
 (defn book-trip
   [n]
   (let [email-stub (a/stub-function send-email)
-        stub       (a/stub-protocol TripBookingActivities)
+        stub       (a/stub-protocol TripBookingActivities example-impl)
         cancel-car* (a/stub-function cancel-car {:idempotent true})
         cancel-hotel* (a/stub-function cancel-hotel {:idempotent true})
         cancel-flight* (a/stub-function cancel-flight {:idempotent true})]

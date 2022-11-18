@@ -23,9 +23,6 @@
   arg)
 
 (deftest activity-test
-  (testing "Can register activity functions"
-    (a/register-function identity-activity-fn))
-
   (testing "Can register activity protocols"
     (a/register-protocol ActivityProtoExample (->MyProtoImpl)))
 

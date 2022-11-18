@@ -43,13 +43,10 @@ Examples:
   (query [this arg] (run-side-effect arg))
   (cancel [_] :cancel))
 
-;; register the activity
-(a/register-protocol ActivityProtoExample (->MyProtoImpl))
-
 ;; workflow: make use of your side effects
 (defn my-workflow [arg]
   ;; activities should be stubbed
-  (let [stub (a/stub-protocol ActivityProtoExample {:idempotent true})]
+  (let [stub (a/stub-protocol ActivityProtoExample (->MyProtoImpl) {:idempotent true})]
     (try
       (if (query stub :query)
         (run stub :run)
@@ -74,9 +71,9 @@ Examples:
 - [X] Activites + Workflows
 - [x] Idempotency handling
 - [x] SQL store
-- [ ] Pass stub options
-  - [ ] Discard `ActivityOptions` 
-  - [ ] Protocol options
-  - [ ] Regular fn options
+- [x] Pass stub options
+  - [x] Discard `ActivityOptions` 
+  - [x] Protocol options
+  - [x] Regular fn options
 - Convert to `.cljc` 
 - [ ] function versioning

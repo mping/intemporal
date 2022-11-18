@@ -31,10 +31,8 @@
   (query [this arg] (run-side-effect arg))
   (cancel [_] :cancel))
 
-(a/register-protocol ActivityProtoExample (->MyProtoImpl))
-
 (defn my-workflow [arg]
-  (let [stub (a/stub-protocol ActivityProtoExample {:idempotent true})]
+  (let [stub (a/stub-protocol ActivityProtoExample (->MyProtoImpl) {:idempotent true})]
     (try
       (if (query stub :query)
         (run stub :run)

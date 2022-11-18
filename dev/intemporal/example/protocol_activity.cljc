@@ -35,17 +35,12 @@
   (doHead [_ id] (maybe id)))
 
 ;;;;
-;; activities registration
-(a/register-protocol HttpClient example-impl)
-;; a record will also work
-(a/register-protocol HttpClient (->MyHttpClient))
-
-;;;;
 ;; workflow registration
 
 (defn simpleflow
   [n]
-  (let [stub (a/stub-protocol HttpClient {:idempotent true})]
+  ;; (->MyHttpClient) would work too
+  (let [stub (a/stub-protocol HttpClient example-impl {:idempotent true})]
     (doHead stub (str n "carr"))
     (doPost stub (str n "carr"))))
 

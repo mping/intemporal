@@ -33,10 +33,8 @@
   (query [this arg] (run-side-effect arg))
   (cancel [_] :cancel))
 
-(a/register-protocol ActivityProtoExample (->MyProtoImpl))
-
 (defn my-workflow [arg]
-  (let [stub (a/stub-protocol ActivityProtoExample {:idempotent true})]
+  (let [stub (a/stub-protocol ActivityProtoExample (->MyProtoImpl) {:idempotent true})]
     (try
       (if (query stub :query)
         (run stub :run)
@@ -124,7 +122,7 @@
 (defn stateless-compensate [])
 
 (defn my-compensated-workflow [_]
-  (let [stub (a/stub-protocol ActivityProtoExample)]
+  (let [stub (a/stub-protocol ActivityProtoExample (->MyProtoImpl))]
     (w/add-compensation (fn [] (stateless-compensate)))
     (w/add-compensation (fn [] (cancel stub)))
     (try

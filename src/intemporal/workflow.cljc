@@ -125,7 +125,6 @@
           wid   (sym->workflow-id fname)]
       `(let [f#       ~fsym
              proxied# (fn proxy-workflow# [& args#]
-                        #_
                         (proxy-workflow-fn ~store '~wid f# args#))]
          (set! ~fsym proxied#)
          (do

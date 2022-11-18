@@ -11,12 +11,6 @@
   ;(throw (ex-info "XX" {:a 1}))
   "kthxbye")
 
-
-;;;;
-;; activities registration
-;; completely optional
-(a/register-function hello-world)
-
 ;;;;
 ;; workflow registration
 (defn simpleflow
