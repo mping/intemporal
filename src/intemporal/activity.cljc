@@ -18,7 +18,7 @@
   (:require [clojure.set :as set]
             [intemporal.utils.check :refer [check]]
             [intemporal.workflow :as w])
-  #?(:clj (:require [net.cgrand.macrovich :as macros])
+  #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros])))
 
 ;;;;
@@ -70,7 +70,7 @@
   (defn register-protocol
     "Registers an activity implementation for `proto` via `object`"
     [proto object]
-    ;; TODO: not compatible with cljs
+    ;; XXX:TODO: clj/cljs version
     (let [klass (:on-interface proto)]
       (check (some? klass) "'%s' Should be a protocol" proto)
       (check (.isInterface ^Class klass) "'%s' Should be a protocol")
@@ -86,8 +86,9 @@
 
   (defn get-protocol-impl
     "Gets an implementation for `proto`"
-    [^Class proto]
-    (let [impl (get @registry (.getCanonicalName proto))]
+    [proto]
+    ;; XXX:TODO: clj/cljs version
+    (let [impl (get @registry (.getCanonicalName ^Class proto))]
       (check (some? impl) "No activity registered for '%s', known protocols: %s" proto (type proto) (keys @registry))
       impl))
 
@@ -155,8 +156,8 @@
         ;; don't return the swap! result to prevent print-dup issues:
         ;; Syntax error compiling fn* at (src/intemporal/example.clj:40:1).
         ;; Can't embed object in code, maybe print-dup not defined: intemporal.example$reify__10664@32878806
-        :clj `(do (swap! registry assoc ~fid f) ~fid)
-        :cljs `(do (swap! registry assoc ~fid f) ~fid))))
+        :clj `(do (swap! registry assoc ~fid ~f) ~fid)
+        :cljs `(do (swap! registry assoc ~fid ~f) ~fid))))
 
   (defmacro stub-function
     "Stubs and registers a single function as an activity"
@@ -168,9 +169,10 @@
           fname    (gensym (str "stub-" (or (:name (meta resolved)) "fn") "-"))
           [act-opts] opts]
 
-      (check (or (nil? (get-registered-function fid))
+      ;; TODO fix cljs
+      #_(check (or (nil? (get-registered-function fid))
                  (= (get-registered-function fid) f))
-        "Stubbed function '%s' doesn't match registered function '%s'" (get-registered-function fid) f)
+          "Stubbed function '%s' doesn't match registered function '%s'" (get-registered-function fid) f)
       (swap! registry assoc fid f)
 
       ;; return the proxy fn
@@ -182,15 +184,14 @@
   (defmacro stub-protocol
     "Requires a stub for activity `proto`. To be used in worfklows"
     [proto & opts]
-    (do
-      (check (symbol? proto) "'%s': Protocol should be a symbol, use `(:require [...])` or a namespace-local protocol for the definition" proto)
-      ;; TODO: not compatible with cljs
-      (let [resolved     (resolve-protocol proto)
-            proto-var    (var-get (resolve proto))
-            curr-ns      (name (ns-name *ns*))
-            proto-ns     (namespace (symbol (subs (str (:var proto-var)) 2)))
+    (macros/case
+      :cljs
+      ;; XXX:FIXME: try catch require cljs.analyzer, otherwise clj wont work
+      (let [resolved (cljs.analyzer/resolve-var &env proto (cljs.analyzer/confirm-var-exists-throw))
+            curr-ns  (:name (:ns &env))
+            proto-ns (:ns resolved)
             in-proto-ns? (= curr-ns proto-ns)
-            sig+args     (-> (for [[sig val] (:sigs proto-var)
+            sig+args     (-> (for [[sig val] (:sigs resolved)
                                    :let [arglist (:arglists val)
                                          qname   (str (name proto-ns) "/" (name sig))
                                          invname (if in-proto-ns?
@@ -198,15 +199,45 @@
                                                    (str (namespace proto) "/" (name sig)))]]
                                [(name sig) arglist (symbol invname) (symbol qname)])
                            (doall))]
-
+        (check (symbol? proto) "'%s': Protocol should be a symbol, use `(:require [...])` or a namespace-local protocol for the definition" proto)
         `(reify ~proto
            ~@(for [[mname arglist invname qname] sig+args
                    :let [sname (symbol mname)
                          args  (rest (first arglist))]]
                ;; implement ~sname
                `(~sname [this# ~@args]
-                 (let [impl#     (get-protocol-impl ~resolved)
+                 (let [impl#     (get-protocol-impl ~proto)
                        aid#      '~qname
                        act-opts# ~(first opts)]
                    (with-traced-activity aid# [~@args] act-opts#
-                     (~invname impl# ~@args))))))))))
+                     (~invname impl# ~@args)))))))
+
+      :clj
+      (do
+        (check (symbol? proto) "'%s': Protocol should be a symbol, use `(:require [...])` or a namespace-local protocol for the definition" proto)
+        ;; TODO: not compatible with cljs
+        (let [resolved     (resolve-protocol proto)
+              proto-var    (var-get (resolve proto))
+              curr-ns      (name (ns-name *ns*))
+              proto-ns     (namespace (symbol (subs (str (:var proto-var)) 2)))
+              in-proto-ns? (= curr-ns proto-ns)
+              sig+args     (-> (for [[sig val] (:sigs proto-var)
+                                     :let [arglist (:arglists val)
+                                           qname   (str (name proto-ns) "/" (name sig))
+                                           invname (if in-proto-ns?
+                                                     (name sig)
+                                                     (str (namespace proto) "/" (name sig)))]]
+                                 [(name sig) arglist (symbol invname) (symbol qname)])
+                             (doall))]
+
+          `(reify ~proto
+             ~@(for [[mname arglist invname qname] sig+args
+                     :let [sname (symbol mname)
+                           args  (rest (first arglist))]]
+                 ;; implement ~sname
+                 `(~sname [this# ~@args]
+                   (let [impl#     (get-protocol-impl ~resolved)
+                         aid#      '~qname
+                         act-opts# ~(first opts)]
+                     (with-traced-activity aid# [~@args] act-opts#
+                       (~invname impl# ~@args)))))))))))

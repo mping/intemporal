@@ -24,6 +24,11 @@
 
 (w/register-workflow memstore bar)
 
-(bar)
 
+(defprotocol HttpClient
+  (doHead [this id] "Can be called multiple times")
+  (doPost [this id] "Should only be called once"))
 
+(macroexpand-1 '(a/stub-protocol HttpClient))
+
+;(macroexpand-1 '(a/stub-protocol s/WorkflowStore))
