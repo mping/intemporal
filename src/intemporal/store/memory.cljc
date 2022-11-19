@@ -95,7 +95,7 @@
 
       ;; metadata
       (save-workflow-definition [this wid fvar]
-        (check (var? fvar) "%s: is not a var, type is %s" fvar (type fvar))
+        #?(:clj (check (var? fvar) "%s: is not a var, type is %s" fvar (type fvar)))
         (swap! store (fn [m]
                        (-> m
                            (assoc-in [:workflows wid] fvar)
