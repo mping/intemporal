@@ -18,33 +18,33 @@
 
 ;; current workflow accessors
 (defn current-workflow-id []
-  ;(check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (e/-workflow-id current-workflow-run))
 
 (defn current-workflow-runid []
-  ;(check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (e/-workflow-runid current-workflow-run))
 
 (defn save-workflow-event [event-type payload]
-  ;(check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (e/-save-workflow-event! current-workflow-run event-type payload))
 
 (defn save-activity-event [activity-id event-type payload]
-  ;(check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (e/-save-activity-event! current-workflow-run activity-id event-type payload))
 
 (defn next-event []
-  ;(check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (let [nxt (e/-next-event current-workflow-run)]
     nxt))
 
 (defn current-event []
-  ;(check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (let [nxt (e/-current-event current-workflow-run)]
     nxt))
 
 (defn event-matches? [nxt uid event-type]
-  ;(check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (let [match? (and (some? nxt)
                     (= (:type nxt) event-type)
                     (= (:uid nxt) uid))]
@@ -52,15 +52,15 @@
     match?))
 
 (defn delete-history-forward []
-  ;(check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (e/-delete-history-forward current-workflow-run))
 
 (defn advance-history-cursor []
-  ;(check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (e/-advance-history-cursor current-workflow-run))
 
 (defn add-compensation [f]
-  ;(check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (e/-add-compensation current-workflow-run f))
 
 ;;;;
@@ -70,7 +70,7 @@
   "Calls all compensation functions in order.
   If any compensation function fails, the remaining functions will NOT be called."
   []
-  ;(check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
+  (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (let [actions (e/-workflow-compensations current-workflow-run)]
     (doseq [compensation actions]
       (compensation))))
@@ -79,7 +79,7 @@
   "Retries `f` with given `runid`, possibly resuming execution if `f` didn't reach a terminal state."
   [store f runid]
   (let [[wid _wvar] (s/find-workflow store runid)]
-    ;(check (some? wid) "No workflow found for runid %s" runid)
+    (check (some? wid) "No workflow found for runid %s" runid)
     ;; TODO: check if the workflow reached a terminal state yet
     (binding [current-workflow-run (e/make-workflow-execution store wid runid)]
       (let [invoke-evt (e/-advance-history-cursor current-workflow-run)]
@@ -145,7 +145,7 @@
                         (proxy-workflow-fn ~store '~wid f# args#))]
          (set! ~fsym proxied#)
          (do
-           ;(check (cljs.core/satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
+           (check (cljs.core/satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
            (s/save-workflow-definition ~store '~wid proxied#)
            nil)))
 

@@ -18,3 +18,5 @@ test/*.db
 .shadow-cljs
 node_modules
 public
+bin
+out

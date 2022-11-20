@@ -23,9 +23,6 @@
   arg)
 
 (deftest activity-test
-  (testing "Can register activity protocols"
-    (a/register-protocol ActivityProtoExample (->MyProtoImpl)))
-
   (testing "Can call activity functions"
     (is (= {:some "val"} (identity-activity-fn {:some "val"})))
 

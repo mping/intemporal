@@ -1,1 +1,13 @@
-#kaocha/v1 {}
+#kaocha/v1
+{:tests [{type :kaocha.type/clojure.test
+          :id   :unit
+          :ns-patterns   ["-test$"]
+          :source-paths  ["src"]
+          :test-paths    ["test"]}
+
+         {:id :unit-cljs
+          :type :kaocha.type/cljs}]}
+              ;; :test-paths ["test"]
+              ;; :cljs/timeout 10000                        ; 10 seconds, the default
+              ;; :cljs/repl-env cljs.repl.node/repl-env     ; node is the default
+              ;; :cljs/repl-env cljs.repl.browser/repl-env

@@ -11,8 +11,6 @@
   (defrecord MyHttpActivity [my-conn-pool]
     p/HttpActivity
     (do-req [url] (http/get url {:pool my-conn-pool}))
-
-  (e/register-protocol HttpActivity (->MyHttpActivity (get-pool))
   ```
   "
   (:require [clojure.set :as set]
@@ -24,7 +22,7 @@
                      spy]])
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
-                            [intemporal.activity :refer [resolve-protocol with-traced-activity
+                            [intemporal.activity :refer [with-traced-activity
                                                          stub-function stub-protocol]])))
 
 (defn- fn->fnid
@@ -128,12 +126,15 @@
          (with-traced-activity aid# args# ~act-opts
            (apply ~f args#))))))
 
-#?(:clj (def cljs-available?
-          (try
-            (require '[cljs.analyzer])
-            ;; Ensure clojurescript is recent enough:
-            (-> 'cljs.analyzer/var-meta resolve boolean)
-            (catch Exception _ false))))
+(def cljs-available?
+  #?(:cljs
+     false
+     :clj
+     (try
+       (require '[cljs.analyzer])
+       ;; Ensure clojurescript is recent enough:
+       (-> 'cljs.analyzer/var-meta resolve boolean)
+       (catch Exception _ false))))
 
 (defmacro stub-protocol
   "Requires a stub for activity `proto`. To be used in worfklows"

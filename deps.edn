@@ -10,11 +10,12 @@
            migratus/migratus                 {:mvn/version "1.4.5"}}
  :aliases {:dev  {:extra-paths ["dev"]}
            :cljs {:extra-deps {org.clojure/clojurescript {:mvn/version "1.11.60"}
-                               thheller/shadow-cljs      {:mvn/version "2.20.7"}
-                               com.bhauman/figwheel-main {:mvn/version "0.2.18"}}}
+                               thheller/shadow-cljs      {:mvn/version "2.20.7"}}}
 
            :test {:extra-paths ["test"]
                   :extra-deps  {lambdaisland/kaocha            {:mvn/version "1.71.1119"}
+                                ;lambdaisland/kaocha-cljs2      {:mvn/version "0.1.58"}
+                                com.lambdaisland/kaocha-cljs {:mvn/version "1.4.130"}
                                 ch.qos.logback/logback-classic {:mvn/version "1.4.4"}
                                 tortue/spy                     {:mvn/version "2.13.0"}
                                 org.slf4j/slf4j-nop            {:mvn/version "1.7.30"}}
