@@ -13,13 +13,9 @@
     (do-req [url] (http/get url {:pool my-conn-pool}))
   ```
   "
-  (:require [clojure.set :as set]
-            [intemporal.utils.check :refer [check]]
+  (:require [intemporal.utils.check :refer [check]]
             [intemporal.workflow :as w]
-            [taoensso.timbre :as log
-             :refer [log  trace  debug  info  warn  error  fatal  report
-                     logf tracef debugf infof warnf errorf fatalf reportf
-                     spy]])
+            [taoensso.timbre :as log :refer [log]])
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
                             [intemporal.activity :refer [with-traced-activity
@@ -186,69 +182,6 @@
                ;; implement ~sname
                `(~sname [this# ~@args]
                  (let [impl#     ~impl
-                       aid#      '~qname
-                       act-opts# ~(first opts)]
-                   (with-traced-activity aid# [~@args] act-opts#
-                     (~invname impl# ~@args)))))))))
-  #_
-  (macros/case
-    :cljs
-    ;; XXX:FIXME: try catch require cljs.analyzer, otherwise clj wont work
-    (try
-      (let [analyzer     (find-ns 'cljs.analyzer)
-            ;resolved     (cljs.analyzer/resolve-var &env proto (cljs.analyzer/confirm-var-exists-throw))
-            resolved     ((ns-resolve analyzer 'resolve-var) &env proto)
-            curr-ns      (:name (:ns &env))
-            proto-ns     (:ns resolved)
-            in-proto-ns? (= curr-ns proto-ns)
-            sig+args     (-> (for [[sig val] (:sigs resolved)
-                                   :let [arglist (:arglists val)
-                                         qname   (str (name proto-ns) "/" (name sig))
-                                         invname (if in-proto-ns?
-                                                   (name sig)
-                                                   (str (namespace proto) "/" (name sig)))]]
-                               [(name sig) arglist (symbol invname) (symbol qname)])
-                           (doall))]
-        (check (symbol? proto) "'%s': Protocol should be a symbol, use `(:require [...])` or a namespace-local protocol for the definition" proto)
-        `(reify ~proto
-           ~@(for [[mname arglist invname qname] sig+args
-                   :let [sname (symbol mname)
-                         args  (rest (first arglist))]]
-               ;; implement ~sname
-               `(~sname [this# ~@args]
-                 (let [impl#     ~impl                      ;(get-protocol-impl ~proto)
-                       aid#      '~qname
-                       act-opts# ~(first opts)]
-                   (with-traced-activity aid# [~@args] act-opts#
-                     (~invname impl# ~@args)))))))
-      (catch Exception e
-        (log/warn "cljs.analyzer not present?")))
-
-    :clj
-    (do
-      (check (symbol? proto) "'%s': Protocol should be a symbol, use `(:require [...])` or a namespace-local protocol for the definition" proto)
-      ;; TODO: not compatible with cljs
-      (let [resolved     (resolve-protocol proto)
-            proto-var    (var-get (resolve proto))
-            curr-ns      (name (ns-name *ns*))
-            proto-ns     (namespace (symbol (subs (str (:var proto-var)) 2)))
-            in-proto-ns? (= curr-ns proto-ns)
-            sig+args     (-> (for [[sig val] (:sigs proto-var)
-                                   :let [arglist (:arglists val)
-                                         qname   (str (name proto-ns) "/" (name sig))
-                                         invname (if in-proto-ns?
-                                                   (name sig)
-                                                   (str (namespace proto) "/" (name sig)))]]
-                               [(name sig) arglist (symbol invname) (symbol qname)])
-                           (doall))]
-
-        `(reify ~proto
-           ~@(for [[mname arglist invname qname] sig+args
-                   :let [sname (symbol mname)
-                         args  (rest (first arglist))]]
-               ;; implement ~sname
-               `(~sname [this# ~@args]
-                 (let [impl#     ~impl                      ;(get-protocol-impl ~resolved)
                        aid#      '~qname
                        act-opts# ~(first opts)]
                    (with-traced-activity aid# [~@args] act-opts#

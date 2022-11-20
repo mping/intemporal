@@ -1,10 +1,7 @@
 (ns intemporal.workflow.execution
   "Defines the IWorkflowExecution protocol."
   (:require [intemporal.store :as s]
-            [taoensso.timbre :as log
-             :refer [log  trace  debug  info  warn  error  fatal  report
-                     logf tracef debugf infof warnf errorf fatalf reportf
-                     spy]]))
+            [taoensso.timbre :as log :refer [log]]))
 
 (defprotocol IWorkflowExecution
   ;; accessors

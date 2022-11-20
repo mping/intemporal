@@ -4,10 +4,7 @@
             [intemporal.workflow.execution :as e]
             [intemporal.utils.check :refer [check]]
             [intemporal.utils.string :refer [fmt]]
-            [taoensso.timbre :as log
-             :refer [log  trace  debug  info  warn  error  fatal  report
-                     logf tracef debugf infof warnf errorf fatalf reportf
-                     spy]])
+            [taoensso.timbre :as log :refer [log]])
   #?(:clj (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
                             [intemporal.workflow :refer [register-workflow]])))
