@@ -1,10 +1,10 @@
 (ns intemporal.activity-test
-  (:require [clojure.test :refer :all]
-            [clojure.spec.alpha :as s]
+  #?(:clj  (:require [clojure.test :refer [deftest is testing]])
+     :cljs (:require-macros [cljs.test :refer [deftest is testing run-tests]]))
+  (:require [clojure.spec.alpha :as s]
             [intemporal.activity :as a]
             [intemporal.workflow :as w]
             [intemporal.store :as store]
-            [intemporal.test-utils :as u]
             [intemporal.store.memory :as m]))
 
 (def memstore (m/memory-store))
@@ -28,7 +28,7 @@
 
     (testing "Cannot call stubbed activity functions outside of a workflow function"
       (let [stub (a/stub-function identity-activity-fn)]
-        (is (thrown? Error (stub "some-val")))))))
+        (is (thrown? #?(:clj java.lang.Error :cljs js/Error) (stub "some-val")))))))
 
 ;; workflow
 ;; stubbing
@@ -52,15 +52,14 @@
           (is (uuid? rid)))
 
         (testing "Store lookup by runid"
-          (let [[w sym] (store/find-workflow memstore rid)]
-            (println w sym)
+          (let [[w impl] (store/find-workflow memstore rid)]
             (is (= w 'intemporal.activity-test/wflow))
-            (is (= sym #'wflow))))
+            (is (= impl #?(:clj #'wflow :cljs wflow)))))
 
         (testing "Store lookup by runid"
           (let [data (store/find-workflow-run memstore rid)
                 {:keys [workflow workflow-events]} data]
-            (is (= #'intemporal.activity-test/wflow workflow))
+            (is (= workflow #?(:clj #'wflow :cljs wflow)))
             (is (= 4 (count workflow-events)))
 
             (testing "Workflow and activity events are OK"

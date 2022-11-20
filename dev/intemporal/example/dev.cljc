@@ -30,7 +30,3 @@
     [(s) (doHead sp 1)]))
 
 (w/register-workflow memstore bar)
-
-(bar)
-
-

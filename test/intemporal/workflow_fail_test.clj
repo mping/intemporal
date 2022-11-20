@@ -55,7 +55,7 @@
     (store/clear-events store)
 
     (with-redefs [run-side-effect (fn [v] (throw (RuntimeException. "error")))]
-      (is (thrown? Exception (my-workflow "xx")))
+      (is (thrown? Exception  (my-workflow "xx")))
 
       (testing "History has failures"
         (testing "Store lookup by runid and workflow id"
@@ -140,7 +140,7 @@
 
     (with-redefs [run-side-effect      (fn [v] (throw (RuntimeException. "error")))
                   stateless-compensate (spy/stub)]
-      (is (thrown? Exception (my-compensated-workflow "xx")))
+      (is (thrown? Exception  (my-compensated-workflow "xx")))
 
       (testing "Compensation was called"
         (is (assert/called-once? stateless-compensate)))

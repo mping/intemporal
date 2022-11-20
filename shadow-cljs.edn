@@ -1,7 +1,12 @@
 ;; shadow-cljs configuration
 {:deps {:aliases [:cljs :dev]}
  :nrepl {:init-ns intemporal.example.dev}
- :builds {:dev {:target :browser
+ :builds {:node {:target :browser
+                 :asset-path "."
+                 :output-to "target"
+                 :main intemporal.example.dev
+                 :modules {:dev {:entries [intemporal.example.dev]}}}
+          :dev {:target :browser
                 :asset-path "."
                 :output-dir "target"
                 :modules {:dev {:entries [intemporal.example.dev]}}}}}

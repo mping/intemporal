@@ -25,33 +25,34 @@
                             [intemporal.activity :refer [with-traced-activity
                                                          stub-function stub-protocol]])))
 
-(defn- fn->fnid
+
+(def cljs-available?
+  #?(:cljs
+     false
+     :clj
+     (try
+       (require '[cljs.analyzer])
+       ;; Ensure clojurescript is recent enough:
+       (-> 'cljs.analyzer/var-meta resolve boolean)
+       (catch Exception _ false))))
+
+
+(defmacro fn->fnid
   "Called by defmacro."
   [f]
-  #?(:cljs (let [fname (str f)]
-             (str fname)))
-
-  #?(:clj (check (symbol? f) "'%s' should be a symbol" f))
-  #?(:clj (check (bound? (resolve f)) "'%s' should be bounded" f))
-  #?(:clj (let [resolved (resolve f)
-                cname    (symbol resolved)]
-            (str cname))))
-
-#_
-(defmacro resolve-protocol
-  "Called by defmacro."
-  [sym]
   (macros/case
     :cljs
-    (let [analyzer     (find-ns 'cljs.analyzer)
-          resolved     ((ns-resolve analyzer 'resolve-var) &env sym)]
-      sym)
-    :clj
-    (let [proto (-> sym resolve var-get :on-interface)]
-      (check (some? proto) "'%s': Activity should be implemented via a valid `defprotocol`, but is `nil`" sym)
-      (check (.isInterface ^Class proto) " '%s': Activity should be implemented via a valid `defprotocol`, but it is not an interface" proto)
-      proto)))
+    (when cljs-available?
+      (let [analyzer (find-ns 'cljs.analyzer)
+            resolved ((ns-resolve analyzer 'resolve-var) &env f)]
+        (println resolved)
+        "x"))
 
+    :clj
+    (let [resolved (resolve f)
+          _ (println "XX" f "|" resolved "|" (cljs.analyzer/resolve-var &env f))
+          cname    (symbol resolved)]
+      (str cname))))
 
 (defmacro with-traced-activity
   "Traces activity with given `aid` by executing `body`, persisting events for ::invoke, ::success or ::failure"
@@ -112,29 +113,24 @@
 (defmacro stub-function
   "Stubs and registers a single function as an activity"
   [f & opts]
-  (let [fid      (fn->fnid f)
-        ;resolved (resolve f)
-        ;; poor mans' removing the var #'
-        ;qname    (subs (str resolved) 2)
-        qname    fid
-        fname    fid ;(gensym (str "stub-" (or (:name (meta resolved)) "fn") "-"))
+  (let [fid      (macros/case
+                   :cljs
+                   (when cljs-available?
+                     (let [analyzer (find-ns 'cljs.analyzer)
+                           resolved ((ns-resolve analyzer 'resolve-var) &env f)]
+                       (-> resolved :name str)))
+
+                   :clj
+                   (let [resolved (resolve f)
+                         cname    (symbol resolved)]
+                     (str cname)))
         [act-opts] opts]
 
     ;; return the proxy fn
     `(fn [& args#]
-       (let [aid# (symbol ~qname)]
+       (let [aid# (symbol ~fid)]
          (with-traced-activity aid# args# ~act-opts
            (apply ~f args#))))))
-
-(def cljs-available?
-  #?(:cljs
-     false
-     :clj
-     (try
-       (require '[cljs.analyzer])
-       ;; Ensure clojurescript is recent enough:
-       (-> 'cljs.analyzer/var-meta resolve boolean)
-       (catch Exception _ false))))
 
 (defmacro stub-protocol
   "Requires a stub for activity `proto`. To be used in worfklows"

@@ -33,7 +33,7 @@
 
 (defn randomUUID []
   #?(:clj  (UUID/randomUUID)
-     :cljs "randomUUID!"))
+     :cljs (random-uuid)))
 
 ;; spec
 (s/def :intemporal.store.event/type #{:intemporal.workflow/invoke
