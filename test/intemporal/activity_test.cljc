@@ -1,6 +1,6 @@
 (ns intemporal.activity-test
   #?(:clj  (:require [clojure.test :refer [deftest is testing]])
-     :cljs (:require-macros [cljs.test :refer [deftest is testing run-tests]]))
+     :cljs (:require-macros [cljs.test :refer [deftest is testing]]))
   (:require [clojure.spec.alpha :as s]
             [intemporal.activity :as a]
             [intemporal.workflow :as w]

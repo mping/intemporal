@@ -9,6 +9,25 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
+    - name: Install clojure tools
+        uses: DeLaGuardo/setup-clojure@10.0
+        with:
+          # Install just one or all simultaneously
+          # The value must indicate a particular version of the tool, or use 'latest'
+          # to always provision the latest version
+          cli: 1.10.1.693              # Clojure CLI based on tools.deps
+          clj-kondo: 2022.05.31        # Clj-kondo
+          cljstyle: 0.15.0             # cljstyle
+
+        # Optional step:
+        - name: Cache clojure dependencies
+          uses: actions/cache@v3
+          with:
+            path: |
+              ~/.m2/repository
+            # List all files containing dependencies:
+            key: cljdeps-${{ hashFiles('deps.edn') }}
+            restore-keys: cljdeps-
     - name: Lint and test
-      #run: lein with-profile +test do cljfmt check, difftest
       run: bin/kaocha unit

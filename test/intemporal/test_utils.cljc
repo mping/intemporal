@@ -1,18 +1,19 @@
 (ns intemporal.test-utils
-  (:require [next.jdbc :as jdbc]
-            [intemporal.store.sql :as sql])
-  (:import [java.io File]))
+  #?(:clj (:require [next.jdbc :as jdbc]
+                    [intemporal.store.sql :as sql]))
+  #?(:clj (:import [java.io File])))
 
 ;;;;
 ;; sql
 
-(defn make-sql-store []
-  (let [f    (File/createTempFile "intemporal" ".db")
-        ds   (jdbc/get-datasource {:dbtype "sqlite" :dbname (.toString f)})
-        impl (sql/sql-store ds)]
-    (sql/migrate! ds)
-    (.deleteOnExit f)
-    impl))
+#?(:clj
+   (defn make-sql-store []
+     (let [f    (File/createTempFile "intemporal" ".db")
+           ds   (jdbc/get-datasource {:dbtype "sqlite" :dbname (.toString f)})
+           impl (sql/sql-store ds)]
+       (sql/migrate! ds)
+       (.deleteOnExit f)
+       impl)))
 
 ;;;;
 ;; general
