@@ -19,7 +19,7 @@
 ;; general
 
 ;; comparison of similar objects (lenient with extra keys)
-(defmulti -alike? (fn [a _] (type a)))
+(defmulti -alike? (fn [a _] (type a)) :default Object)
 (defmethod -alike? Exception [a b]
   (= (type a)
      (if (= Class (type b))

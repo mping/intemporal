@@ -29,5 +29,8 @@ jobs:
           key: cljdeps-${{ hashFiles('deps.edn') }}
           restore-keys: cljdeps-
 
-      - name: Lint and test
+      - name: Lint and test clj
         run: bin/kaocha unit
+
+      - name: Lint and test cljs
+        run: bin/kaocha unit-cljs
