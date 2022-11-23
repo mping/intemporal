@@ -1,6 +1,7 @@
 name: Clojure CI
 
-on: [push, pull_request]
+#on: [push, pull_request]
+on: [push]
 
 jobs:
   build:
@@ -9,6 +10,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
       - name: Install clojure tools
         uses: DeLaGuardo/setup-clojure@10.0
         with:
@@ -34,3 +40,9 @@ jobs:
 
       - name: Lint and test cljs
         run: bin/kaocha unit-cljs
+
+      - name: install node deps
+        run: npm ci
+
+      - name: compile cljs
+        run: npx shadow-cljs compile dev
