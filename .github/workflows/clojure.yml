@@ -23,8 +23,6 @@ jobs:
           key: nodedeps-${{ hashFiles('package-lock.json') }}
           restore-keys: nodedeps-
 
-      - name: compile cljs
-        run: npx shadow-cljs compile dev
 
       - name: Install clojure tools
         uses: DeLaGuardo/setup-clojure@10.0
@@ -36,6 +34,11 @@ jobs:
           clj-kondo: 2022.05.31        # Clj-kondo
           cljstyle: 0.15.0             # cljstyle
 
+      # requires clojure
+      - name: compile cljs
+        run: npx shadow-cljs compile dev
+
+      # will cache shadow deps too
       - name: Cache clojure dependencies
         uses: actions/cache@v3
         with:
