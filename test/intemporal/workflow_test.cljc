@@ -6,7 +6,7 @@
             [intemporal.workflow :as w]
             [intemporal.store :as store]
             [intemporal.store.memory :as m]
-            #?(:clj [intemporal.test-utils :as tu])))
+            [intemporal.test-utils :as tu]))
 
 ;; TODO parameterize
 (def store #?(:clj (tu/make-sql-store) :cljs (m/memory-store)))
@@ -63,37 +63,40 @@
               (is (every? #(s/valid? ::store/event %) workflow-events)))
 
             (testing "workflow invoke"
-              (is (= (select-keys e1 [:type :uid :payload])
-                    {:type    ::w/invoke
-                     :uid     'intemporal.workflow-test/my-workflow
-                     :payload ["xx"]})))
+              (is (tu/alike? e1
+                            {:type    ::w/invoke
+                             :uid     'intemporal.workflow-test/my-workflow
+                             :payload ["xx"]})))
 
             (testing "query invoke"
-              (is (= (select-keys e2 [:type :uid :payload])
-                    {:type    ::a/invoke
-                     :uid     'intemporal.workflow-test/query
-                     :payload [:query]})))
+              (is (tu/alike? e2
+                            {:type    ::a/invoke
+                             :uid     'intemporal.workflow-test/query
+                             :payload [:query]})))
 
             (testing "query success"
-              (is (= (select-keys e3 [:type :uid :payload])
-                    {:type    ::a/success
-                     :uid     'intemporal.workflow-test/query
-                     :payload :side-effect})))
+              (is (tu/alike? e3
+                            {:type    ::a/success
+                             :uid     'intemporal.workflow-test/query
+                             :payload :side-effect
+                             :deleted nil})))
 
             (testing "run invoke"
-              (is (= (select-keys e4 [:type :uid :payload])
-                    {:type    ::a/invoke
-                     :uid     'intemporal.workflow-test/run
-                     :payload [:run]})))
+              (is (tu/alike? e4
+                            {:type    ::a/invoke
+                             :uid     'intemporal.workflow-test/run
+                             :payload [:run]})))
 
             (testing "run success"
-              (is (= (select-keys e5 [:type :uid :payload])
-                    {:type    ::a/success
-                     :uid     'intemporal.workflow-test/run
-                     :payload :side-effect})))
+              (is (tu/alike? e5
+                            {:type    ::a/success
+                             :uid     'intemporal.workflow-test/run
+                             :payload :side-effect
+                             :deleted nil})))
 
             (testing "workflow success"
-              (is (= (select-keys e6 [:type :uid :payload])
-                    {:type    ::w/success
-                     :uid     'intemporal.workflow-test/my-workflow
-                     :payload :side-effect})))))))))
+              (is (tu/alike? e6
+                            {:type    ::w/success
+                             :uid     'intemporal.workflow-test/my-workflow
+                             :payload :side-effect
+                             :deleted nil})))))))))
