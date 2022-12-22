@@ -1,4 +1,5 @@
 (ns intemporal.store.sql
+  "CLJ only file"
   (:require [clojure.pprint :as pprint]
             [taoensso.nippy :as nippy]
             [intemporal.store :as s]
@@ -64,7 +65,7 @@
   (cond
     (= "metadata" (name table)) (jdbc/execute-one! tx ["delete from metadata"])
     (= "events" (name table)) (jdbc/execute-one! tx ["delete from events"])
-    :else (throw (IllegalArgumentException. (format "Unknown table: %s" table)))))
+    :else (throw (ex-info (format "Unknown table: %s" table) {}))))
 
 (defn sql-store
   "Make a new SQL backed store."

@@ -1,18 +1,15 @@
 (ns intemporal.workflow-test
-  (:require [clojure.test :refer :all]
-            [clojure.spec.alpha :as s]
+  #?(:clj  (:require [clojure.test :refer [deftest is testing use-fixtures]])
+     :cljs (:require-macros [cljs.test :refer [deftest is testing use-fixtures]]))
+  (:require [clojure.spec.alpha :as s]
             [intemporal.activity :as a]
             [intemporal.workflow :as w]
             [intemporal.store :as store]
-            [intemporal.test-utils :as u]
             [intemporal.store.memory :as m]
-            [intemporal.test-utils :as tu])
-  (:import [intemporal.annotations ActivityOptions]))
+            [intemporal.test-utils :as tu]))
 
-(comment
-  ;; TODO parameterize
-  (def store (m/memory-store)))
-(def store (tu/make-sql-store))
+;; TODO parameterize
+(def store #?(:clj (tu/make-sql-store) :cljs (m/memory-store)))
 
 (use-fixtures :each (fn [f]
                       (f)
@@ -29,18 +26,16 @@
 (defrecord MyProtoImpl []
   ActivityProtoExample
   (run [this arg] (run-side-effect arg))
-  (^{ActivityOptions {:idempotent true}} query [this arg] (run-side-effect arg))
-  (^{ActivityOptions {:idempotent true}} cancel [_] :cancel))
-
-(a/register-protocol ActivityProtoExample (->MyProtoImpl))
+  (query [this arg] (run-side-effect arg))
+  (cancel [_] :cancel))
 
 (defn my-workflow [arg]
-  (let [stub (a/stub-protocol ActivityProtoExample)]
+  (let [stub (a/stub-protocol ActivityProtoExample (->MyProtoImpl) {:idempotent true})]
     (try
       (if (query stub :query)
         (run stub :run)
         nil)
-      (catch Exception e
+      (catch #?(:clj Exception :cljs js/Error) e
         (cancel stub)
         (throw e)))))
 
@@ -58,8 +53,7 @@
             data (store/find-workflow-run store rid)
             {:keys [workflow workflow-events]} data]
 
-        ;; TODO why?
-        ;;(is (= #'intemporal.workflow-test/my-workflow workflow))
+        (is (= #?(:clj #'intemporal.workflow-test/my-workflow :cljs my-workflow) workflow))
         (is (= 6 (count workflow-events)))
 
         (testing "Workflow and activity events"
@@ -69,39 +63,39 @@
               (is (every? #(s/valid? ::store/event %) workflow-events)))
 
             (testing "workflow invoke"
-              (is (u/alike? e1
+              (is (tu/alike? e1
                             {:type    ::w/invoke
                              :uid     'intemporal.workflow-test/my-workflow
                              :payload ["xx"]})))
 
             (testing "query invoke"
-              (is (u/alike? e2
+              (is (tu/alike? e2
                             {:type    ::a/invoke
                              :uid     'intemporal.workflow-test/query
                              :payload [:query]})))
 
             (testing "query success"
-              (is (u/alike? e3
+              (is (tu/alike? e3
                             {:type    ::a/success
                              :uid     'intemporal.workflow-test/query
                              :payload :side-effect
                              :deleted nil})))
 
             (testing "run invoke"
-              (is (u/alike? e4
+              (is (tu/alike? e4
                             {:type    ::a/invoke
                              :uid     'intemporal.workflow-test/run
                              :payload [:run]})))
 
             (testing "run success"
-              (is (u/alike? e5
+              (is (tu/alike? e5
                             {:type    ::a/success
                              :uid     'intemporal.workflow-test/run
                              :payload :side-effect
                              :deleted nil})))
 
             (testing "workflow success"
-              (is (u/alike? e6
+              (is (tu/alike? e6
                             {:type    ::w/success
                              :uid     'intemporal.workflow-test/my-workflow
                              :payload :side-effect

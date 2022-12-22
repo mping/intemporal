@@ -1,6 +1,7 @@
 (ns intemporal.store
   (:require [clojure.spec.alpha :as s])
-  (:import [java.time LocalDateTime]))
+  #?(:clj (:import [java.time LocalDateTime]
+                   [java.util UUID])))
 
 (defprotocol WorkflowStore
   :extend-via-metadata true
@@ -22,6 +23,17 @@
   (save-workflow-event [this wid runid etype data] "Saves an workflow event")
   (save-activity-event [this wid runid aid etype data] "Saves an activity event"))
 
+(defn- date? [dt]
+  #?(:clj  (instance? LocalDateTime dt)
+     :cljs (= js/Date (type dt))))
+
+(defn now []
+  #?(:clj  (LocalDateTime/now)
+     :cljs (js/Date.)))
+
+(defn randomUUID []
+  #?(:clj  (UUID/randomUUID)
+     :cljs (random-uuid)))
 
 ;; spec
 (s/def :intemporal.store.event/type #{:intemporal.workflow/invoke
@@ -35,7 +47,7 @@
 (s/def :intemporal.store.event/payload any?)
 (s/def :intemporal.store.event/id nat-int?)
 (s/def :intemporal.store.event/deleted? (s/nilable boolean?))
-(s/def :intemporal.store.event/timestamp #(instance? LocalDateTime %))
+(s/def :intemporal.store.event/timestamp #(date? %))
 
 (s/def ::event (s/keys :req-un [:intemporal.store.event/type
                                 :intemporal.store.event/uid
@@ -46,4 +58,5 @@
 
 (s/def ::worfklow (s/tuple symbol? var?))
 (s/def ::activity (s/tuple symbol? var?))
+
 
