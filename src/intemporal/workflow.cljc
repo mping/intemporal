@@ -3,7 +3,11 @@
   (:require [intemporal.store :as s]
             [intemporal.workflow.execution :as e]
             [intemporal.utils.check :refer [check]]
-            [clojure.tools.logging :as log]))
+            [intemporal.utils.string :refer [fmt]]
+            [taoensso.timbre :as log :refer [log]])
+  #?(:clj (:require [net.cgrand.macrovich :as macros])
+     :cljs (:require-macros [net.cgrand.macrovich :as macros]
+                            [intemporal.workflow :refer [register-workflow]])))
 
 ;; holds the data for the current workflow, including the store used for persistence
 ;; is a dynamic var so we can rebind each time the workflow function is called
@@ -68,77 +72,94 @@
     (doseq [compensation actions]
       (compensation))))
 
-;;;;
-;; worfklow is just a function
-
-(defn- sym->workflow-id [sym]
-  (symbol (str (ns-name *ns*)) (str sym)))
-
-(defmacro register-workflow
-  "Registers function `fsym`, using `store` to keep track of executions.
-  Replaces the function var by a proxy that saves execution to the store."
-  [store fsym]
-  ;; TODO: throw if already registered
-  (let [fvar (resolve fsym)
-        wid  (sym->workflow-id fsym)
-        astore (var-get (resolve store))]
-    (check (bound? fvar) "%s: Should be bound" fsym)
-    (alter-var-root fvar
-                    (fn [f]
-                      (fn proxy-workflow [& args]
-                        ;; the current-workflow-run will hold the store where all data will be saved
-                        (with-bindings {#'current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))}
-                          (let [vargs (if (event-matches? (next-event) wid ::invoke)
-                                        (:payload (advance-history-cursor))
-                                        (do
-                                          (save-workflow-event ::invoke args)
-                                          (into [] args)))]
-                            (try
-                              (let [result (apply f vargs)
-                                    nxt    (next-event)]
-                                ;; if it throws we go to the catch
-                                (cond
-                                  (event-matches? nxt wid ::success)
-                                  (:payload (advance-history-cursor))
-
-                                  (event-matches? nxt wid ::failure)
-                                  (throw (:payload (advance-history-cursor))) ;; goes to catch
-
-                                  ;; TODO handle divergence
-
-                                  :else
-                                  (do
-                                    (save-workflow-event ::success result)
-                                    result)))
-                              (catch Exception e
-                                ;; did we just replay a throw?
-                                ;; TODO should match the exception too?
-                                (if (event-matches? (next-event) wid ::failure)
-                                  (:payload (advance-history-cursor))
-                                  (do
-                                    (save-workflow-event ::failure e)
-                                    (throw e))))))))))
-
-    `(do
-       (check (satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
-       (s/save-workflow-definition ~store '~wid ~fvar)
-       nil)))
-
 (defn retry
   "Retries `f` with given `runid`, possibly resuming execution if `f` didn't reach a terminal state."
   [store f runid]
   (let [[wid _wvar] (s/find-workflow store runid)]
     (check (some? wid) "No workflow found for runid %s" runid)
     ;; TODO: check if the workflow reached a terminal state yet
-
-    (with-bindings {#'current-workflow-run (e/make-workflow-execution store wid runid)}
+    (binding [current-workflow-run (e/make-workflow-execution store wid runid)]
       (let [invoke-evt (e/-advance-history-cursor current-workflow-run)]
         (when-not (some? invoke-evt)
-          (throw (IllegalArgumentException. (format "%s: runid %s not found" wid runid))))
+          (throw (ex-info (fmt "%s: runid %s not found" wid runid) {})))
 
         (when-not (= (:type invoke-evt) ::invoke)
-          (throw (IllegalArgumentException. (format "%s: event for run %s is %s, should be ::invoke" wid invoke-evt runid))))
+          (throw (ex-info (fmt "%s: event for run %s is %s, should be ::invoke" wid invoke-evt runid) {})))
 
         (e/-reset-history-cursor current-workflow-run)
         (apply f (:payload invoke-evt))))))
+
+;;;;
+;; worfklow is just a function
+
+(defn- sym->workflow-id [sym]
+  (symbol (str (ns-name *ns*)) (str sym)))
+
+(defn proxy-workflow-fn
+  [astore wid f args]
+  (binding [current-workflow-run (or current-workflow-run (e/make-workflow-execution astore wid))]
+    (let [vargs (if (event-matches? (next-event) wid ::invoke)
+                  (:payload (advance-history-cursor))
+                  (do
+                    (save-workflow-event ::invoke args)
+                    (into [] args)))]
+      (try
+        (let [result (apply f vargs)
+              nxt    (next-event)]
+          ;; if it throws we go to the catch
+          (cond
+            (event-matches? nxt wid ::success)
+            (:payload (advance-history-cursor))
+
+            (event-matches? nxt wid ::failure)
+            (throw (:payload (advance-history-cursor)))     ;; goes to catch
+
+            ;; TODO handle divergence
+            :else
+            (do
+              (save-workflow-event ::success result)
+              result)))
+        (catch #?(:clj Exception :cljs js/Error) e
+          ;; did we just replay a throw?
+          ;; TODO should match the exception too?
+          (if (event-matches? (next-event) wid ::failure)
+            (:payload (advance-history-cursor))
+            (do
+              (save-workflow-event ::failure e)
+              (throw e))))))))
+
+(defmacro register-workflow
+  "Registers function `fsym`, using `store` to keep track of executions.
+  Replaces the function var by a proxy that saves execution to the store."
+  [store fsym]
+  ;; TODO: throw if already registered
+  (macros/case
+    :cljs
+    (let [fname (str fsym)
+          wid   (sym->workflow-id fname)]
+      `(let [f#       ~fsym
+             proxied# (fn proxy-workflow# [& args#]
+                        (proxy-workflow-fn ~store '~wid f# args#))]
+         (set! ~fsym proxied#)
+         (do
+           (check (cljs.core/satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
+           (s/save-workflow-definition ~store '~wid proxied#)
+           nil)))
+
+    :clj
+    (let [fvar   (resolve fsym)
+          wid    (sym->workflow-id fsym)
+          astore (var-get (resolve store))]
+      (check (bound? fvar) "%s: Should be bound" fsym)
+      (alter-var-root fvar
+        (fn [f]
+          (fn proxy-workflow [& args]
+            ;; the current-workflow-run will hold the store where all data will be saved
+            (proxy-workflow-fn astore wid f args))))
+
+      `(do
+         (check (satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
+         (s/save-workflow-definition ~store '~wid ~fvar)
+         nil))))
+
 

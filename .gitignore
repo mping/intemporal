@@ -14,3 +14,10 @@ pom.xml.asc
 .clj-kondo
 test/*.db
 
+.cpcache
+.shadow-cljs
+node_modules
+public
+bin
+out
+.cljs_node_repl

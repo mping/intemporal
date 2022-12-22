@@ -1,20 +1,17 @@
 (ns intemporal.workflow-fail-test
-  (:require [clojure.test :refer :all]
-            [clojure.spec.alpha :as s]
+  #?(:clj  (:require [clojure.test :refer [deftest is testing use-fixtures]])
+     :cljs (:require-macros [cljs.test :refer [deftest is testing use-fixtures]]))
+  (:require [clojure.spec.alpha :as s]
             [intemporal.activity :as a]
             [intemporal.workflow :as w]
             [intemporal.store :as store]
-            [intemporal.test-utils :as u]
             [intemporal.store.memory :as m]
-            [intemporal.test-utils :as tu]
             [spy.core :as spy]
-            [spy.assert :as assert])
-  (:import [intemporal.annotations ActivityOptions]))
+            [spy.assert :as assert]
+            [intemporal.test-utils :as tu]))
 
-(comment
-  ;; TODO parameterize
-  (def store (m/memory-store)))
-(def store (tu/make-sql-store))
+;; TODO parameterize
+(def store #?(:clj (tu/make-sql-store) :cljs (m/memory-store)))
 
 (use-fixtures :each (fn [f]
                       (f)
@@ -31,18 +28,16 @@
 (defrecord MyProtoImpl []
   ActivityProtoExample
   (run [this arg] (run-side-effect arg))
-  (^{ActivityOptions {:idempotent true}} query [this arg] (run-side-effect arg))
-  (^{ActivityOptions {:idempotent true}} cancel [_] :cancel))
-
-(a/register-protocol ActivityProtoExample (->MyProtoImpl))
+  (query [this arg] (run-side-effect arg))
+  (cancel [_] :cancel))
 
 (defn my-workflow [arg]
-  (let [stub (a/stub-protocol ActivityProtoExample)]
+  (let [stub (a/stub-protocol ActivityProtoExample (->MyProtoImpl) {:idempotent true})]
     (try
       (if (query stub :query)
         (run stub :run)
         nil)
-      (catch Exception e
+      (catch #?(:clj Exception :cljs js/Error) e
         (cancel stub)
         (throw e)))))
 
@@ -57,8 +52,10 @@
   (testing "Workflow fails if activity throws"
     (store/clear-events store)
 
-    (with-redefs [run-side-effect (fn [v] (throw (RuntimeException. "error")))]
-      (is (thrown? Exception (my-workflow "xx")))
+    (with-redefs [run-side-effect (fn [v] (throw
+                                            #?(:clj (RuntimeException. "error")
+                                               :cljs (js/Error. "error"))))]
+      (is (thrown? #?(:clj Exception :cljs js/Error) (my-workflow "xx")))
 
       (testing "History has failures"
         (testing "Store lookup by runid and workflow id"
@@ -67,8 +64,13 @@
                 data  (store/find-workflow-run store rid)
                 {:keys [workflow workflow-events]} data]
 
-            ;; TODO why? (is (= #'intemporal.workflow-fail-test/my-workflow workflow))
-            (is (= 6 (count workflow-events)))
+            (testing "workflow fn/var matches"
+              (is (= workflow
+                    #?(:clj  #'intemporal.workflow-fail-test/my-workflow
+                       :cljs intemporal.workflow-fail-test/my-workflow))))
+
+            (testing "workflow event count is 6 (w/invoke, a/invoke, a/failure, a/invoke, a/success, w/failure)"
+              (is (= 6 (count workflow-events))))
 
             (testing "Workflow and activity events"
               (let [[e1 e2 e3 e4 e5 e6] workflow-events]
@@ -77,42 +79,42 @@
                   (is (every? #(s/valid? ::store/event %) workflow-events)))
 
                 (testing "workflow invoke"
-                  (is (u/alike? e1
+                  (is (tu/alike? e1
                         {:type    ::w/invoke
                          :uid     'intemporal.workflow-fail-test/my-workflow
                          :payload ["xx"]})))
 
                 (testing "query invoke"
-                  (is (u/alike? e2
+                  (is (tu/alike? e2
                         {:type    ::a/invoke
                          :uid     'intemporal.workflow-fail-test/query
                          :payload [:query]})))
 
                 (testing "query failure"
-                  (is (u/alike? e3
+                  (is (tu/alike? e3
                         {:type    ::a/failure
                          :uid     'intemporal.workflow-fail-test/query
                          :deleted nil
-                         :payload RuntimeException})))
+                         :payload #?(:clj RuntimeException :cljs js/Error)})))
 
                 (testing "cancellation invoke"
-                  (is (u/alike? e4
+                  (is (tu/alike? e4
                         {:type    ::a/invoke
                          :uid     'intemporal.workflow-fail-test/cancel
                          :deleted nil})))
 
                 (testing "cancellation success"
-                  (is (u/alike? e5
+                  (is (tu/alike? e5
                         {:type    ::a/success
                          :payload :cancel
                          :uid     'intemporal.workflow-fail-test/cancel
                          :deleted nil})))
 
                 (testing "run invoke"
-                  (is (u/alike? e6
+                  (is (tu/alike? e6
                         {:type    ::w/failure
                          :uid     'intemporal.workflow-fail-test/my-workflow
-                         :payload RuntimeException}))))))))))
+                         :payload #?(:clj RuntimeException :cljs js/Error)}))))))))))
 
   (testing "Workflow can be replayed and completed successfully"
     (let [rid (latest-rid 'intemporal.workflow-fail-test/my-workflow)]
@@ -125,12 +127,12 @@
 (defn stateless-compensate [])
 
 (defn my-compensated-workflow [_]
-  (let [stub (a/stub-protocol ActivityProtoExample)]
+  (let [stub (a/stub-protocol ActivityProtoExample (->MyProtoImpl))]
     (w/add-compensation (fn [] (stateless-compensate)))
     (w/add-compensation (fn [] (cancel stub)))
     (try
       (run stub :run)
-      (catch Exception e
+      (catch #?(:clj Exception :cljs js/Error) e
         (w/compensate)
         (throw e)))))
 
@@ -141,9 +143,10 @@
   (testing "Workflow fails if activity throws"
     (store/clear-events store)
 
-    (with-redefs [run-side-effect      (fn [v] (throw (RuntimeException. "error")))
+    (with-redefs [run-side-effect      (fn [v] (throw #?(:clj (RuntimeException. "error")
+                                                         :cljs (js/Error. "error"))))
                   stateless-compensate (spy/stub)]
-      (is (thrown? Exception (my-compensated-workflow "xx")))
+      (is (thrown? #?(:clj Exception :cljs js/Error)  (my-compensated-workflow "xx")))
 
       (testing "Compensation was called"
         (is (assert/called-once? stateless-compensate)))
@@ -163,14 +166,14 @@
             :intemporal.workflow/failure)
 
           (testing "cancellation success"
-            (is (u/alike? (get workflow-events 3)
+            (is (tu/alike? (get workflow-events 3)
                   {:type    ::a/invoke
                    :payload []
                    :uid     'intemporal.workflow-fail-test/cancel
                    :deleted nil})))
 
           (testing "cancellation success"
-            (is (u/alike? (get workflow-events 4)
+            (is (tu/alike? (get workflow-events 4)
                   {:type    ::a/success
                    :payload :cancel
                    :uid     'intemporal.workflow-fail-test/cancel

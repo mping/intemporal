@@ -6,21 +6,16 @@
 
 (def memstore (m/memory-store))
 
-(defn ^{:idempotent true} hello-world [& args]
+(defn hello-world [& args]
   (println "hello, " args)
+  ;(throw (ex-info "XX" {:a 1}))
   "kthxbye")
-
-
-;;;;
-;; activities registration
-;; completely optional
-(a/register-function hello-world)
 
 ;;;;
 ;; workflow registration
 (defn simpleflow
   [n]
-  (let [hello-stub (a/stub-function hello-world)]
+  (let [hello-stub (a/stub-function hello-world {:idempotent true})]
     (hello-stub n "foo" "bar")))
 
 (s/clear-events memstore)

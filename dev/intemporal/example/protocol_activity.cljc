@@ -2,9 +2,7 @@
   (:require [intemporal.workflow :as w]
             [intemporal.activity :as a]
             [intemporal.store :as s]
-            [intemporal.store.memory :as m])
-  #_:clj-kondo/ignore
-  (:import [intemporal.annotations ActivityOptions]))
+            [intemporal.store.memory :as m]))
 
 (def memstore (m/memory-store))
 
@@ -33,22 +31,16 @@
 (defrecord MyHttpClient []
   HttpClient
   ;; (Ab)use annotations to pass activity options
-  (^{ActivityOptions {:idempotent false}} doPost [_ id] (maybe id))
-  (^{ActivityOptions {:idempotent true}} doHead [_ id] (maybe id)))
-
-;;;;
-;; activities registration
-(a/register-protocol HttpClient example-impl)
-;; a record will also work
-;; records allow decorating fns with annotations (eg ActivityOptions)
-(a/register-protocol HttpClient (->MyHttpClient))
+  (doPost [_ id] (maybe id))
+  (doHead [_ id] (maybe id)))
 
 ;;;;
 ;; workflow registration
 
 (defn simpleflow
   [n]
-  (let [stub (a/stub-protocol HttpClient)]
+  ;; (->MyHttpClient) would work too
+  (let [stub (a/stub-protocol HttpClient example-impl {:idempotent true})]
     (doHead stub (str n "carr"))
     (doPost stub (str n "carr"))))
 
@@ -58,7 +50,7 @@
 ;; call workflow
 (try
   (simpleflow "foo")
-  (catch Exception _
+  (catch #?(:clj Exception :cljs js/Error) _
     (println "Workflow failed!")))
 
 (println (s/events->table memstore))
