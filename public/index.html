@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en-us">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/@picocss/pico@latest/css/pico.min.css">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/default.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/clojure.min.js"></script>
+    <script>hljs.highlightAll();</script>
+
+    <title>Intemporal demo</title>
+    <style>
+        table {font-size: small}
+    </style>
+</head>
+<body>
+<main class="container">
+<h1 class=>Intemporal demo with sqlite.js</h1>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+<script src="/intemporal/js/main.js"></script>
+
+This demo is running intemporal with a sql-on-wasm backing store.
+
+<h3>Requirements</h3>
+<pre><code>
+(ns intemporal.doc
+  (:require
+    [intemporal.doc.sqlite :as sqlite]
+    [intemporal.doc.sqlite-store :as sstore]
+    [intemporal.store :as s]
+    [intemporal.workflow :as w]
+    [intemporal.activity :as a]))
+</code>
+</pre>
+
+<h3>Using the protocol version of intemporal activities</h3>
+<pre><code>
+(defprotocol HttpClient
+  (doHead [this id] "Can be called multiple times")
+  (doPost [this id] "Should only be called once"))
+
+(defn maybe [thunk]
+  (let [r (rand-int 10)]
+    (when (> r 5)
+      (throw (js/Error. "Forced error (simulated failure)")))
+    (thunk)))
+</code>
+</pre>
+
+<h3>Implementation</h3>
+<pre><code>
+;; basic protocol function
+(def example-impl
+  (reify HttpClient
+    (doPost [_ _url] (maybe (fn [] "200 OK")))
+    (doHead [_ _url] (maybe (fn [] "200 OK")))))
+
+(defrecord MyHttpClient []
+  HttpClient
+  (doPost [_ id] (maybe (fn [] id)))
+  (doHead [_ id] (maybe (fn [] id))))
+</code>
+</pre>
+
+<h3>Workflow definition</h3>
+<pre><code>
+(defn simpleflow
+  [n]
+  ;; (->MyHttpClient) would work too
+  (let [stub (a/stub-protocol HttpClient example-impl {:idempotent true})]
+    (doHead stub (str n "carr"))
+    (doPost stub (str n "carr"))))
+
+;; register the workflow
+(w/register-workflow sqlitestore simpleflow)
+</code>
+</pre>
+
+<h3>Execution</h3>
+<pre><code>
+(try
+  (simpleflow "foo")
+  (catch js/Object err
+    (js/console.error "Workflow failed!" err)))
+</code>
+</pre>
+<button id="runner">Click to run the code</button>
+
+<h3>In-browser results</h3>
+<h4>Metadata</h4>
+<div id="metadata"></div>
+
+<h4>Events</h4>
+<div id="events"></div>
+</main>
+</body>
+</html>

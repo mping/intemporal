@@ -75,5 +75,5 @@ Examples:
   - [x] Discard `ActivityOptions` 
   - [x] Protocol options
   - [x] Regular fn options
-- Convert to `.cljc` 
+- [x] Convert to `.cljc` 
 - [ ] function versioning

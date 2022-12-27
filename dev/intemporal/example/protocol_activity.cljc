@@ -30,7 +30,6 @@
 
 (defrecord MyHttpClient []
   HttpClient
-  ;; (Ab)use annotations to pass activity options
   (doPost [_ id] (maybe id))
   (doHead [_ id] (maybe id)))
 

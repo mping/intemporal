@@ -63,6 +63,19 @@
 ;;;;
 ;;
 
+
+(def cljs-available?
+  #?(:cljs
+     false
+     :clj
+     (try
+       (require '[cljs.analyzer])
+       ;; Ensure clojurescript is recent enough:
+       (-> 'cljs.analyzer/var-meta resolve boolean)
+       (catch Exception _ false))))
+
+
+
 (defn compensate
   "Calls all compensation functions in order.
   If any compensation function fails, the remaining functions will NOT be called."
@@ -135,16 +148,21 @@
   ;; TODO: throw if already registered
   (macros/case
     :cljs
-    (let [fname (str fsym)
-          wid   (sym->workflow-id fname)]
-      `(let [f#       ~fsym
-             proxied# (fn proxy-workflow# [& args#]
-                        (proxy-workflow-fn ~store '~wid f# args#))]
-         (set! ~fsym proxied#)
-         (do
-           (check (cljs.core/satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
-           (s/save-workflow-definition ~store '~wid proxied#)
-           nil)))
+    (when cljs-available?
+      (let [analyzer (find-ns 'cljs.analyzer)
+            resolved ((ns-resolve analyzer 'resolve-var) &env fsym)
+            fname    (str (:name resolved))
+            ;fname    (str fsym)
+            wid      fname] ;(sym->workflow-id fname)
+        `(let [f#       ~fsym
+               proxied# (fn proxy-workflow# [& args#]
+                          (proxy-workflow-fn ~store '~wid f# args#))]
+           (set! ~fsym proxied#)
+           (do
+             (check (cljs.core/satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
+             ;(s/save-workflow-definition ~store '~wid proxied#)
+             (s/save-workflow-definition ~store '~wid ~fname)
+             nil))))
 
     :clj
     (let [fvar   (resolve fsym)

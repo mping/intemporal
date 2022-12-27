@@ -2,6 +2,7 @@
 
 ```shell
 npx shadow-cljs watch dev
+
 ```
 
 Observe browser window open with a message like:
@@ -14,14 +15,24 @@ The, connect and select the appropriate shadow repl.
 (shadow/browser-repl)
 ```
 
+# doc
+
+```shell
+npx shadow-cljs watch doc
+# or
+npx shadow-cljs compile doc
+python -m http.server --directory public
+```
+
 # cljs repl
 
 ```
-clj -A:dev
+clj -A:dev:doc:cljs
 ```
 
 # Tests
 
 ```shell
-clj -Atest
+bin/kaocha unit
+bin/kaocha unit-cljs
 ```
