@@ -7,7 +7,8 @@
    [intemporal.workflow :as w]
    [intemporal.activity :as a]
    ;;hiccupsrt required
-   [hiccups.runtime :as hiccupsrt]))
+   [hiccups.runtime :as hiccupsrt]
+   [clojure.string :as str]))
 
 ;;;;
 ;; main code
@@ -77,9 +78,11 @@
                      (for [h header] [:td h])]]
                    [:tbody
                     (for [r rows]
-                      [:tr
-                       (for [h header]
-                         [:td (get r h)])])]]))
+                      (do
+                        (println (get r :type))
+                        [:tr {:class (name (get r :type))}
+                         (for [h header]
+                           [:td (get r h)])]))]]))
 
           update-html-events (fn []
                                (let [mdata  (sqlite/execute! db ["select * from metadata"])

@@ -13,7 +13,9 @@
     <title>Intemporal demo</title>
     <style>
         table {font-size: small}
-
+        tr.\:intemporal\.workflow\/failure,
+        tr.\:intemporal\.activity\/failure {background: #ffbaad}
+        tr.\:intemporal\.workflow\/invoke {font-size: large !important}
 
     </style>
 </head>
@@ -107,8 +109,8 @@
             <pre id="results">;;Results go here</pre>
             <button id="retry" disabled>Click to retry (enabled when workflow fails)</button>
             <blockquote>
-                Observe the events on the table; you will see new events for the given rund, starting from the last
-                good event.
+                Observe the events on the table; you will see new events for the given runid, starting from the last
+                successful event. Intemporal "replays" the persisted events then resumes execution.
             </blockquote>
 
             <h3>In-browser results</h3>
