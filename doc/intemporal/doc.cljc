@@ -1,12 +1,13 @@
 (ns intemporal.doc
   (:require-macros [hiccups.core :as hiccups :refer [html]])
   (:require
-    [intemporal.doc.sqlite :as sqlite]
-    [intemporal.doc.sqlite-store :as sstore]
-    [intemporal.store :as s]
-    [intemporal.workflow :as w]
-    [intemporal.activity :as a]
-    [hiccups.runtime :as hiccupsrt]))
+   [intemporal.doc.sqlite :as sqlite]
+   [intemporal.doc.sqlite-store :as sstore]
+   [intemporal.store :as s]
+   [intemporal.workflow :as w]
+   [intemporal.activity :as a]
+   ;;hiccupsrt required
+   [hiccups.runtime :as hiccupsrt]))
 
 ;;;;
 ;; main code
@@ -57,7 +58,15 @@
     (w/register-workflow sqlitestore simpleflow)
     ;; now invoke
 
-    (let [el (js/document.getElementById "runner")
+    (let [el  (js/document.getElementById "runner")
+          ret (js/document.getElementById "retry")
+          toggle!     (fn [id b]
+                        (set! (.-disabled (.getElementById js/document id)) b))
+          set-html!   (fn [id html]
+                        (-> js/document
+                          (.getElementById id)
+                          (.-innerHTML)
+                          (set! html)))
           tbl (fn [rows header]
                 (html
                   [:table {:role "grid"}
@@ -68,37 +77,41 @@
                     (for [r rows]
                       [:tr
                        (for [h header]
-                         [:td (get r h)])])]]))]
+                         [:td (get r h)])])]]))
+
+          update-html-events (fn []
+                               (let [mdata  (sqlite/execute! db ["select * from metadata"])
+                                     events (sqlite/execute! db ["select * from events"])]
+                                 (set-html! "metadata" (tbl mdata (keys (first mdata))))
+                                 (set-html! "events" (tbl events (keys (first events))))))]
+
+      (.addEventListener ret "click"
+        (fn [e]
+          (let [[row] (sqlite/execute! db ["select runid from events order by timestamp asc limit 1"])
+                runid    (:runid row)]
+            (set-html! "results" (str "Retrying id: " runid))
+            (try
+              (let [res (w/retry sqlitestore #'simpleflow runid)]
+                (set-html! "results" res)
+                (toggle! "retry" true))
+              (catch js/Object err
+                (js/console.error "Workflow failed!" err)
+                (set-html! "results" err)
+                (toggle! "retry" false)))
+            (update-html-events))))
 
       (.addEventListener el "click"
-
         (fn [e]
           (try
-            (simpleflow "foo")
+            (let [res (simpleflow "foo")]
+              (set-html! "results" res)
+              (toggle! "retry" true))
             (catch js/Object err
-              (js/console.error "Workflow failed!" err)))
+              (js/console.error "Workflow failed!" err)
+              (set-html! "results" err)
+              (toggle! "retry" false)))
 
-          (let [mdata  (sqlite/execute! db ["select * from metadata"])
-                events (sqlite/execute! db ["select * from events"])]
-
-            (-> js/document
-              (.getElementById "metadata")
-              (.-innerHTML)
-              (set! (tbl mdata (keys (first mdata)))))
-            (-> js/document
-              (.getElementById "events")
-              (.-innerHTML)
-              (set! (tbl events (keys (first events))))))
-
-          (comment
-            (let [mdata  (sqlite/execute! db ["select * from metadata"])
-                  events (sqlite/execute! db ["select * from events"])]
-              (js/console.log "Metadata:")
-              (js/console.table (clj->js mdata)
-                (clj->js (keys (first mdata))))
-              (js/console.log "Events:")
-              (js/console.table (clj->js events)
-                (clj->js (keys (first events)))))))))))
+          (update-html-events))))))
 
 
 (defn init []

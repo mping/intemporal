@@ -5,7 +5,7 @@ goog.provide('intemporal.workflow.execution');
  */
 intemporal.workflow.execution.IWorkflowExecution = function(){};
 
-var intemporal$workflow$execution$IWorkflowExecution$_workflow_id$dyn_42134 = (function (this$){
+var intemporal$workflow$execution$IWorkflowExecution$_workflow_id$dyn_42150 = (function (this$){
 var x__5393__auto__ = (((this$ == null))?null:this$);
 var m__5394__auto__ = (intemporal.workflow.execution._workflow_id[goog.typeOf(x__5393__auto__)]);
 if((!((m__5394__auto__ == null)))){
@@ -26,11 +26,11 @@ intemporal.workflow.execution._workflow_id = (function intemporal$workflow$execu
 if((((!((this$ == null)))) && ((!((this$.intemporal$workflow$execution$IWorkflowExecution$_workflow_id$arity$1 == null)))))){
 return this$.intemporal$workflow$execution$IWorkflowExecution$_workflow_id$arity$1(this$);
 } else {
-return intemporal$workflow$execution$IWorkflowExecution$_workflow_id$dyn_42134(this$);
+return intemporal$workflow$execution$IWorkflowExecution$_workflow_id$dyn_42150(this$);
 }
 });
 
-var intemporal$workflow$execution$IWorkflowExecution$_workflow_runid$dyn_42135 = (function (this$){
+var intemporal$workflow$execution$IWorkflowExecution$_workflow_runid$dyn_42151 = (function (this$){
 var x__5393__auto__ = (((this$ == null))?null:this$);
 var m__5394__auto__ = (intemporal.workflow.execution._workflow_runid[goog.typeOf(x__5393__auto__)]);
 if((!((m__5394__auto__ == null)))){
@@ -51,11 +51,11 @@ intemporal.workflow.execution._workflow_runid = (function intemporal$workflow$ex
 if((((!((this$ == null)))) && ((!((this$.intemporal$workflow$execution$IWorkflowExecution$_workflow_runid$arity$1 == null)))))){
 return this$.intemporal$workflow$execution$IWorkflowExecution$_workflow_runid$arity$1(this$);
 } else {
-return intemporal$workflow$execution$IWorkflowExecution$_workflow_runid$dyn_42135(this$);
+return intemporal$workflow$execution$IWorkflowExecution$_workflow_runid$dyn_42151(this$);
 }
 });
 
-var intemporal$workflow$execution$IWorkflowExecution$_workflow_compensations$dyn_42136 = (function (this$){
+var intemporal$workflow$execution$IWorkflowExecution$_workflow_compensations$dyn_42152 = (function (this$){
 var x__5393__auto__ = (((this$ == null))?null:this$);
 var m__5394__auto__ = (intemporal.workflow.execution._workflow_compensations[goog.typeOf(x__5393__auto__)]);
 if((!((m__5394__auto__ == null)))){
@@ -76,11 +76,11 @@ intemporal.workflow.execution._workflow_compensations = (function intemporal$wor
 if((((!((this$ == null)))) && ((!((this$.intemporal$workflow$execution$IWorkflowExecution$_workflow_compensations$arity$1 == null)))))){
 return this$.intemporal$workflow$execution$IWorkflowExecution$_workflow_compensations$arity$1(this$);
 } else {
-return intemporal$workflow$execution$IWorkflowExecution$_workflow_compensations$dyn_42136(this$);
+return intemporal$workflow$execution$IWorkflowExecution$_workflow_compensations$dyn_42152(this$);
 }
 });
 
-var intemporal$workflow$execution$IWorkflowExecution$_add_compensation$dyn_42137 = (function (this$,compensation_fn){
+var intemporal$workflow$execution$IWorkflowExecution$_add_compensation$dyn_42153 = (function (this$,compensation_fn){
 var x__5393__auto__ = (((this$ == null))?null:this$);
 var m__5394__auto__ = (intemporal.workflow.execution._add_compensation[goog.typeOf(x__5393__auto__)]);
 if((!((m__5394__auto__ == null)))){
@@ -101,11 +101,11 @@ intemporal.workflow.execution._add_compensation = (function intemporal$workflow$
 if((((!((this$ == null)))) && ((!((this$.intemporal$workflow$execution$IWorkflowExecution$_add_compensation$arity$2 == null)))))){
 return this$.intemporal$workflow$execution$IWorkflowExecution$_add_compensation$arity$2(this$,compensation_fn);
 } else {
-return intemporal$workflow$execution$IWorkflowExecution$_add_compensation$dyn_42137(this$,compensation_fn);
+return intemporal$workflow$execution$IWorkflowExecution$_add_compensation$dyn_42153(this$,compensation_fn);
 }
 });
 
-var intemporal$workflow$execution$IWorkflowExecution$_save_workflow_event_BANG_$dyn_42138 = (function (this$,event_type,payload){
+var intemporal$workflow$execution$IWorkflowExecution$_save_workflow_event_BANG_$dyn_42154 = (function (this$,event_type,payload){
 var x__5393__auto__ = (((this$ == null))?null:this$);
 var m__5394__auto__ = (intemporal.workflow.execution._save_workflow_event_BANG_[goog.typeOf(x__5393__auto__)]);
 if((!((m__5394__auto__ == null)))){
@@ -126,11 +126,11 @@ intemporal.workflow.execution._save_workflow_event_BANG_ = (function intemporal$
 if((((!((this$ == null)))) && ((!((this$.intemporal$workflow$execution$IWorkflowExecution$_save_workflow_event_BANG_$arity$3 == null)))))){
 return this$.intemporal$workflow$execution$IWorkflowExecution$_save_workflow_event_BANG_$arity$3(this$,event_type,payload);
 } else {
-return intemporal$workflow$execution$IWorkflowExecution$_save_workflow_event_BANG_$dyn_42138(this$,event_type,payload);
+return intemporal$workflow$execution$IWorkflowExecution$_save_workflow_event_BANG_$dyn_42154(this$,event_type,payload);
 }
 });
 
-var intemporal$workflow$execution$IWorkflowExecution$_save_activity_event_BANG_$dyn_42139 = (function (this$,activity_id,event_type,payload){
+var intemporal$workflow$execution$IWorkflowExecution$_save_activity_event_BANG_$dyn_42155 = (function (this$,activity_id,event_type,payload){
 var x__5393__auto__ = (((this$ == null))?null:this$);
 var m__5394__auto__ = (intemporal.workflow.execution._save_activity_event_BANG_[goog.typeOf(x__5393__auto__)]);
 if((!((m__5394__auto__ == null)))){
@@ -151,11 +151,11 @@ intemporal.workflow.execution._save_activity_event_BANG_ = (function intemporal$
 if((((!((this$ == null)))) && ((!((this$.intemporal$workflow$execution$IWorkflowExecution$_save_activity_event_BANG_$arity$4 == null)))))){
 return this$.intemporal$workflow$execution$IWorkflowExecution$_save_activity_event_BANG_$arity$4(this$,activity_id,event_type,payload);
 } else {
-return intemporal$workflow$execution$IWorkflowExecution$_save_activity_event_BANG_$dyn_42139(this$,activity_id,event_type,payload);
+return intemporal$workflow$execution$IWorkflowExecution$_save_activity_event_BANG_$dyn_42155(this$,activity_id,event_type,payload);
 }
 });
 
-var intemporal$workflow$execution$IWorkflowExecution$_current_event$dyn_42140 = (function (this$){
+var intemporal$workflow$execution$IWorkflowExecution$_current_event$dyn_42156 = (function (this$){
 var x__5393__auto__ = (((this$ == null))?null:this$);
 var m__5394__auto__ = (intemporal.workflow.execution._current_event[goog.typeOf(x__5393__auto__)]);
 if((!((m__5394__auto__ == null)))){
@@ -176,11 +176,11 @@ intemporal.workflow.execution._current_event = (function intemporal$workflow$exe
 if((((!((this$ == null)))) && ((!((this$.intemporal$workflow$execution$IWorkflowExecution$_current_event$arity$1 == null)))))){
 return this$.intemporal$workflow$execution$IWorkflowExecution$_current_event$arity$1(this$);
 } else {
-return intemporal$workflow$execution$IWorkflowExecution$_current_event$dyn_42140(this$);
+return intemporal$workflow$execution$IWorkflowExecution$_current_event$dyn_42156(this$);
 }
 });
 
-var intemporal$workflow$execution$IWorkflowExecution$_next_event$dyn_42141 = (function (this$){
+var intemporal$workflow$execution$IWorkflowExecution$_next_event$dyn_42157 = (function (this$){
 var x__5393__auto__ = (((this$ == null))?null:this$);
 var m__5394__auto__ = (intemporal.workflow.execution._next_event[goog.typeOf(x__5393__auto__)]);
 if((!((m__5394__auto__ == null)))){
@@ -201,11 +201,11 @@ intemporal.workflow.execution._next_event = (function intemporal$workflow$execut
 if((((!((this$ == null)))) && ((!((this$.intemporal$workflow$execution$IWorkflowExecution$_next_event$arity$1 == null)))))){
 return this$.intemporal$workflow$execution$IWorkflowExecution$_next_event$arity$1(this$);
 } else {
-return intemporal$workflow$execution$IWorkflowExecution$_next_event$dyn_42141(this$);
+return intemporal$workflow$execution$IWorkflowExecution$_next_event$dyn_42157(this$);
 }
 });
 
-var intemporal$workflow$execution$IWorkflowExecution$_reset_history_cursor$dyn_42142 = (function (this$){
+var intemporal$workflow$execution$IWorkflowExecution$_reset_history_cursor$dyn_42158 = (function (this$){
 var x__5393__auto__ = (((this$ == null))?null:this$);
 var m__5394__auto__ = (intemporal.workflow.execution._reset_history_cursor[goog.typeOf(x__5393__auto__)]);
 if((!((m__5394__auto__ == null)))){
@@ -226,11 +226,11 @@ intemporal.workflow.execution._reset_history_cursor = (function intemporal$workf
 if((((!((this$ == null)))) && ((!((this$.intemporal$workflow$execution$IWorkflowExecution$_reset_history_cursor$arity$1 == null)))))){
 return this$.intemporal$workflow$execution$IWorkflowExecution$_reset_history_cursor$arity$1(this$);
 } else {
-return intemporal$workflow$execution$IWorkflowExecution$_reset_history_cursor$dyn_42142(this$);
+return intemporal$workflow$execution$IWorkflowExecution$_reset_history_cursor$dyn_42158(this$);
 }
 });
 
-var intemporal$workflow$execution$IWorkflowExecution$_advance_history_cursor$dyn_42143 = (function (this$){
+var intemporal$workflow$execution$IWorkflowExecution$_advance_history_cursor$dyn_42159 = (function (this$){
 var x__5393__auto__ = (((this$ == null))?null:this$);
 var m__5394__auto__ = (intemporal.workflow.execution._advance_history_cursor[goog.typeOf(x__5393__auto__)]);
 if((!((m__5394__auto__ == null)))){
@@ -251,11 +251,11 @@ intemporal.workflow.execution._advance_history_cursor = (function intemporal$wor
 if((((!((this$ == null)))) && ((!((this$.intemporal$workflow$execution$IWorkflowExecution$_advance_history_cursor$arity$1 == null)))))){
 return this$.intemporal$workflow$execution$IWorkflowExecution$_advance_history_cursor$arity$1(this$);
 } else {
-return intemporal$workflow$execution$IWorkflowExecution$_advance_history_cursor$dyn_42143(this$);
+return intemporal$workflow$execution$IWorkflowExecution$_advance_history_cursor$dyn_42159(this$);
 }
 });
 
-var intemporal$workflow$execution$IWorkflowExecution$_delete_history_forward$dyn_42144 = (function (this$){
+var intemporal$workflow$execution$IWorkflowExecution$_delete_history_forward$dyn_42160 = (function (this$){
 var x__5393__auto__ = (((this$ == null))?null:this$);
 var m__5394__auto__ = (intemporal.workflow.execution._delete_history_forward[goog.typeOf(x__5393__auto__)]);
 if((!((m__5394__auto__ == null)))){
@@ -276,7 +276,7 @@ intemporal.workflow.execution._delete_history_forward = (function intemporal$wor
 if((((!((this$ == null)))) && ((!((this$.intemporal$workflow$execution$IWorkflowExecution$_delete_history_forward$arity$1 == null)))))){
 return this$.intemporal$workflow$execution$IWorkflowExecution$_delete_history_forward$arity$1(this$);
 } else {
-return intemporal$workflow$execution$IWorkflowExecution$_delete_history_forward$dyn_42144(this$);
+return intemporal$workflow$execution$IWorkflowExecution$_delete_history_forward$dyn_42160(this$);
 }
 });
 
@@ -317,12 +317,12 @@ var this__5343__auto____$1 = this;
 return this__5343__auto____$1.cljs$core$ILookup$_lookup$arity$3(null,k__5344__auto__,null);
 }));
 
-(intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$ILookup$_lookup$arity$3 = (function (this__5345__auto__,k42095,else__5346__auto__){
+(intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$ILookup$_lookup$arity$3 = (function (this__5345__auto__,k42134,else__5346__auto__){
 var self__ = this;
 var this__5345__auto____$1 = this;
-var G__42100 = k42095;
-var G__42100__$1 = (((G__42100 instanceof cljs.core.Keyword))?G__42100.fqn:null);
-switch (G__42100__$1) {
+var G__42138 = k42134;
+var G__42138__$1 = (((G__42138 instanceof cljs.core.Keyword))?G__42138.fqn:null);
+switch (G__42138__$1) {
 case "store":
 return self__.store;
 
@@ -340,7 +340,7 @@ return self__.run_id;
 
 break;
 default:
-return cljs.core.get.cljs$core$IFn$_invoke$arity$3(self__.__extmap,k42095,else__5346__auto__);
+return cljs.core.get.cljs$core$IFn$_invoke$arity$3(self__.__extmap,k42134,else__5346__auto__);
 
 }
 }));
@@ -348,10 +348,10 @@ return cljs.core.get.cljs$core$IFn$_invoke$arity$3(self__.__extmap,k42095,else__
 (intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IKVReduce$_kv_reduce$arity$3 = (function (this__5363__auto__,f__5364__auto__,init__5365__auto__){
 var self__ = this;
 var this__5363__auto____$1 = this;
-return cljs.core.reduce.cljs$core$IFn$_invoke$arity$3((function (ret__5366__auto__,p__42101){
-var vec__42102 = p__42101;
-var k__5367__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__42102,(0),null);
-var v__5368__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__42102,(1),null);
+return cljs.core.reduce.cljs$core$IFn$_invoke$arity$3((function (ret__5366__auto__,p__42139){
+var vec__42140 = p__42139;
+var k__5367__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__42140,(0),null);
+var v__5368__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__42140,(1),null);
 return (f__5364__auto__.cljs$core$IFn$_invoke$arity$3 ? f__5364__auto__.cljs$core$IFn$_invoke$arity$3(ret__5366__auto__,k__5367__auto__,v__5368__auto__) : f__5364__auto__.call(null,ret__5366__auto__,k__5367__auto__,v__5368__auto__));
 }),init__5365__auto__,this__5363__auto____$1);
 }));
@@ -365,10 +365,10 @@ return cljs.core.pr_sequential_writer(writer__5359__auto__,cljs.core.pr_writer,"
 return cljs.core.pr_sequential_writer(writer__5359__auto__,pr_pair__5361__auto__,"#intemporal.workflow.execution.WorkflowExecution{",", ","}",opts__5360__auto__,cljs.core.concat.cljs$core$IFn$_invoke$arity$2(new cljs.core.PersistentVector(null, 4, 5, cljs.core.PersistentVector.EMPTY_NODE, [(new cljs.core.PersistentVector(null,2,(5),cljs.core.PersistentVector.EMPTY_NODE,[new cljs.core.Keyword(null,"store","store",1512230022),self__.store],null)),(new cljs.core.PersistentVector(null,2,(5),cljs.core.PersistentVector.EMPTY_NODE,[new cljs.core.Keyword(null,"state","state",-1988618099),self__.state],null)),(new cljs.core.PersistentVector(null,2,(5),cljs.core.PersistentVector.EMPTY_NODE,[new cljs.core.Keyword(null,"workflow-id","workflow-id",-199003646),self__.workflow_id],null)),(new cljs.core.PersistentVector(null,2,(5),cljs.core.PersistentVector.EMPTY_NODE,[new cljs.core.Keyword(null,"run-id","run-id",-1745267908),self__.run_id],null))], null),self__.__extmap));
 }));
 
-(intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IIterable$_iterator$arity$1 = (function (G__42094){
+(intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IIterable$_iterator$arity$1 = (function (G__42133){
 var self__ = this;
-var G__42094__$1 = this;
-return (new cljs.core.RecordIter((0),G__42094__$1,4,new cljs.core.PersistentVector(null, 4, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"store","store",1512230022),new cljs.core.Keyword(null,"state","state",-1988618099),new cljs.core.Keyword(null,"workflow-id","workflow-id",-199003646),new cljs.core.Keyword(null,"run-id","run-id",-1745267908)], null),(cljs.core.truth_(self__.__extmap)?cljs.core._iterator(self__.__extmap):cljs.core.nil_iter())));
+var G__42133__$1 = this;
+return (new cljs.core.RecordIter((0),G__42133__$1,4,new cljs.core.PersistentVector(null, 4, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"store","store",1512230022),new cljs.core.Keyword(null,"state","state",-1988618099),new cljs.core.Keyword(null,"workflow-id","workflow-id",-199003646),new cljs.core.Keyword(null,"run-id","run-id",-1745267908)], null),(cljs.core.truth_(self__.__extmap)?cljs.core._iterator(self__.__extmap):cljs.core.nil_iter())));
 }));
 
 (intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IMeta$_meta$arity$1 = (function (this__5341__auto__){
@@ -501,10 +501,10 @@ return h__5154__auto____$1;
 }
 }));
 
-(intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IEquiv$_equiv$arity$2 = (function (this42096,other42097){
+(intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IEquiv$_equiv$arity$2 = (function (this42135,other42136){
 var self__ = this;
-var this42096__$1 = this;
-return (((!((other42097 == null)))) && ((((this42096__$1.constructor === other42097.constructor)) && (((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this42096__$1.store,other42097.store)) && (((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this42096__$1.state,other42097.state)) && (((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this42096__$1.workflow_id,other42097.workflow_id)) && (((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this42096__$1.run_id,other42097.run_id)) && (cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this42096__$1.__extmap,other42097.__extmap)))))))))))));
+var this42135__$1 = this;
+return (((!((other42136 == null)))) && ((((this42135__$1.constructor === other42136.constructor)) && (((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this42135__$1.store,other42136.store)) && (((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this42135__$1.state,other42136.state)) && (((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this42135__$1.workflow_id,other42136.workflow_id)) && (((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this42135__$1.run_id,other42136.run_id)) && (cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this42135__$1.__extmap,other42136.__extmap)))))))))))));
 }));
 
 (intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IMap$_dissoc$arity$2 = (function (this__5353__auto__,k__5354__auto__){
@@ -517,12 +517,12 @@ return (new intemporal.workflow.execution.WorkflowExecution(self__.store,self__.
 }
 }));
 
-(intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IAssociative$_contains_key_QMARK_$arity$2 = (function (this__5350__auto__,k42095){
+(intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IAssociative$_contains_key_QMARK_$arity$2 = (function (this__5350__auto__,k42134){
 var self__ = this;
 var this__5350__auto____$1 = this;
-var G__42127 = k42095;
-var G__42127__$1 = (((G__42127 instanceof cljs.core.Keyword))?G__42127.fqn:null);
-switch (G__42127__$1) {
+var G__42143 = k42134;
+var G__42143__$1 = (((G__42143 instanceof cljs.core.Keyword))?G__42143.fqn:null);
+switch (G__42143__$1) {
 case "store":
 case "state":
 case "workflow-id":
@@ -531,29 +531,29 @@ return true;
 
 break;
 default:
-return cljs.core.contains_QMARK_(self__.__extmap,k42095);
+return cljs.core.contains_QMARK_(self__.__extmap,k42134);
 
 }
 }));
 
-(intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IAssociative$_assoc$arity$3 = (function (this__5351__auto__,k__5352__auto__,G__42094){
+(intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IAssociative$_assoc$arity$3 = (function (this__5351__auto__,k__5352__auto__,G__42133){
 var self__ = this;
 var this__5351__auto____$1 = this;
-var pred__42128 = cljs.core.keyword_identical_QMARK_;
-var expr__42129 = k__5352__auto__;
-if(cljs.core.truth_((pred__42128.cljs$core$IFn$_invoke$arity$2 ? pred__42128.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"store","store",1512230022),expr__42129) : pred__42128.call(null,new cljs.core.Keyword(null,"store","store",1512230022),expr__42129)))){
-return (new intemporal.workflow.execution.WorkflowExecution(G__42094,self__.state,self__.workflow_id,self__.run_id,self__.__meta,self__.__extmap,null));
+var pred__42144 = cljs.core.keyword_identical_QMARK_;
+var expr__42145 = k__5352__auto__;
+if(cljs.core.truth_((pred__42144.cljs$core$IFn$_invoke$arity$2 ? pred__42144.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"store","store",1512230022),expr__42145) : pred__42144.call(null,new cljs.core.Keyword(null,"store","store",1512230022),expr__42145)))){
+return (new intemporal.workflow.execution.WorkflowExecution(G__42133,self__.state,self__.workflow_id,self__.run_id,self__.__meta,self__.__extmap,null));
 } else {
-if(cljs.core.truth_((pred__42128.cljs$core$IFn$_invoke$arity$2 ? pred__42128.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"state","state",-1988618099),expr__42129) : pred__42128.call(null,new cljs.core.Keyword(null,"state","state",-1988618099),expr__42129)))){
-return (new intemporal.workflow.execution.WorkflowExecution(self__.store,G__42094,self__.workflow_id,self__.run_id,self__.__meta,self__.__extmap,null));
+if(cljs.core.truth_((pred__42144.cljs$core$IFn$_invoke$arity$2 ? pred__42144.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"state","state",-1988618099),expr__42145) : pred__42144.call(null,new cljs.core.Keyword(null,"state","state",-1988618099),expr__42145)))){
+return (new intemporal.workflow.execution.WorkflowExecution(self__.store,G__42133,self__.workflow_id,self__.run_id,self__.__meta,self__.__extmap,null));
 } else {
-if(cljs.core.truth_((pred__42128.cljs$core$IFn$_invoke$arity$2 ? pred__42128.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"workflow-id","workflow-id",-199003646),expr__42129) : pred__42128.call(null,new cljs.core.Keyword(null,"workflow-id","workflow-id",-199003646),expr__42129)))){
-return (new intemporal.workflow.execution.WorkflowExecution(self__.store,self__.state,G__42094,self__.run_id,self__.__meta,self__.__extmap,null));
+if(cljs.core.truth_((pred__42144.cljs$core$IFn$_invoke$arity$2 ? pred__42144.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"workflow-id","workflow-id",-199003646),expr__42145) : pred__42144.call(null,new cljs.core.Keyword(null,"workflow-id","workflow-id",-199003646),expr__42145)))){
+return (new intemporal.workflow.execution.WorkflowExecution(self__.store,self__.state,G__42133,self__.run_id,self__.__meta,self__.__extmap,null));
 } else {
-if(cljs.core.truth_((pred__42128.cljs$core$IFn$_invoke$arity$2 ? pred__42128.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"run-id","run-id",-1745267908),expr__42129) : pred__42128.call(null,new cljs.core.Keyword(null,"run-id","run-id",-1745267908),expr__42129)))){
-return (new intemporal.workflow.execution.WorkflowExecution(self__.store,self__.state,self__.workflow_id,G__42094,self__.__meta,self__.__extmap,null));
+if(cljs.core.truth_((pred__42144.cljs$core$IFn$_invoke$arity$2 ? pred__42144.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"run-id","run-id",-1745267908),expr__42145) : pred__42144.call(null,new cljs.core.Keyword(null,"run-id","run-id",-1745267908),expr__42145)))){
+return (new intemporal.workflow.execution.WorkflowExecution(self__.store,self__.state,self__.workflow_id,G__42133,self__.__meta,self__.__extmap,null));
 } else {
-return (new intemporal.workflow.execution.WorkflowExecution(self__.store,self__.state,self__.workflow_id,self__.run_id,self__.__meta,cljs.core.assoc.cljs$core$IFn$_invoke$arity$3(self__.__extmap,k__5352__auto__,G__42094),null));
+return (new intemporal.workflow.execution.WorkflowExecution(self__.store,self__.state,self__.workflow_id,self__.run_id,self__.__meta,cljs.core.assoc.cljs$core$IFn$_invoke$arity$3(self__.__extmap,k__5352__auto__,G__42133),null));
 }
 }
 }
@@ -566,10 +566,10 @@ var this__5356__auto____$1 = this;
 return cljs.core.seq(cljs.core.concat.cljs$core$IFn$_invoke$arity$2(new cljs.core.PersistentVector(null, 4, 5, cljs.core.PersistentVector.EMPTY_NODE, [(new cljs.core.MapEntry(new cljs.core.Keyword(null,"store","store",1512230022),self__.store,null)),(new cljs.core.MapEntry(new cljs.core.Keyword(null,"state","state",-1988618099),self__.state,null)),(new cljs.core.MapEntry(new cljs.core.Keyword(null,"workflow-id","workflow-id",-199003646),self__.workflow_id,null)),(new cljs.core.MapEntry(new cljs.core.Keyword(null,"run-id","run-id",-1745267908),self__.run_id,null))], null),self__.__extmap));
 }));
 
-(intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IWithMeta$_with_meta$arity$2 = (function (this__5342__auto__,G__42094){
+(intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$IWithMeta$_with_meta$arity$2 = (function (this__5342__auto__,G__42133){
 var self__ = this;
 var this__5342__auto____$1 = this;
-return (new intemporal.workflow.execution.WorkflowExecution(self__.store,self__.state,self__.workflow_id,self__.run_id,G__42094,self__.__extmap,self__.__hash));
+return (new intemporal.workflow.execution.WorkflowExecution(self__.store,self__.state,self__.workflow_id,self__.run_id,G__42133,self__.__extmap,self__.__hash));
 }));
 
 (intemporal.workflow.execution.WorkflowExecution.prototype.cljs$core$ICollection$_conj$arity$2 = (function (this__5348__auto__,entry__5349__auto__){
@@ -606,23 +606,23 @@ return (new intemporal.workflow.execution.WorkflowExecution(store,state,workflow
 /**
  * Factory function for intemporal.workflow.execution/WorkflowExecution, taking a map of keywords to field values.
  */
-intemporal.workflow.execution.map__GT_WorkflowExecution = (function intemporal$workflow$execution$map__GT_WorkflowExecution(G__42098){
-var extmap__5385__auto__ = (function (){var G__42131 = cljs.core.dissoc.cljs$core$IFn$_invoke$arity$variadic(G__42098,new cljs.core.Keyword(null,"store","store",1512230022),cljs.core.prim_seq.cljs$core$IFn$_invoke$arity$2([new cljs.core.Keyword(null,"state","state",-1988618099),new cljs.core.Keyword(null,"workflow-id","workflow-id",-199003646),new cljs.core.Keyword(null,"run-id","run-id",-1745267908)], 0));
-if(cljs.core.record_QMARK_(G__42098)){
-return cljs.core.into.cljs$core$IFn$_invoke$arity$2(cljs.core.PersistentArrayMap.EMPTY,G__42131);
+intemporal.workflow.execution.map__GT_WorkflowExecution = (function intemporal$workflow$execution$map__GT_WorkflowExecution(G__42137){
+var extmap__5385__auto__ = (function (){var G__42147 = cljs.core.dissoc.cljs$core$IFn$_invoke$arity$variadic(G__42137,new cljs.core.Keyword(null,"store","store",1512230022),cljs.core.prim_seq.cljs$core$IFn$_invoke$arity$2([new cljs.core.Keyword(null,"state","state",-1988618099),new cljs.core.Keyword(null,"workflow-id","workflow-id",-199003646),new cljs.core.Keyword(null,"run-id","run-id",-1745267908)], 0));
+if(cljs.core.record_QMARK_(G__42137)){
+return cljs.core.into.cljs$core$IFn$_invoke$arity$2(cljs.core.PersistentArrayMap.EMPTY,G__42147);
 } else {
-return G__42131;
+return G__42147;
 }
 })();
-return (new intemporal.workflow.execution.WorkflowExecution(new cljs.core.Keyword(null,"store","store",1512230022).cljs$core$IFn$_invoke$arity$1(G__42098),new cljs.core.Keyword(null,"state","state",-1988618099).cljs$core$IFn$_invoke$arity$1(G__42098),new cljs.core.Keyword(null,"workflow-id","workflow-id",-199003646).cljs$core$IFn$_invoke$arity$1(G__42098),new cljs.core.Keyword(null,"run-id","run-id",-1745267908).cljs$core$IFn$_invoke$arity$1(G__42098),null,cljs.core.not_empty(extmap__5385__auto__),null));
+return (new intemporal.workflow.execution.WorkflowExecution(new cljs.core.Keyword(null,"store","store",1512230022).cljs$core$IFn$_invoke$arity$1(G__42137),new cljs.core.Keyword(null,"state","state",-1988618099).cljs$core$IFn$_invoke$arity$1(G__42137),new cljs.core.Keyword(null,"workflow-id","workflow-id",-199003646).cljs$core$IFn$_invoke$arity$1(G__42137),new cljs.core.Keyword(null,"run-id","run-id",-1745267908).cljs$core$IFn$_invoke$arity$1(G__42137),null,cljs.core.not_empty(extmap__5385__auto__),null));
 });
 
 /**
  * Makes a new workflow run for the given workflow id
  */
 intemporal.workflow.execution.make_workflow_execution = (function intemporal$workflow$execution$make_workflow_execution(var_args){
-var G__42133 = arguments.length;
-switch (G__42133) {
+var G__42149 = arguments.length;
+switch (G__42149) {
 case 2:
 return intemporal.workflow.execution.make_workflow_execution.cljs$core$IFn$_invoke$arity$2((arguments[(0)]),(arguments[(1)]));
 

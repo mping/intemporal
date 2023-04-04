@@ -1,14 +1,14 @@
 goog.provide('intemporal.utils.string');
 intemporal.utils.string.fmt = (function intemporal$utils$string$fmt(var_args){
 var args__5775__auto__ = [];
-var len__5769__auto___36701 = arguments.length;
-var i__5770__auto___36702 = (0);
+var len__5769__auto___36740 = arguments.length;
+var i__5770__auto___36741 = (0);
 while(true){
-if((i__5770__auto___36702 < len__5769__auto___36701)){
-args__5775__auto__.push((arguments[i__5770__auto___36702]));
+if((i__5770__auto___36741 < len__5769__auto___36740)){
+args__5775__auto__.push((arguments[i__5770__auto___36741]));
 
-var G__36703 = (i__5770__auto___36702 + (1));
-i__5770__auto___36702 = G__36703;
+var G__36742 = (i__5770__auto___36741 + (1));
+i__5770__auto___36741 = G__36742;
 continue;
 } else {
 }
@@ -26,9 +26,9 @@ return cljs.core.apply.cljs$core$IFn$_invoke$arity$2(goog.string.format,args);
 (intemporal.utils.string.fmt.cljs$lang$maxFixedArity = (0));
 
 /** @this {Function} */
-(intemporal.utils.string.fmt.cljs$lang$applyTo = (function (seq36700){
+(intemporal.utils.string.fmt.cljs$lang$applyTo = (function (seq36738){
 var self__5755__auto__ = this;
-return self__5755__auto__.cljs$core$IFn$_invoke$arity$variadic(cljs.core.seq(seq36700));
+return self__5755__auto__.cljs$core$IFn$_invoke$arity$variadic(cljs.core.seq(seq36738));
 }));
 
 

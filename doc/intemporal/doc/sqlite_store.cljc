@@ -54,24 +54,22 @@
     (find-workflow [this runid]
       (when-let [{uid  :uid
                   type :type} (sqlite/execute-one! db ["select uid,type from events where runid=? order by timestamp asc limit 1" (str runid)])]
-        (let [{var :metadata/var} (sqlite/execute-one! db ["select var from metadata where type=? and uid=?" "workflow" uid])]
+        (let [ {var :var} (sqlite/execute-one! db ["select var from metadata where type=? and uid=?" "workflow" uid])]
           [(symbol uid) (resolve' (symbol var))])))
 
     ;; queries
     (find-workflow-run [this runid]
-      
       (when-let [{uid  :uid
                   type :type} (sqlite/execute-one! db ["select uid,type from events where runid=? order by timestamp asc limit 1" (str runid)])]
-        (let [{var :metadata/var} (sqlite/execute-one! db ["select var from metadata where type=? and uid=?" "workflow" uid])
+        (let [{var :var} (sqlite/execute-one! db ["select var from metadata where type=? and uid=?" "workflow" uid])
               events (sqlite/execute! db ["select * From events where runid=?" (str runid)])]
           {:workflow        (resolve' (symbol var))
            :workflow-events (mapv event->event-map events)})))
 
     (find-workflow-run [this runid {:keys [all?] :or {all? true}}]
-      
       (when-let [{uid  :uid
                   type :type} (sqlite/execute-one! db ["select uid,type from events where runid=? order by timestamp asc limit 1" (str runid)])]
-        (let [{var :metadata/var} (sqlite/execute-one! db ["select var from metadata where type=? and uid=?" "workflow" uid])
+        (let [{var :var} (sqlite/execute-one! db ["select var from metadata where type=? and uid=?" "workflow" uid])
               eventsq (if all?
                         "select * From events where runid=?"
                         "select * From events where runid=? and (deleted is false or deleted is null)")

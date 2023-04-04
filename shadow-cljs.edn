@@ -13,5 +13,5 @@
                 :asset-path "."
                 :output-dir "target"
                 :compiler-options {:infer-externs true
-                																	  :optimizations :none}
+                                                    :optimizations :none}
                 :modules {:dev {:entries [intemporal.example.dev]}}}}}

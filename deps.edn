@@ -1,5 +1,6 @@
 {:paths   ["src" "dev" "target"]
  :deps    {org.clojure/clojure               {:mvn/version "1.11.1"}
+           thheller/shadow-cljs              {:mvn/version "2.22.9"}
            com.taoensso/timbre               {:mvn/version "6.0.1"}
            ;;stuff
            net.cgrand/macrovich              {:mvn/version "0.2.1"}

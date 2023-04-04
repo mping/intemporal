@@ -1,7 +1,7 @@
 # cljs repl
 
 ```shell
-npx shadow-cljs watch dev
+yarn shadow-cljs watch dev
 
 ```
 
@@ -18,9 +18,13 @@ The, connect and select the appropriate shadow repl.
 # doc
 
 ```shell
-npx shadow-cljs watch doc
+yarn shadow-cljs watch doc
+...
+shadow-cljs - HTTP server available at http://localhost:8000
+#open the browser
+
 # or
-npx shadow-cljs compile doc
+yarn shadow-cljs compile doc
 python -m http.server --directory public
 ```
 
