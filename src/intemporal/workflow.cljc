@@ -43,8 +43,9 @@
 (defn event-matches? [nxt uid event-type]
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (let [match? (and (some? nxt)
-                    (= (:type nxt) event-type)
-                    (= (:uid nxt) uid))]
+                    ;;TODO: figure out why we have uid as symbol in cljs & ditch this "cast"
+                    (= (str (:type nxt)) (str event-type))
+                    (= (str (:uid nxt))  (str uid)))]
     (log/debugf "[store] match? %s [%s %s]" match? event-type uid)
     match?))
 

@@ -2,29 +2,47 @@
   (:require [clojure.edn :as edn]
             [clojure.pprint :as pprint]
             [intemporal.doc.sqlite :as sqlite]
-            [intemporal.store :as s]))
+            [intemporal.store :as s]
+            #?(:cljs ["serialize-error" :as serde-error])))
 
 
-(defn- serialize [obj]
-  (pr-str obj))
+(defn- serialize
+  ([obj]
+   (pr-str obj))
+  ([obj etype]
+   #?(:clj  (pr-str obj)
+      :cljs (if (or (= :intemporal.activity/failure etype)
+                    (= :intemporal.workflow/failure etype))
+              (pr-str (serde-error/serializeError obj))
+              (pr-str obj)))))
 
-(defn- deserialize [s]
-  (edn/read-string s))
+(defn- deserialize
+  ([s]
+   (edn/read-string s))
+  ([s etype]
+   #?(:clj  (edn/read-string s)
+      :cljs (if (or (= :intemporal.activity/failure etype)
+                    (= :intemporal.workflow/failure etype))
+              (serde-error/deserializeError (edn/read-string s))
+              (edn/read-string s)))))
+
+;#?(:cljs (println (serde-error/deserializeError (serde-error/serializeError (js/Error)))))
 
 (defn- persist-event [db _wid runid {:keys [type uid payload] :as evt}]
   (let [query (str "insert into events "
                    "(runid, type, uid, payload, deleted, timestamp)"
                    "values (?, ?, ?, ?, ?, ?)")]
-    (sqlite/execute-one! db [query (str runid) (serialize type) uid (serialize payload) false (.toUTCString (js/Date.))])))
+    (sqlite/execute-one! db [query (str runid) (serialize type) uid (serialize payload type) false (.toUTCString (js/Date.))])))
 
 (defn event->event-map [{:keys [id _run type uid payload deleted timestamp] :as dbevt}]
   (when (some? dbevt)
-    {:id        id
-     :type      (keyword (.substring type 1))
-     :uid       (symbol uid)
-     :payload   (deserialize payload)
-     :timestamp (js/Date. timestamp)
-     :deleted?  (not (or (nil? deleted) (zero? deleted)))}))
+    (let [etype (keyword (.substring type 1))]
+      {:id        id
+       :type      etype
+       :uid       (symbol uid)
+       :payload   (deserialize payload etype)
+       :timestamp (js/Date. timestamp)
+       :deleted?  (not (or (nil? deleted) (zero? deleted)))})))
 
 
 (defn- truncate [db table]

@@ -26,12 +26,14 @@
 ;; basic protocol function
 (def example-impl
   (reify HttpClient
-    (doPost [_ _url] (maybe (fn [] "200 OK")))
-    (doHead [_ _url] (maybe (fn [] "200 OK")))))
+    ;; doHead always goes through
+    (doHead [_ _url] "200 OK")
+    ;; doPost sometimes fails
+    (doPost [_ _url] (maybe (fn [] "200 OK")))))
 
 (defrecord MyHttpClient []
   HttpClient
-  (doPost [_ id] (maybe (fn [] id)))
+  (doPost [_ id] (fn [] id))
   (doHead [_ id] (maybe (fn [] id))))
 
 ;;;;
