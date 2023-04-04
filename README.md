@@ -76,4 +76,5 @@ Examples:
   - [x] Protocol options
   - [x] Regular fn options
 - [x] Convert to `.cljc` 
+- [ ] workers + queues
 - [ ] function versioning

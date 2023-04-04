@@ -65,16 +65,16 @@
 ;; basic protocol function
 (def example-impl
   (reify HttpClient
-    (doHead [_ _url] (fn [] "200 OK"))
+    (doHead [_ _url] "200 OK")
     (doPost [_ _url] (maybe (fn [] "200 OK")))))
 
+;; alternative implementation
 (defrecord MyHttpClient []
   HttpClient
-  (doPost [_ id] (maybe (fn [] id)))
-  (doHead [_ id] (maybe (fn [] id))))
+  (doHead [_ _url] "200 OK")
+  (doPost [_ _url] (maybe (fn [] "200 OK"))))
 </code>
 </pre>
-
             <h3>Workflow definition</h3>
             <pre><code>
 (defn simpleflow
