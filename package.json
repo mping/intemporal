@@ -4,8 +4,7 @@
   "description": "![example workflow](https://github.com/mping/intemporal/actions/workflows/clojure.yml/badge.svg)",
   "main": "index.js",
   "directories": {
-    "doc": "doc",
-    "test": "test"
+    "doc": "doc"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -15,12 +14,19 @@
     "url": "git+https://github.com/mping/intemporal.git"
   },
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/mping/intemporal/issues"
   },
   "homepage": "https://github.com/mping/intemporal#readme",
   "devDependencies": {
     "shadow-cljs": "^2.20.7"
+  },
+  "engines": {
+    "npm": ">=9.0.0",
+    "node": ">=19.0.0"
+  },
+  "dependencies": {
+    "serialize-error": "^11.0.0"
   }
 }

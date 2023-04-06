@@ -1,5 +1,6 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
 [ -d "node_modules/ws" ] || npm install ws
 
-clojure -M:test "$@"
+#clojure -M:test "$@"
+clojure -A:dev:test -M:test "$@"
