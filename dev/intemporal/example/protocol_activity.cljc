@@ -25,12 +25,12 @@
 ;; basic protocol function
 (def example-impl
   (reify HttpClient
-    (doPost [_ _url] (maybe "200 OK"))
-    (doHead [_ _url] (maybe "200 OK"))))
+    (doHead [_ _url] "200 OK")
+    (doPost [_ _url] (maybe "200 OK"))))
+
 
 (defrecord MyHttpClient []
   HttpClient
-  ;; (Ab)use annotations to pass activity options
   (doPost [_ id] (maybe id))
   (doHead [_ id] (maybe id)))
 

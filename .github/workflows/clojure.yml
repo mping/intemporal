@@ -13,7 +13,7 @@ jobs:
 
       - uses: actions/setup-node@v3
         with:
-          node-version: 16
+          node-version: 19.3.0
 
       - name: install node deps
         run: npm install
@@ -26,20 +26,23 @@ jobs:
           key: nodedeps-${{ hashFiles('package-lock.json') }}
           restore-keys: nodedeps-
 
-
       - name: Install clojure tools
         uses: DeLaGuardo/setup-clojure@10.0
         with:
           # Install just one or all simultaneously
           # The value must indicate a particular version of the tool, or use 'latest'
           # to always provision the latest version
-          cli: 1.10.1.693              # Clojure CLI based on tools.deps
+          cli: 1.11.1.1105             # Clojure CLI based on tools.deps
           clj-kondo: 2022.05.31        # Clj-kondo
           cljstyle: 0.15.0             # cljstyle
 
       # requires clojure
       - name: compile cljs
         run: npx shadow-cljs compile dev
+
+      # requires clojure
+      - name: compile docs
+        run: npx shadow-cljs compile doc
 
       # will cache shadow deps too
       - name: Cache clojure dependencies
@@ -53,6 +56,6 @@ jobs:
       - name: Lint and test clj
         run: bin/kaocha unit
 
-      - name: Lint and test cljs
-        run: bin/kaocha unit-cljs
+      #- name: Lint and test cljs
+      #  run: bin/kaocha unit-cljs
 

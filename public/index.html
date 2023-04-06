@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en-us">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@latest/css/pico.min.css">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/default.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/clojure.min.js"></script>
+    <script>hljs.highlightAll();</script>
+
+    <title>Intemporal demo</title>
+    <style>
+        table {font-size: small}
+        tr.\:intemporal\.workflow\/failure,
+        tr.\:intemporal\.activity\/failure {background: #ffbaad}
+        tr.\:intemporal\.workflow\/invoke {font-size: large !important}
+
+    </style>
+</head>
+<body>
+<main class="container">
+    <h1 class=>Intemporal demo with sqlite.js</h1>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <script>
+    var main = document.createElement("script");
+    main.setAttribute("src", window.location+"/js/main.js");
+    document.head.appendChild(main);
+
+
+    </script>
+
+    This demo is running intemporal with a sql-on-wasm backing store.
+    <div class="grid">
+        <div>
+            <h3>Requirements</h3>
+            <pre><code>
+(ns intemporal.doc
+  (:require
+    [intemporal.doc.sqlite :as sqlite]
+    [intemporal.doc.sqlite-store :as sstore]
+    [intemporal.store :as s]
+    [intemporal.workflow :as w]
+    [intemporal.activity :as a]))
+</code>
+</pre>
+
+            <h3>Using the protocol version of intemporal activities</h3>
+            <pre><code>
+(defprotocol HttpClient
+  (doHead [this id] "Can be called multiple times")
+  (doPost [this id] "Should only be called once"))
+
+(defn maybe [thunk]
+  (let [r (rand-int 10)]
+    (when (> r 5)
+      (throw (js/Error. "Forced error (simulated failure)")))
+    (thunk)))
+</code>
+</pre>
+
+            <h3>Implementation</h3>
+            <pre><code>
+;; basic protocol function
+(def example-impl
+  (reify HttpClient
+    (doHead [_ _url] "200 OK")
+    (doPost [_ _url] (maybe (fn [] "200 OK")))))
+
+;; alternative implementation
+(defrecord MyHttpClient []
+  HttpClient
+  (doHead [_ _url] "200 OK")
+  (doPost [_ _url] (maybe (fn [] "200 OK"))))
+</code>
+</pre>
+            <h3>Workflow definition</h3>
+            <pre><code>
+(defn simpleflow
+  [n]
+  ;; (->MyHttpClient) would work too
+  (let [stub (a/stub-protocol HttpClient example-impl {:idempotent true})]
+    (doHead stub (str n "carr"))
+    (doPost stub (str n "carr"))))
+
+;; register the workflow
+(w/register-workflow sqlitestore simpleflow)
+</code>
+</pre>
+
+            <h3>Execution</h3>
+            <pre><code>
+(try
+  (simpleflow "foo")
+  (catch js/Object err
+    (js/console.error "Workflow failed!" err)))
+</code>
+</pre>
+        </div>
+        <div>
+            <h3>Live example</h3>
+            <button id="runner">Click to run the code</button>
+            <blockquote>
+                When running the workflow, all events will be stored at the store level.
+                If a workflow fails, you can retry the workflow; if it is retryable it will resume from the
+                last known good "event".
+            </blockquote>
+            <pre id="results">;;Results go here</pre>
+            <button id="retry" disabled>Click to retry (enabled when workflow fails)</button>
+            <blockquote>
+                Observe the events on the table; you will see new events for the given runid, starting from the last
+                successful event. Intemporal "replays" the persisted events then resumes execution.
+            </blockquote>
+
+            <h3>In-browser results</h3>
+            <h4>Metadata</h4>
+            <div id="metadata"></div>
+
+            <h4>Events</h4>
+            <div id="events"></div>
+        </div>
+    </div>
+</main>
+
+</body>
+</html>

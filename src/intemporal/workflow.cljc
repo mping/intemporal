@@ -43,8 +43,9 @@
 (defn event-matches? [nxt uid event-type]
   (check (some? current-workflow-run) "Not running within a workflow function, did you call `register-workflow`?")
   (let [match? (and (some? nxt)
-                    (= (:type nxt) event-type)
-                    (= (:uid nxt) uid))]
+                    ;;TODO: figure out why we have uid as symbol in cljs & ditch this "cast"
+                    (= (str (:type nxt)) (str event-type))
+                    (= (str (:uid nxt))  (str uid)))]
     (log/debugf "[store] match? %s [%s %s]" match? event-type uid)
     match?))
 
@@ -62,6 +63,19 @@
 
 ;;;;
 ;;
+
+
+(def cljs-available?
+  #?(:cljs
+     false
+     :clj
+     (try
+       (require '[cljs.analyzer])
+       ;; Ensure clojurescript is recent enough:
+       (-> 'cljs.analyzer/var-meta resolve boolean)
+       (catch Exception _ false))))
+
+
 
 (defn compensate
   "Calls all compensation functions in order.
@@ -135,16 +149,21 @@
   ;; TODO: throw if already registered
   (macros/case
     :cljs
-    (let [fname (str fsym)
-          wid   (sym->workflow-id fname)]
-      `(let [f#       ~fsym
-             proxied# (fn proxy-workflow# [& args#]
-                        (proxy-workflow-fn ~store '~wid f# args#))]
-         (set! ~fsym proxied#)
-         (do
-           (check (cljs.core/satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
-           (s/save-workflow-definition ~store '~wid proxied#)
-           nil)))
+    (when cljs-available?
+      (let [analyzer (find-ns 'cljs.analyzer)
+            resolved ((ns-resolve analyzer 'resolve-var) &env fsym)
+            fname    (str (:name resolved))
+            ;fname    (str fsym)
+            wid      fname] ;(sym->workflow-id fname)
+        `(let [f#       ~fsym
+               proxied# (fn proxy-workflow# [& args#]
+                          (proxy-workflow-fn ~store '~wid f# args#))]
+           (set! ~fsym proxied#)
+           (do
+             (check (cljs.core/satisfies? s/WorkflowStore ~store) "store %s does not implement WorkflowStore" (s/id ~store))
+             ;(s/save-workflow-definition ~store '~wid proxied#)
+             (s/save-workflow-definition ~store '~wid ~fname)
+             nil))))
 
     :clj
     (let [fvar   (resolve fsym)

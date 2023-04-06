@@ -1,7 +1,8 @@
 # cljs repl
 
 ```shell
-npx shadow-cljs watch dev
+yarn shadow-cljs watch dev
+
 ```
 
 Observe browser window open with a message like:
@@ -14,14 +15,28 @@ The, connect and select the appropriate shadow repl.
 (shadow/browser-repl)
 ```
 
+# doc
+
+```shell
+yarn shadow-cljs watch doc
+...
+shadow-cljs - HTTP server available at http://localhost:8000
+#open the browser
+
+# or
+yarn shadow-cljs compile doc
+python -m http.server --directory public
+```
+
 # cljs repl
 
 ```
-clj -A:dev
+clj -A:dev:doc:cljs
 ```
 
 # Tests
 
 ```shell
-clj -Atest
+bin/kaocha unit
+bin/kaocha unit-cljs
 ```

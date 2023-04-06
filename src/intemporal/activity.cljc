@@ -32,24 +32,6 @@
        (-> 'cljs.analyzer/var-meta resolve boolean)
        (catch Exception _ false))))
 
-
-(defmacro fn->fnid
-  "Called by defmacro."
-  [f]
-  (macros/case
-    :cljs
-    (when cljs-available?
-      (let [analyzer (find-ns 'cljs.analyzer)
-            resolved ((ns-resolve analyzer 'resolve-var) &env f)]
-        (println resolved)
-        "x"))
-
-    :clj
-    (let [resolved (resolve f)
-          _ (println "XX" f "|" resolved "|" (cljs.analyzer/resolve-var &env f))
-          cname    (symbol resolved)]
-      (str cname))))
-
 (defmacro with-traced-activity
   "Traces activity with given `aid` by executing `body`, persisting events for ::invoke, ::success or ::failure"
   ([aid args body]
