@@ -15,6 +15,9 @@ jobs:
         with:
           node-version: 16
 
+      - name: install node deps
+        run: npm install
+
       - name: Cache nodejs dependencies
         uses: actions/cache@v3
         with:
@@ -53,5 +56,3 @@ jobs:
       - name: Lint and test cljs
         run: bin/kaocha unit-cljs
 
-      - name: install node deps
-        run: npm install
