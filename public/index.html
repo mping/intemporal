@@ -79,6 +79,7 @@
             <pre><code>
 (defn simpleflow
   [n]
+  ;; stub-protocol proxies all protocol fns so the flow state can be saved/restored
   ;; (->MyHttpClient) would work too
   (let [stub (a/stub-protocol HttpClient example-impl {:idempotent true})]
     (doHead stub (str n "carr"))
