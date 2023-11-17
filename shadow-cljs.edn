@@ -7,14 +7,15 @@
                 :asset-path "/js"
                 :compiler-options {:infer-externs true
                                    :optimizations :none}
-                :modules {:main     {:init-fn intemporal.doc.main/init}
+                :modules {:shared {:entries []}
+                          :main     {:init-fn intemporal.doc.main/init
+                                     :depends-on #{:shared}}
                           :automata {:init-fn intemporal.doc.automata/init
-                                     :depends-on #{:main}}}}
-
+                                     :depends-on #{:shared}}}}
 
           :dev {:target :browser
                 :asset-path "."
                 :output-dir "target"
                 :compiler-options {:infer-externs true
-                                                    :optimizations :none}
+                                   :optimizations :none}
                 :modules {:dev {:entries [intemporal.example.dev]}}}}}

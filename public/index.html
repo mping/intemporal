@@ -21,20 +21,15 @@
 </head>
 <body>
 <main class="container">
-    <h1 class=>Intemporal demo with sqlite.js</h1>
+    <h1>Intemporal demo with sqlite.js</h1>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
-    <script>
-    var main = document.createElement("script");
-    main.setAttribute("src", window.location+"/js/main.js");
-    document.head.appendChild(main);
-
-
-    </script>
-    This demo is running intemporal with a sql-on-wasm backing store.
+    <script src="js/shared.js"></script>
+    <script src="js/main.js"></script>
+    <p>This demo is running intemporal with a sql-on-wasm backing store.</p>
     Demos:
     <ul>
-        <li><a href="intemporal/index.html">main</a></li>
-        <li><a href="intemporal/automata.html">automata</a></li>
+        <li><a href="index.html">main</a></li>
+        <li><a href="automata.html">automata</a></li>
     </ul>
 
     <div class="grid">

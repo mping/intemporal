@@ -6,9 +6,11 @@
    [intemporal.store :as s]
    [intemporal.workflow :as w]
    [intemporal.activity :as a]
-   ;;hiccupsrt required
-   [hiccups.runtime :as hiccupsrt]
-   [clojure.string :as str]))
+   [devtools.core :as devtools]
+    ;;hiccupsrt required
+   [hiccups.runtime :as hiccupsrt]))
+
+(devtools/install!)
 
 ;;;;
 ;; main code
@@ -75,7 +77,6 @@
                    [:tbody
                     (for [r rows]
                       (do
-                        (println (get r :type))
                         [:tr {:class (name (get r :type))}
                          (for [h header]
                            [:td (get r h)])]))]]))

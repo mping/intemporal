@@ -5,7 +5,6 @@
             [intemporal.store :as s]
             #?(:cljs ["serialize-error" :as serde-error])))
 
-
 (defn- serialize
   ([obj]
    (pr-str obj))
