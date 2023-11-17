@@ -1,0 +1,69 @@
+(ns intemporal.example.fsm
+  (:require [intemporal.workflow :as w]
+            [intemporal.activity :as a]
+            [intemporal.store :as s]
+            [intemporal.store.memory :as m]
+            [automata.fsm :as fsm]))
+
+(def memstore (m/memory-store))
+
+
+(def resource-rules
+  {:state/init     [{::fsm/event :event/create ::fsm/to :state/creating ::fsm/actions [:action/create]}
+                    {::fsm/event :event/kill ::fsm/to :state/killed}]
+   :state/creating [{::fsm/event :event/created ::fsm/to :state/down}
+                    {::fsm/event :event/error ::fsm/to :state/init}]
+   :state/down     [{::fsm/event :event/start ::fsm/to :state/starting ::fsm/actions [:action/start]}
+                    {::fsm/event :event/kill ::fsm/to :state/killing ::fsm/actions [:action/kill]}]
+   :state/starting [{::fsm/event :event/started ::fsm/to :state/up}
+                    {::fsm/event :event/error ::fsm/to :state/down}]
+   :state/stopping [{::fsm/event :event/stopped ::fsm/to :state/down}
+                    {::fsm/event :event/error ::fsm/to :state/up}]
+   :state/up       [{::fsm/event :event/stop ::fsm/to :state/stopping ::fsm/actions [:action/stop]}
+                    {::fsm/event :event/kill ::fsm/to :state/killing ::fsm/actions [:action/kill]}]
+   :state/killing  [{::fsm/event :event/killed ::fsm/to :state/killed}
+                    {::fsm/event :event/error ::fsm/to :state/killing}]
+   :state/killed   []})
+
+;; event producer
+(defprotocol EventHandler
+  (process-event [this event] "Processes the event, returns the next event"))
+
+(defn make-event-handler []
+  (reify EventHandler
+    (process-event [this event]
+      (let [nxt (condp = event
+                  :event/create :event/created
+                  :event/created :event/start
+                  :event/start :event/started
+                  :event/started :event/stop
+                  :event/stop :event/stopped
+                  :event/stopped :event/kill
+                  :event/kill :event/killed
+                  nil)]
+        nxt))))
+;;;;
+;; workflow registration
+
+(defn run-fsm-workflow
+  [rules init-state init-event]
+  (let [stub      (a/stub-protocol EventHandler (make-event-handler) {:idempotent true})
+        initstate {::fsm/rules rules ::fsm/state init-state}]
+
+    (loop [state initstate
+           evt   init-event]
+      (if evt
+        (recur (fsm/transit state evt) (process-event stub evt))
+        (::fsm/state state)))))
+
+(s/clear-events memstore)
+(w/register-workflow memstore run-fsm-workflow)
+
+;; call workflow
+(try
+  (println (run-fsm-workflow resource-rules :state/init :event/create))
+  (catch #?(:clj Exception :cljs js/Error) e
+    (println "Workflow failed!")))
+
+#_
+(println (s/events->table memstore))
