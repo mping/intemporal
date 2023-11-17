@@ -1,4 +1,4 @@
-(ns intemporal.doc
+(ns intemporal.doc.automata
   (:require-macros [hiccups.core :as hiccups :refer [html]])
   (:require
    [intemporal.doc.sqlite :as sqlite]
@@ -50,10 +50,6 @@
 ;;;;
 ;; bootstrap
 (defn onready [db]
-  ;(sqlite/run db "CREATE TABLE test (col1, col2);")
-  ;(sqlite/run db "INSERT INTO test VALUES (?,?), (?,?)", [1,111,2,222])
-  ;(js/console.log (sqlite/execute-one! db ["insert into test values (?,?)" 21, 2]))
-  ;(js/console.log (pr-str (sqlite/execute! db ["select * from test"])))
 
   (let [sqlitestore (sstore/make-sqlite-store db)]
     ;; main demo code

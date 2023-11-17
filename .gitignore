@@ -22,3 +22,6 @@ bin
 out
 .cljs_node_repl
 dev/example.db
+
+*.iml
+.idea/
