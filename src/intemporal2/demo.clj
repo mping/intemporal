@@ -6,18 +6,22 @@
 ;;;;
 ;; demo
 
+(defn activity-fn [a]
+  (prn "activity was called")
+  :ok)
+
 (w/defn-workflow my-workflow [i]
-  (/ 1 i))
+  (let [s (w/stub-function activity-fn)]
+    [(/ 1 i) (s 1)]))
 
 (def wstore (store/make-memstore))
 
-(clojure.pprint/print-table (vals (::store/workflow-store @wstore)))
+(w/start-worker! wstore)
 
-(w/start-workflow-worker! wstore)
-
-(w/with-env {::w/workflow-store wstore}
+(w/with-env {:store wstore}
   (my-workflow 1))
 
-(clojure.pprint/print-table (vals (::store/workflow-store @wstore)))
+(clojure.pprint/print-table (vals (::store/task-store @wstore)))
 (clojure.pprint/print-table (->> (vals (::store/history-store @wstore))
                                  (flatten)))
+
