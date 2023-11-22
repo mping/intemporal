@@ -1,5 +1,6 @@
 (ns intemporal2.workflow
-  (:require [intemporal2.store :as store]))
+  (:require [intemporal2.store :as store])
+  (:import [java.util.concurrent ThreadFactory]))
 
 (set! *warn-on-reflection* true)
 
@@ -21,6 +22,15 @@
 (def ^:dynamic *env* nil)
 (def default-env {:polling-interval-ms 1000
                   :timeout-ms          Long/MAX_VALUE})
+
+(def ^ThreadFactory threadfactory (-> (Thread/ofVirtual)
+                                      (.name "intemporal-vthread-", 0)
+                                      (.factory)))
+
+(defmacro virtual-thread [& body]
+  `(-> threadfactory
+       (.newThread (fn [] (do ~@body)))
+       (.start)))
 
 (defmacro with-env [m & body]
   `(with-bindings {#'*env* (merge default-env ~m)}
@@ -62,29 +72,24 @@
         (store/transition-task store id {:type :intemporal.activity/failure :sym sym :error e})
         (throw e)))))
 
-(defmacro virtual-thread [& body]
-  `(-> (Thread/ofVirtual)
-       (.start (fn [] (do ~@body)))))
-
 ;;;;
 ;; worker
 
 (defn start-worker!
-  "Starts a worker thread that polls the store for tasks to be picked up."
+  "Starts a worker thread."
   ([store]
    (start-worker! store (constantly false) 500))
   ([store done? poll-ms]
    (virtual-thread
-     (loop []
-       (when (and (not (Thread/interrupted))
-                  (not (done?)))
-         (when-let [task (store/dequeue-task store)]
-           ;; run the resume in another thread so this dont get blocked
-           (virtual-thread
-             (with-env {:store store}
-               (resume-task store task))))
-         (Thread/sleep (long (+ poll-ms (rand-int (int (/ poll-ms 15))))))
-         (recur))))))
+     (let [task-ready? #(= :new (:state %))]
+       (store/watch-tasks store
+                          task-ready?
+                          (fn [_]
+                            ;; should be the store to handle dequeing
+                            (when-let [task (store/dequeue-task store)]
+                              (virtual-thread
+                                (with-env {:store store}
+                                  (resume-task store task))))))))))
 
 (defn enqueue-and-wait
   [{:keys [store] :as env} task]

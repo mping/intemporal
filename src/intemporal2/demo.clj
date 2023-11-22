@@ -24,4 +24,3 @@
 (clojure.pprint/print-table (vals (::store/task-store @wstore)))
 (clojure.pprint/print-table (->> (vals (::store/history-store @wstore))
                                  (flatten)))
-

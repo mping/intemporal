@@ -1,5 +1,7 @@
 (ns intemporal2.store
-  (:import [clojure.lang IDeref]))
+  (:import [clojure.lang IDeref]
+           [java.util.concurrent CountDownLatch TimeUnit]
+           [java.util.concurrent.locks ReentrantLock]))
 
 (set! *warn-on-reflection* true)
 
@@ -13,11 +15,14 @@
     `{:sym 'ns/f :result :ok}`
     `{:sym 'ns/f :error <some error>}`
     ")
+  (watch-tasks [this predicate callback]
+    "Observes state changes, calling `callback` for any task that matches `predicate`")
   (await-task [this id] [this id opts]
-    "Waits for workflow to finish. Returns a deref'able object. Can throw.
+    "Waits for workflow to finish. Returns a deref'able value. Can throw.
     Opts include
-    - `timeout-ms`
-    - `polling-interval`")
+    - `promise`: if supplied, will be delivered when task is complete
+    - `timeout-ms`: timeout for task await
+    - `polling-interval-ms`: applied if promise was not supplied")
   (enqueue-task [this task]
     "Enqueues a workflow or activity execution")
   (dequeue-task [this]
@@ -28,15 +33,16 @@
   (next-event [this id] [this id last-event-id]))
 
 (deftype ResultOK [ok] IDeref (deref [this] ok))
-(deftype ResultError [err] IDeref (deref [this]  (throw err)))
+(deftype ResultError [err] IDeref (deref [this] (throw err)))
 
 (defn make-memstore []
-  (let [tasks  (atom {})
-        history    (atom {})
-        counter    (atom 0)
+  (let [tasks       (atom {})
+        history     (atom {})
+        counter     (atom 0)
+        pcounter    (atom 0)
 
-        find-task (fn [this id]
-                    (get @tasks id))
+        find-task   (fn [this id]
+                      (get @tasks id))
 
         update-task (fn [this id & kvs]
                       (when-let [w (find-task this id)]
@@ -44,8 +50,8 @@
 
     (reify
       IDeref
-      (deref [this] {::task-store (deref tasks)
-                     ::history-store  (deref history)})
+      (deref [this] {::task-store    (deref tasks)
+                     ::history-store (deref history)})
 
       HistoryStore
       (save-event [this id event]
@@ -81,24 +87,42 @@
             (update-task this id :state :failure :result error)
             (save-event this id {:type type :sym sym :error error}))))
 
+      (watch-tasks [this predicate f]
+        (let [k       (keyword (str "watcher-" (swap! pcounter inc)))
+              watchfn (fn [k atm old new]
+                        ;; todo: xf
+                        (let [matches   (filter predicate (vals new))
+                              changeset (filter #(not= (get old (:id %)) %) matches)]
+
+                          (run! #(f %) changeset)))]
+          (add-watch tasks k watchfn)))
+
       (await-task [this id]
-        (await-task this id {:timeout-ms Long/MAX_VALUE
+        (await-task this id {:timeout-ms          Long/MAX_VALUE
                              :polling-interval-ms 100}))
 
       (await-task [this id {:keys [timeout-ms polling-interval-ms] :as opts}]
-        (let [w (find-task this id)
-              s (now)]
-          (loop [curr w]
-            (let [{:keys [state result id]} curr
-                  elapsed (- (now) s)]
-              (cond
-                (>= elapsed timeout-ms) (throw (ex-info "Timeout awaiting for task" {:id id :opts (select-keys opts [:timeout-ms :polling-interval-ms])}))
-                (nil? curr) (throw (ex-info "Could not find task" {:id id :opts (select-keys opts [:timeout-ms :polling-interval-ms])}))
-                (= :success state) (->ResultOK result)
-                (= :failure state) (->ResultError result)
-                :else (do
-                        (Thread/sleep (long polling-interval-ms))
-                        (recur (-> (find-task this id)))))))))
+        (let [task        (find-task this id)
+              latch       (promise)
+              completed?  (fn [{:keys [state]}]
+                            (or (= :success state)
+                                (= :failure state)))
+              wrap-result (fn [{:keys [state result] :as task}]
+                            (cond
+                              (= :success state) (->ResultOK result)
+                              (= :failure state) (->ResultError result)
+                              :else (->ResultError (ex-info "Unknown state" {:task task}))))]
+
+          (if (completed? task)
+            (wrap-result task)
+            (let [pred #(and (= (:id %) id)
+                             (or (= :success (:state %))
+                                 (= :failure (:state %))))]
+              (watch-tasks this pred (fn [_] (deliver latch ::completed)))
+              ;; wait for resolution
+              (if (= ::timeout (deref latch timeout-ms ::timeout))
+                (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
+                (wrap-result (find-task this id)))))))
 
       (enqueue-task [this workflow]
         (swap! tasks assoc (:id workflow) workflow))
