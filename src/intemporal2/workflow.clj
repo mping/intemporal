@@ -7,14 +7,18 @@
 ;;;;
 ;; task definitions
 
+(defn random-id []
+  ;; TODO use (random-uuid), really
+  (apply str (take 10 (repeatedly #(char (+ (rand 26) 65))))))
+
 (defrecord WorkflowExecutionTask [type id ref sym args state result])
 (defrecord ActivityExecutionTask [type id ref sym args state result])
 
 (defn create-workflow-task [ref sym args]
-  (->WorkflowExecutionTask :workflow (random-uuid) ref sym args :new nil))
+  (->WorkflowExecutionTask :workflow (random-id) ref sym args :new nil))
 
 (defn create-activity-task [ref sym args]
-  (->ActivityExecutionTask :activity (random-uuid) ref sym args :new nil))
+  (->ActivityExecutionTask :activity (random-id) ref sym args :new nil))
 
 ;;;;
 ;; runtime
@@ -45,32 +49,33 @@
             (:type task)))
 
 (defmethod resume-task :workflow
-  [store {:keys [ref] :as ctx} {:keys [id sym args] :as task}]
+  [store {:keys [ref root] :as ctx} {:keys [id sym args] :as task}]
   ;; todo: ensure history is saved/replayed
   (let [fn (requiring-resolve sym)]
     (try
-      (store/transition-task store id {:ref ref :type :intemporal.workflow/invoke :sym sym :args args})
+      (store/transition-task store id {:ref ref :root root :type :intemporal.workflow/invoke :sym sym :args args})
 
       (let [r (apply fn args)]
-        (store/transition-task store id {:ref ref :type :intemporal.workflow/success :sym sym :result r})
+        (store/transition-task store id {:ref ref :root root  :type :intemporal.workflow/success :sym sym :result r})
         r)
 
       (catch Exception e
-        (store/transition-task store id {:ref ref :type :intemporal.workflow/failure :sym sym :error e})
+        (store/transition-task store id {:ref ref :root root  :type :intemporal.workflow/failure :sym sym :error e})
         (throw e)))))
 
 (defmethod resume-task :activity
-  [store {:keys [ref]} {:keys [id sym args] :as task}]
+  [store {:keys [ref root]} {:keys [id sym args] :as task}]
+  ;; todo: ensure history is saved/replayed
   (let [fn (requiring-resolve sym)]
     (try
-      (store/transition-task store id {:ref ref :type :intemporal.activity/invoke :sym sym :args args})
+      (store/transition-task store id {:ref ref :root root :type :intemporal.activity/invoke :sym sym :args args})
 
       (let [r (apply fn args)]
-        (store/transition-task store id {:ref ref :type :intemporal.activity/success :sym sym :result r})
+        (store/transition-task store id {:ref ref :root root  :type :intemporal.activity/success :sym sym :result r})
         r)
 
       (catch Exception e
-        (store/transition-task store id {:ref ref :type :intemporal.activity/failure :sym sym :error e})
+        (store/transition-task store id {:ref ref :root root :type :intemporal.activity/failure :sym sym :error e})
         (throw e)))))
 
 ;;;;
@@ -89,12 +94,13 @@
                           (fn [_]
                             ;; should be the store to handle dequeing
                             (when-let [{:keys [type id] :as task} (store/dequeue-task store)]
-                              (let [{ctxtype :type ctxid :id :as new-ctx} (select-keys *env* [:type :id])]
+                              (let [{last-root :root} *env*]
                                 (virtual-thread
                                   (with-env {:store store
                                              :type  type
-                                             :ref id}
-                                    (resume-task store {:type type :ref id} task)))))))))))
+                                             :ref id
+                                             :root (or last-root id)}
+                                    (resume-task store {:type type :ref id :root (or last-root id)} task)))))))))))
 
 (defn enqueue-and-wait
   [{:keys [store] :as env} task]

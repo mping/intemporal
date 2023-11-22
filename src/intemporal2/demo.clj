@@ -2,26 +2,29 @@
   (:require [intemporal2.store :as store]
             [intemporal2.workflow :as w]))
 
-
 ;;;;
 ;; demo
 
-(defn activity-fn [a]
+(defn nested-fn [a]
   (prn "activity was called" a)
-  :ok)
+  :nested)
+
+(defn activity-fn [a]
+  (let [n (w/stub-function nested-fn)]
+    (conj a :activity (n :sub))))
 
 (w/defn-workflow my-workflow [i]
   (let [s (w/stub-function activity-fn)]
-    [(/ 1 i) (s 1)]))
+    (conj [:root] (s [1]))))
 
-(def wstore (store/make-memstore))
+(def mstore (store/make-memstore))
 
-(w/start-worker! wstore)
+(w/start-worker! mstore)
 
-(w/with-env {:store wstore}
+(w/with-env {:store mstore}
   (my-workflow 1))
 
-(clojure.pprint/print-table (vals (::store/task-store @wstore)))
-(clojure.pprint/print-table (->> (vals (::store/history-store @wstore))
+(clojure.pprint/print-table (vals (::store/task-store @mstore)))
+(clojure.pprint/print-table (->> (vals (::store/history-store @mstore))
                                  (flatten)
                                  (sort-by :id)))
