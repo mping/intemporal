@@ -18,7 +18,6 @@
   (await-task [this id] [this id opts]
     "Waits for workflow to finish. Returns a deref'able value. Can throw.
     Opts include
-    - `promise`: if supplied, will be delivered when task is complete
     - `timeout-ms`: timeout for task await")
   (enqueue-task [this task]
     "Enqueues a workflow or activity execution")
