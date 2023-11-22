@@ -7,21 +7,20 @@
 ;;;;
 ;; task definitions
 
-(defrecord WorkflowExecutionTask [type id sym args state result])
-(defrecord ActivityExecutionTask [type id sym args state result])
+(defrecord WorkflowExecutionTask [type id ref sym args state result])
+(defrecord ActivityExecutionTask [type id ref sym args state result])
 
-(defn create-workflow-task [sym args]
-  (->WorkflowExecutionTask :workflow (random-uuid) sym args :new nil))
+(defn create-workflow-task [ref sym args]
+  (->WorkflowExecutionTask :workflow (random-uuid) ref sym args :new nil))
 
-(defn create-activity-task [sym args]
-  (->ActivityExecutionTask :activity (random-uuid) sym args :new nil))
+(defn create-activity-task [ref sym args]
+  (->ActivityExecutionTask :activity (random-uuid) ref sym args :new nil))
 
 ;;;;
 ;; runtime
 
 (def ^:dynamic *env* nil)
-(def default-env {:polling-interval-ms 1000
-                  :timeout-ms          Long/MAX_VALUE})
+(def default-env {:timeout-ms Long/MAX_VALUE})
 
 (def ^ThreadFactory threadfactory (-> (Thread/ofVirtual)
                                       (.name "intemporal-vthread-", 0)
@@ -39,37 +38,39 @@
 ;;;;
 ;; task execution/replay
 
+(ns-unmap *ns* 'resume-task)
 (defmulti resume-task
           "Continues a task that has been queued for execution. Replays events if they exist."
-          (fn [store task] (:type task)))
+          (fn [store ctx task]
+            (:type task)))
 
 (defmethod resume-task :workflow
-  [store {:keys [id sym args] :as task}]
+  [store {:keys [ref] :as ctx} {:keys [id sym args] :as task}]
   ;; todo: ensure history is saved/replayed
   (let [fn (requiring-resolve sym)]
     (try
-      (store/transition-task store id {:type :intemporal.workflow/invoke :sym sym :args args})
+      (store/transition-task store id {:ref ref :type :intemporal.workflow/invoke :sym sym :args args})
 
       (let [r (apply fn args)]
-        (store/transition-task store id {:type :intemporal.workflow/success :sym sym :result r})
+        (store/transition-task store id {:ref ref :type :intemporal.workflow/success :sym sym :result r})
         r)
 
       (catch Exception e
-        (store/transition-task store id {:type :intemporal.workflow/failure :sym sym :error e})
+        (store/transition-task store id {:ref ref :type :intemporal.workflow/failure :sym sym :error e})
         (throw e)))))
 
 (defmethod resume-task :activity
-  [store {:keys [id sym args] :as task}]
+  [store {:keys [ref]} {:keys [id sym args] :as task}]
   (let [fn (requiring-resolve sym)]
     (try
-      (store/transition-task store id {:type :intemporal.activity/invoke :sym sym :args args})
+      (store/transition-task store id {:ref ref :type :intemporal.activity/invoke :sym sym :args args})
 
       (let [r (apply fn args)]
-        (store/transition-task store id {:type :intemporal.activity/success :sym sym :result r})
+        (store/transition-task store id {:ref ref :type :intemporal.activity/success :sym sym :result r})
         r)
 
       (catch Exception e
-        (store/transition-task store id {:type :intemporal.activity/failure :sym sym :error e})
+        (store/transition-task store id {:ref ref :type :intemporal.activity/failure :sym sym :error e})
         (throw e)))))
 
 ;;;;
@@ -78,18 +79,22 @@
 (defn start-worker!
   "Starts a worker thread."
   ([store]
-   (start-worker! store (constantly false) 500))
-  ([store done? poll-ms]
+   (start-worker! store (constantly false)))
+  ([store done?]
    (virtual-thread
      (let [task-ready? #(= :new (:state %))]
+       ;; TODO check done?
        (store/watch-tasks store
                           task-ready?
                           (fn [_]
                             ;; should be the store to handle dequeing
-                            (when-let [task (store/dequeue-task store)]
-                              (virtual-thread
-                                (with-env {:store store}
-                                  (resume-task store task))))))))))
+                            (when-let [{:keys [type id] :as task} (store/dequeue-task store)]
+                              (let [{ctxtype :type ctxid :id :as new-ctx} (select-keys *env* [:type :id])]
+                                (virtual-thread
+                                  (with-env {:store store
+                                             :type  type
+                                             :ref id}
+                                    (resume-task store {:type type :ref id} task)))))))))))
 
 (defn enqueue-and-wait
   [{:keys [store] :as env} task]
@@ -110,9 +115,9 @@
          ;; workflow should be called within a with-env block:
          ;; (with-env {:store ..}
          ;;   (my-workflow ...
-         (enqueue-and-wait *env* (create-workflow-task (symbol #'~wname) ~argv))))))
+         (enqueue-and-wait *env* (create-workflow-task (get *env* :ref) (symbol #'~wname) ~argv))))))
 
 (defmacro stub-function [f]
   (let [fvar (resolve f)]
     `(fn [& argv#]
-       (enqueue-and-wait *env* (create-activity-task (symbol ~fvar) argv#)))))
+       (enqueue-and-wait *env* (create-activity-task (get *env* :ref) (symbol ~fvar) argv#)))))

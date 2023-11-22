@@ -7,7 +7,7 @@
 ;; demo
 
 (defn activity-fn [a]
-  (prn "activity was called")
+  (prn "activity was called" a)
   :ok)
 
 (w/defn-workflow my-workflow [i]
@@ -23,4 +23,5 @@
 
 (clojure.pprint/print-table (vals (::store/task-store @wstore)))
 (clojure.pprint/print-table (->> (vals (::store/history-store @wstore))
-                                 (flatten)))
+                                 (flatten)
+                                 (sort-by :id)))

@@ -21,8 +21,7 @@
     "Waits for workflow to finish. Returns a deref'able value. Can throw.
     Opts include
     - `promise`: if supplied, will be delivered when task is complete
-    - `timeout-ms`: timeout for task await
-    - `polling-interval-ms`: applied if promise was not supplied")
+    - `timeout-ms`: timeout for task await")
   (enqueue-task [this task]
     "Enqueues a workflow or activity execution")
   (dequeue-task [this]
@@ -69,23 +68,23 @@
                (first))))
 
       TaskStore
-      (transition-task [this id {:keys [type sym args result error]}]
+      (transition-task [this id {:keys [ref type sym args result error]}]
         ;; some redundancy between :result in task and event
         (cond
           (some? args)
           (do
             (update-task this id :state :pending)
-            (save-event this id {:type type :sym sym :args args}))
+            (save-event this id {:ref ref :type type :sym sym :args args}))
 
           (some? result)
           (do
             (update-task this id :state :success :result result)
-            (save-event this id {:type type :sym sym :result result}))
+            (save-event this id {:ref ref :type type :sym sym :result result}))
 
           (some? error)
           (do
             (update-task this id :state :failure :result error)
-            (save-event this id {:type type :sym sym :error error}))))
+            (save-event this id {:ref ref :type type :sym sym :error error}))))
 
       (watch-tasks [this predicate f]
         (let [k       (keyword (str "watcher-" (swap! pcounter inc)))
@@ -93,15 +92,13 @@
                         ;; todo: xf
                         (let [matches   (filter predicate (vals new))
                               changeset (filter #(not= (get old (:id %)) %) matches)]
-
                           (run! #(f %) changeset)))]
           (add-watch tasks k watchfn)))
 
       (await-task [this id]
-        (await-task this id {:timeout-ms          Long/MAX_VALUE
-                             :polling-interval-ms 100}))
+        (await-task this id {:timeout-ms Long/MAX_VALUE}))
 
-      (await-task [this id {:keys [timeout-ms polling-interval-ms] :as opts}]
+      (await-task [this id {:keys [timeout-ms] :as opts}]
         (let [task        (find-task this id)
               latch       (promise)
               completed?  (fn [{:keys [state]}]
