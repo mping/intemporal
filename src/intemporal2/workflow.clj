@@ -1,5 +1,7 @@
 (ns intemporal2.workflow
-  (:require [intemporal2.store :as store])
+  (:require [intemporal2.store :as store]
+            [intemporal.workflow :as-alias w]
+            [intemporal.activity :as-alias a])
   (:import [java.util.concurrent ThreadFactory]))
 
 (set! *warn-on-reflection* true)
@@ -13,12 +15,15 @@
         right ["agnesi" "albattani" "allen" "almeida" "antonelli" "archimedes" "ardinghelli" "aryabhata" "austin" "babbage" "banach" "banzai" "bardeen" "bartik" "bassi" "beaver" "bell" "benz" "bhabha" "bhaskara" "black" "blackburn" "blackwell" "bohr" "booth" "borg" "bose" "bouman" "boyd" "brahmagupta" "brattain" "brown" "buck" "burnell" "cannon" "carson" "cartwright" "carver" "cerf" "chandrasekhar" "chaplygin" "chatelet" "chatterjee" "chaum" "chebyshev" "clarke" "cohen" "colden" "cori" "cray" "curie" "curran" "darwin" "davinci" "dewdney" "dhawan" "diffie" "dijkstra" "dirac" "driscoll" "dubinsky" "easley" "edison" "einstein" "elbakyan" "elgamal" "elion" "ellis" "engelbart" "euclid" "euler" "faraday" "feistel" "fermat" "fermi" "feynman" "franklin" "gagarin" "galileo" "galois" "ganguly" "gates" "gauss" "germain" "goldberg" "goldstine" "goldwasser" "golick" "goodall" "gould" "greider" "grothendieck" "haibt" "hamilton" "haslett" "hawking" "heisenberg" "hellman" "hermann" "herschel" "hertz" "heyrovsky" "hodgkin" "hofstadter" "hoover" "hopper" "hugle" "hypatia" "ishizaka" "jackson" "jang" "jemison" "jennings" "jepsen" "johnson" "joliot" "jones" "kalam" "kapitsa" "kare" "keldysh" "keller" "kepler" "khayyam" "khorana" "kilby" "kirch" "knuth" "kowalevski" "lalande" "lamarr" "lamport" "leakey" "leavitt" "lederberg" "lehmann" "lewin" "lichterman" "liskov" "lovelace" "lumiere" "mahavira" "margulis" "matsumoto" "maxwell" "mayer" "mccarthy" "mcclintock" "mclaren" "mclean" "mcnulty" "meitner" "mendel" "mendeleev" "meninsky" "merkle" "mestorf" "mirzakhani" "montalcini" "moore" "morse" "moser" "murdock" "napier" "nash" "neumann" "newton" "nightingale" "nobel" "noether" "northcutt" "noyce" "panini" "pare" "pascal" "pasteur" "payne" "perlman" "pike" "poincare" "poitras" "proskuriakova" "ptolemy" "raman" "ramanujan" "rhodes" "ride" "ritchie" "robinson" "roentgen" "rosalind" "rubin" "saha" "sammet" "sanderson" "satoshi" "shamir" "shannon" "shaw" "shirley" "shockley" "shtern" "sinoussi" "snyder" "solomon" "spence" "stonebraker" "sutherland" "swanson" "swartz" "swirles" "taussig" "tesla" "tharp" "thompson" "torvalds" "tu" "turing" "varahamihira" "vaughan" "villani" "visvesvaraya" "volhard" "wescoff" "wilbur" "wiles" "williams" "williamson" "wilson" "wing" "wozniak" "wright" "wu" "yalow" "yonath" "zhukovsky"]]
     (str (rand-nth left) "-" (rand-nth right))))
 
-(defrecord WorkflowExecutionTask [type id ref root sym args state result])
-(defrecord ActivityExecutionTask [type id ref root sym args state result])
+(defrecord WorkflowExecutionTask [type id ref root sym args state result]
+  Object
+  (toString [this] (str "#WorkflowExecutionTask" (into {} this))))
+(defrecord ActivityExecutionTask [type id ref root sym args state result]
+  Object
+  (toString [this] (str "#ActivityExecutionTask" (into {} this))))
 
 (defn create-workflow-task [ref root sym args]
-  (let [id (random-id)]
-    (->WorkflowExecutionTask :workflow (random-id) ref root sym args :new nil)))
+  (->WorkflowExecutionTask :workflow (random-id) ref root sym args :new nil))
 
 (defn create-activity-task [ref root sym args]
   (->ActivityExecutionTask :activity (random-id) ref root sym args :new nil))
@@ -32,11 +37,16 @@
 (def ^ThreadFactory threadfactory (-> (Thread/ofVirtual)
                                       (.name "intemporal-vthread-", 0)
                                       (.factory)))
+(defn internal-error? [ex]
+  (= :internal (-> ex ex-data ::type)))
+
+(defn internal-exception [msg data]
+  (ex-info msg (merge data {::type :internal})))
 
 (defmacro virtual-thread [& body]
-  `(-> threadfactory
-       (.newThread (fn [] (do ~@body)))
-       (.start)))
+  `(let [thread# (-> threadfactory (.newThread (fn ^:once [] (do ~@body))))]
+     (.start thread#)
+     thread#))
 
 (defmacro with-env [m & body]
   `(with-bindings {#'*env* (merge default-env ~m)}
@@ -44,6 +54,55 @@
 
 ;;;;
 ;; task execution/replay
+
+(defn- event-matches? [{t :type s :sym} {t2 :type s2 :sym}]
+  (and (= t t2) (= s s2)))
+
+(defn- resume-fn-task
+  "Resumes a generic fn call task"
+  [store {:keys [id root sym args] :as task} [invoke success failure]]
+  (let [fn (requiring-resolve sym)
+        [inv? res?] (store/all-events store id)]
+
+    ;; mark invoke/replay
+    (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
+      (cond
+        (not inv?)
+        (store/apply-fn-event store id next-event)
+
+        (not (event-matches? inv? next-event))
+        (throw (internal-exception "Transition unexpected" {:type     (:type inv?)
+                                                            :expected invoke}))))
+
+    ;; mark success/failure or replay
+    (let [next-event   {:ref id :root (or root id) :type success :sym sym}
+          next-failure (assoc next-event :type failure)]
+
+      (cond
+        (not res?)
+        (try
+          ;; TODO: fix replay
+          ;; - check if there is a pending/new task for this ref
+          ;;   if there is, wait for it
+          (let [r (apply fn args)]
+            (store/apply-fn-event store id (assoc next-event :result r))
+            r)
+          (catch Exception e
+            (when-not (internal-error? e)
+              (store/apply-fn-event store id (assoc next-failure :error e)))
+            (throw e)))
+
+        ;; replay ok
+        (event-matches? res? next-event)
+        (:result next-event)
+
+        ;; replay failure
+        (event-matches? res? next-failure)
+        (throw (:error next-failure))
+
+        :else
+        (throw (internal-exception "Transition unexpected" {:type     (:type res?)
+                                                            :expected #{success failure}}))))))
 
 (ns-unmap *ns* 'resume-task)
 (defmulti resume-task
@@ -53,33 +112,11 @@
 
 (defmethod resume-task :workflow
   [store {:keys [id root sym args] :as task}]
-  ;; todo: ensure history is saved/replayed
-  (let [fn (requiring-resolve sym)]
-    (try
-      (store/transition-task store id {:ref id :root (or root id) :type :intemporal.workflow/invoke :sym sym :args args})
-
-      (let [r (apply fn args)]
-        (store/transition-task store id {:ref id :root (or root id) :type :intemporal.workflow/success :sym sym :result r})
-        r)
-
-      (catch Exception e
-        (store/transition-task store id {:ref id :root (or root id) :type :intemporal.workflow/failure :sym sym :error e})
-        (throw e)))))
+  (resume-fn-task store task [::w/invoke ::w/success ::w/failure]))
 
 (defmethod resume-task :activity
   [store {:keys [id root sym args] :as task}]
-  ;; todo: ensure history is saved/replayed
-  (let [fn (requiring-resolve sym)]
-    (try
-      (store/transition-task store id {:ref id :root root :type :intemporal.activity/invoke :sym sym :args args})
-
-      (let [r (apply fn args)]
-        (store/transition-task store id {:ref id :root root :type :intemporal.activity/success :sym sym :result r})
-        r)
-
-      (catch Exception e
-        (store/transition-task store id {:ref id :root root :type :intemporal.activity/failure :sym sym :error e})
-        (throw e)))))
+  (resume-fn-task store task [::w/invoke ::w/success ::w/failure]))
 
 ;;;;
 ;; worker
@@ -109,9 +146,10 @@
 (defn enqueue-and-wait
   [{:keys [store] :as opts} task]
   ;(println ">>> enqueuing" task)
-  (store/enqueue-task store task)
-  ;; await for task to be completed
-  (deref (store/await-task store (:id task) opts)))
+  (let [t (or (store/matching-task store task)
+              (store/enqueue-task store task))]
+    ;; await for task to be completed
+    (deref (store/await-task store (:id t) opts))))
 
 ;;;;
 ;; userland

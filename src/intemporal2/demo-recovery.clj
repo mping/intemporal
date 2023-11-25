@@ -1,5 +1,6 @@
 (ns intemporal2.demo
-  (:require [intemporal2.store :as store]
+  (:require [clojure.java.io :as io]
+            [intemporal2.store :as store]
             [intemporal2.workflow :as w]))
 
 ;;;;
@@ -10,23 +11,17 @@
 
 (defn activity-fn [a]
   (let [n (w/stub-function nested-fn)]
-    ;;(System/exit 0) ;; TODO this emulates process crash
     (conj a :activity (n :sub))))
 
 (w/defn-workflow my-workflow [i]
   (let [s (w/stub-function activity-fn)]
     (conj [:root] (s [1]))))
 
-(def mstore (store/make-memstore "/tmp/intemporal.edn"
+(io/copy (io/file "./src/intemporal2/recovery.edn") (io/file "/tmp/intemporal-recovery.edn"))
+(def mstore (store/make-memstore "/tmp/intemporal-recovery.edn"
                                  {'intemporal2.workflow.WorkflowExecutionTask w/map->WorkflowExecutionTask
                                   'intemporal2.workflow.ActivityExecutionTask w/map->ActivityExecutionTask}))
 (def worker (w/start-worker! mstore))
-
-#_
-(store/reenqueue-pending-tasks mstore println)
-
-(w/with-env {:store mstore}
-  (my-workflow 1))
 
 (defn print-tables []
   (let [tasks (vals @(::store/task-store @mstore))
@@ -38,16 +33,4 @@
 
 (print-tables)
 
-;;
-;; now lets emulate a crash: just remove some events
-#_
-(let [[w1 a1 a2] (keys @(::store/task-store @mstore))]
-  ;; drop activity tasks
-  (swap! (::store/task-store @mstore) dissoc a1 a2)
-  ;; mark task as new
-  ;; the worker is still running
-  (swap! (::store/task-store @mstore) update w1 (fn [v] (-> v (assoc :state :new)
-                                                              (dissoc :result))))
-  (println "------------------------------------------------------------------------")
-  (println "------------------------------------------------------------------------")
-  (print-tables))
+(store/reenqueue-pending-tasks mstore println)
