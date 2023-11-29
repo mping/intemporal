@@ -114,15 +114,16 @@
              (update-task this id :state :pending)
              (save-event this id evt))
 
-           (some? result)
-           (let [evt {:ref ref :root root :type type :sym sym :result result}]
-             (update-task this id :state :success :result result)
-             (save-event this id evt))
-
            (some? error)
            (let [evt {:ref ref :root root :type type :sym sym :error error}]
              (update-task this id :state :failure :result error)
+             (save-event this id evt))
+
+           :else ;;(some? result) ;result can be nil
+           (let [evt {:ref ref :root root :type type :sym sym :result result}]
+             (update-task this id :state :success :result result)
              (save-event this id evt))))
+
 
        (matching-task [this task]
          (let [ks     [:ref :root :type :sym :args]

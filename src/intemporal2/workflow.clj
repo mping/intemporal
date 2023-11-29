@@ -1,7 +1,8 @@
 (ns intemporal2.workflow
   (:require [intemporal2.store :as store]
             [intemporal.workflow :as-alias w]
-            [intemporal.activity :as-alias a])
+            [intemporal.activity :as-alias a]
+            [intemporal.protocol :as-alias p])
   (:import [java.util.concurrent ThreadFactory]))
 
 (set! *warn-on-reflection* true)
@@ -18,15 +19,23 @@
 (defrecord WorkflowExecutionTask [type id ref root sym args state result]
   Object
   (toString [this] (str "#WorkflowExecutionTask" (into {} this))))
+
 (defrecord ActivityExecutionTask [type id ref root sym args state result]
   Object
   (toString [this] (str "#ActivityExecutionTask" (into {} this))))
+
+(defrecord ProtoActivityExecutionTask [proto type id ref root sym args state result]
+  Object
+  (toString [this] (str "#ProtoActivityExecutionTask" (into {} this))))
 
 (defn create-workflow-task [ref root sym args]
   (->WorkflowExecutionTask :workflow (random-id) ref root sym args :new nil))
 
 (defn create-activity-task [ref root sym args]
   (->ActivityExecutionTask :activity (random-id) ref root sym args :new nil))
+
+(defn create-proto-activity-task [proto ref root sym args]
+  (->ProtoActivityExecutionTask proto :proto-activity (random-id) ref root sym args :new nil))
 
 ;;;;
 ;; runtime
@@ -60,7 +69,8 @@
 
 (defn- resume-fn-task
   "Resumes a generic fn call task"
-  [store {:keys [id root sym args] :as task} [invoke success failure]]
+  [store protos {:keys [type proto id root sym args] :as task} [invoke success failure]]
+  ;; TODO check if proto exists in protos
   (let [fn (requiring-resolve sym)
         [inv? res?] (store/all-events store id)]
 
@@ -84,7 +94,13 @@
           ;; TODO: fix replay
           ;; - check if there is a pending/new task for this ref
           ;;   if there is, wait for it
-          (let [r (apply fn args)]
+          (let [impl? (if (= :proto-activity type)
+                        (get protos proto)
+                        nil)
+                args' (if (= :proto-activity type)
+                        (cons impl? args)
+                        args)
+                r (apply fn args')]
             (store/apply-fn-event store id (assoc next-event :result r))
             r)
           (catch Exception e
@@ -107,16 +123,20 @@
 (ns-unmap *ns* 'resume-task)
 (defmulti resume-task
           "Continues a task that has been queued for execution. Replays events if they exist."
-          (fn [store task]
+          (fn [store protos task]
             (:type task)))
 
 (defmethod resume-task :workflow
-  [store {:keys [id root sym args] :as task}]
-  (resume-fn-task store task [::w/invoke ::w/success ::w/failure]))
+  [store protos {:keys [id root sym args] :as task}]
+  (resume-fn-task store protos task [::w/invoke ::w/success ::w/failure]))
 
 (defmethod resume-task :activity
-  [store {:keys [id root sym args] :as task}]
-  (resume-fn-task store task [::w/invoke ::w/success ::w/failure]))
+  [store protos {:keys [id root sym args] :as task}]
+  (resume-fn-task store protos task [::a/invoke ::a/success ::a/failure]))
+
+(defmethod resume-task :proto-activity
+  [store protos {:keys [id root sym args] :as task}]
+  (resume-fn-task store protos task [::p/invoke ::p/success ::p/failure]))
 
 ;;;;
 ;; worker
@@ -125,48 +145,31 @@
   "Starts a worker thread."
   ([store]
    (start-worker! store (constantly false)))
-  ([store done?]
+  ([store worker-protos]
    (virtual-thread
-     (let [task-ready? #(= :new (:state %))]
-       ;; TODO check done?
+     (let [task-ready? #(= :new (:state %))
+           env *env*]
        (store/watch-tasks store
                           task-ready?
                           (fn [_]
                             ;; should be the store to handle dequeing
                             (when-let [{:keys [type id] :as task} (store/dequeue-task store)]
-                              (let [{last-root :root} *env*]
+                              (let [{last-root :root protos :protos} env]
                                 ;; run in a new thread to avoid deadlocks
                                 (virtual-thread
                                   (with-env {:store store
                                              :type  type
                                              :ref   id
-                                             :root  (or last-root id)}
-                                    (resume-task store task)))))))))))
+                                             :root  (or last-root id)
+                                             :protos (or protos worker-protos)}
+                                    (resume-task store worker-protos task)))))))))))
 
 (defn enqueue-and-wait
   [{:keys [store] :as opts} task]
-  ;(println ">>> enqueuing" task)
+  ;; because execution engine is supposed to be deterministic,
+  ;; we can safely assume that if an identic task exists at this point
+  ;; we are replaying some events
   (let [t (or (store/matching-task store task)
               (store/enqueue-task store task))]
     ;; await for task to be completed
     (deref (store/await-task store (:id t) opts))))
-
-;;;;
-;; userland
-
-(defmacro defn-workflow
-  [sym argv & body]
-  (let [wname (symbol (str sym "-"))]
-    ;; capture bindings to propagate it correctly for activities
-    `(do
-       (defn- ~wname ~argv (do ~@body))
-       (defn ~sym ~argv
-         ;; workflow should be called within a with-env block:
-         ;; (with-env {:store ..}
-         ;;   (my-workflow ...
-         (enqueue-and-wait *env* (create-workflow-task (get *env* :ref) (get *env* :root) (symbol #'~wname) ~argv))))))
-
-(defmacro stub-function [f]
-  (let [fvar (resolve f)]
-    `(fn [& argv#]
-       (enqueue-and-wait *env* (create-activity-task (get *env* :ref) (get *env* :root) (symbol ~fvar) argv#)))))

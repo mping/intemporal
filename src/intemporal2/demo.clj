@@ -1,32 +1,29 @@
 (ns intemporal2.demo
-  (:require [intemporal2.store :as store]
-            [intemporal2.workflow :as w]))
+  (:require [clojure.java.io :as io]
+            [intemporal2.store :as store]
+            [intemporal2.workflow :as w]
+            [intemporal2.macros :refer [stub-function defn-workflow]]))
 
 ;;;;
-;; demo
+;; demo - recovery of a crashed process
 
 (defn nested-fn [a]
   :nested)
 
 (defn activity-fn [a]
-  (let [n (w/stub-function nested-fn)]
-    ;;(System/exit 0) ;; TODO this emulates process crash
+  (let [n (stub-function nested-fn)]
     (conj a :activity (n :sub))))
 
-(w/defn-workflow my-workflow [i]
-  (let [s (w/stub-function activity-fn)]
+(defn-workflow my-workflow [i]
+  (let [s (stub-function activity-fn)]
     (conj [:root] (s [1]))))
 
-(def mstore (store/make-memstore "/tmp/intemporal.edn"
+;; make a backup of the db to allow replay
+(io/copy (io/file "./src/intemporal2/recovery.edn") (io/file "/tmp/intemporal-recovery.edn"))
+(def mstore (store/make-memstore "/tmp/intemporal-recovery.edn"
                                  {'intemporal2.workflow.WorkflowExecutionTask w/map->WorkflowExecutionTask
                                   'intemporal2.workflow.ActivityExecutionTask w/map->ActivityExecutionTask}))
 (def worker (w/start-worker! mstore))
-
-#_
-(store/reenqueue-pending-tasks mstore println)
-
-(w/with-env {:store mstore}
-  (my-workflow 1))
 
 (defn print-tables []
   (let [tasks (vals @(::store/task-store @mstore))
@@ -38,16 +35,6 @@
 
 (print-tables)
 
-;;
-;; now lets emulate a crash: just remove some events
-#_
-(let [[w1 a1 a2] (keys @(::store/task-store @mstore))]
-  ;; drop activity tasks
-  (swap! (::store/task-store @mstore) dissoc a1 a2)
-  ;; mark task as new
-  ;; the worker is still running
-  (swap! (::store/task-store @mstore) update w1 (fn [v] (-> v (assoc :state :new)
-                                                              (dissoc :result))))
-  (println "------------------------------------------------------------------------")
-  (println "------------------------------------------------------------------------")
-  (print-tables))
+;;;;
+;; all pending tasks are marked as new again, so they will be reexecuted
+(store/reenqueue-pending-tasks mstore println)
