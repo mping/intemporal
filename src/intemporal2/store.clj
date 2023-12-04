@@ -22,7 +22,7 @@
     Opts include
     - `timeout-ms`: timeout for task await")
   (matching-task [this task]
-    "Finds the matching task on the db")
+    "Finds the matching task on the db, comparing the following tuple: `:ref :root :type :sym :args`")
   (reenqueue-pending-tasks [this callback]
     "Marks all pending tasks as `new`")
   (enqueue-task [this task]
