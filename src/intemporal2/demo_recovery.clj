@@ -1,4 +1,4 @@
-(ns intemporal2.demo
+(ns intemporal2.demo-recovery
   (:require [clojure.java.io :as io]
             [intemporal2.store :as store]
             [intemporal2.workflow :as w]
