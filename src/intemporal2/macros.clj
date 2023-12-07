@@ -18,15 +18,16 @@
          ;; (with-env {:store ..}
          ;;   (my-workflow ...
          (let [ref#  (:ref w/*env*)
-               root# (:root w/*env*)]
-           (w/enqueue-and-wait w/*env* (w/create-workflow-task ref# root# (symbol #'~wname) ~argv)))))))
+               root# (:root w/*env*)
+               fvar# #'~wname]
+           (w/enqueue-and-wait w/*env* (w/create-workflow-task ref# root# (symbol fvar#) (var-get fvar#) ~argv)))))))
 
 (defmacro stub-function [f]
   (let [fvar (resolve f)]
     `(fn [& argv#]
        (let [ref#  (:ref w/*env*)
              root# (:root w/*env*)]
-         (w/enqueue-and-wait w/*env* (w/create-activity-task ref# root# (symbol ~fvar) argv#))))))
+         (w/enqueue-and-wait w/*env* (w/create-activity-task ref# root# (symbol ~fvar) (var-get ~fvar) argv#))))))
 
 
 (defmacro stub-protocol
@@ -57,4 +58,5 @@
                 ;; TODO check if (-> ~proto :var symbol) exists in (:protos *env*)
                 (let [ref#  (:ref w/*env*)
                       root# (:root w/*env*)]
-                  (w/enqueue-and-wait w/*env* (w/create-proto-activity-task (-> ~proto :var symbol) ref# root# (symbol aid#) [~@args])))))))))
+                  ;; TODO (var-get (requiring-resolve aid#))
+                  (w/enqueue-and-wait w/*env* (w/create-proto-activity-task (-> ~proto :var symbol) ref# root# (symbol aid#) (var-get (requiring-resolve aid#)) [~@args])))))))))

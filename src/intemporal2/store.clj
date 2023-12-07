@@ -28,7 +28,7 @@
   (enqueue-task [this task]
     "Enqueues a workflow or activity execution")
   (dequeue-task [this]
-    "Dequeues some workflow or activity execution."))
+    "Dequeues some workflow, protocol or activity execution. If the task was deserialized, `fvar` attribute must be a `fn`"))
 
 (defprotocol HistoryStore
   (save-event [this id event] "Saves the event. Returns the saved event")
@@ -36,6 +36,9 @@
 
 (deftype ResultOK [ok] IDeref (deref [this] ok))
 (deftype ResultError [err] IDeref (deref [this] (throw err)))
+
+(defn- sym->var [{:keys [sym fvar] :as task}]
+  (or fvar (requiring-resolve sym)))
 
 (defn make-memstore
   ([]
@@ -188,7 +191,7 @@
            (swap-vals! tasks
                        (fn [v] (let [found (first-new v)]
                                  (if found
-                                   (do (->> (assoc found :state :pending)
+                                   (do (->> (assoc found :state :pending :fvar (sym->var found))
                                             (reset! found?)
                                             (assoc v (:id found))))
                                    v))))
