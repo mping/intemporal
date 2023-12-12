@@ -35,8 +35,7 @@
            (my-workflow 1)))
 
 (defn pprint-table [table]
-  #?(:clj (clojure.pprint/print-table table)
-     :cljs (cljs.pprint/print-table table)))
+  (clojure.pprint/print-table table))
 
 (defn print-tables []
   (let [tasks (vals @(::store/task-store @mstore))
