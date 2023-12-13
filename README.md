@@ -17,53 +17,60 @@ Two concepts apply:
 ## Usage
 
 Examples:
-- [hello_world.clj](./dev/intemporal/example/hello_world.clj)
-- [protocols.clj](./dev/intemporal/example/protocol_activity.clj)
-- [saga.clj](./dev/intemporal/example/saga.clj)
+- [demo_workflow.clj](./dev/intemporal2/demo_workflow.clj)
+- [demo_automata.clj](./dev/intemporal2/demo_automata.clj)
+- [demo_saga.cljc](./dev/intemporal2/demo_saga.cljc)
 
 ```clojure
 
-(require '[intemporal.workflow :as w]
-         '[intemporal.activity :as a]
-         '[intemporal.store :as s])
+(ns intemporal2.demo-workflow
+  (:require [intemporal2.store :as store]
+            [intemporal2.workflow :as w]
+            [intemporal2.macros :refer [stub-function stub-protocol defn-workflow]]))
 
-;; define your side-effects
-(defprotocol ActivityProtoExample
-  (run [this arg])
-  (query [this arg])
-  (cancel [this]))
+;;;;
+;; demo
 
-;; can be a function too
-(defn run-side-effect [_] :side-effect)
+(defn nested-fn [a]
+  [a :nested])
 
-(defrecord MyProtoImpl []
-  ActivityProtoExample
-  (run [this arg] (run-side-effect arg))
-  ;; we can pass additional metadata
-  (query [this arg] (run-side-effect arg))
-  (cancel [_] :cancel))
+(defn activity-fn [a]
+  (let [f (stub-function nested-fn)]
+    (conj a :activity (f :sub))))
 
-;; workflow: make use of your side effects
-(defn my-workflow [arg]
-  ;; activities should be stubbed
-  (let [stub (a/stub-protocol ActivityProtoExample (->MyProtoImpl) {:idempotent true})]
-    (try
-      (if (query stub :query)
-        (run stub :run)
-        nil)
-      (catch Exception e
-        (cancel stub)
-        (throw e)))))
+(defprotocol MyActivities
+  (some-stuff [this a]))
 
-;; register your workflow, we're actually calling `alter-var-root`
-;; the store that is passed here is the one that will be used to persist/query
-(w/register-workflow store/memstore my-workflow)
+(defrecord MyActivitiesImpl []
+  MyActivities
+  (some-stuff [this a] (println "record was called:" ) [a :child]))
 
-;; to use, just call your workflow function
-(my-workflow "foo")
+(defn-workflow my-workflow [i]
+  (let [sf (stub-function activity-fn)
+        pr (stub-protocol MyActivities {})]
+    (conj [:root]
+          (sf [1])
+          (some-stuff pr :X))))
 
-;; later, given a workflow id you can retry it:
-(w/retry store/memstore my-workflow rid)
+(def mstore (store/make-memstore))
+(def worker (w/start-worker! mstore {`MyActivities (->MyActivitiesImpl)}))
+
+;; note that in cljs, this returns a promise
+(def res (w/with-env {:store mstore}
+           (my-workflow 1)))
+
+(defn pprint-table [table]
+  (clojure.pprint/print-table table))
+
+(defn print-tables []
+  (let [tasks (vals @(::store/task-store @mstore))
+        events (->> (vals @(::store/history-store @mstore))
+                    (flatten)
+                    (sort-by :id))]
+    (pprint-table tasks)
+    (pprint-table events)))
+
+(print-tables)
 ```
 
 # TODO
