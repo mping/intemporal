@@ -21,8 +21,7 @@
 </head>
 <body>
 <main class="container">
-    <h1 class=>Intemporal demo with sqlite.js</h1>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <h1 class=>Intemporal demo with in-memory store</h1>
     <script>
     var main = document.createElement("script");
     main.setAttribute("src", window.location+"/js/main.js");
@@ -31,90 +30,81 @@
 
     </script>
 
-    This demo is running intemporal with a sql-on-wasm backing store.
+    This demo is running intemporal with an in-memory store
     <div class="grid">
         <div>
             <h3>Requirements</h3>
             <pre><code>
 (ns intemporal.doc
-  (:require
-    [intemporal.doc.sqlite :as sqlite]
-    [intemporal.doc.sqlite-store :as sstore]
-    [intemporal.store :as s]
-    [intemporal.workflow :as w]
-    [intemporal.activity :as a]))
+  (:require [intemporal2.store :as s]
+            [intemporal2.workflow :as w]
+            [promesa.core :as p]
+  (:require-macros [intemporal2.macros :refer [stub-function stub-protocol defn-workflow]]
 </code>
 </pre>
 
-            <h3>Using the protocol version of intemporal activities</h3>
+            <h3>Let's define some side effects functions</h3>
             <pre><code>
-(defprotocol HttpClient
-  (doHead [this id] "Can be called multiple times")
-  (doPost [this id] "Should only be called once"))
 
-(defn maybe [thunk]
-  (let [r (rand-int 10)]
-    (when (> r 5)
-      (throw (js/Error. "Forced error (simulated failure)")))
-    (thunk)))
+(defn nested-fn [a]
+  [a :nested])
+
+(defn activity-fn [a]
+  (let [f (stub-function nested-fn)]
+    (f :sub)))
+
+(defprotocol MyActivities
+  (some-stuff [this a]))
+
+(defrecord MyActivitiesImpl []
+  MyActivities
+  (some-stuff [this a] (println "record was called:" ) [a :child]))
 </code>
 </pre>
 
-            <h3>Implementation</h3>
-            <pre><code>
-;; basic protocol function
-(def example-impl
-  (reify HttpClient
-    (doHead [_ _url] "200 OK")
-    (doPost [_ _url] (maybe (fn [] "200 OK")))))
-
-;; alternative implementation
-(defrecord MyHttpClient []
-  HttpClient
-  (doHead [_ _url] "200 OK")
-  (doPost [_ _url] (maybe (fn [] "200 OK"))))
-</code>
 </pre>
             <h3>Workflow definition</h3>
+            <p>
+                Since the js runtime does not allow blocking calls,
+                the results of stubbed functions and protocols is a promise.
+                The clojure version of this does not rely on promises.
+            </p>
             <pre><code>
-(defn simpleflow
-  [n]
-  ;; stub-protocol proxies all protocol fns so the flow state can be saved/restored
-  ;; (->MyHttpClient) would work too
-  (let [stub (a/stub-protocol HttpClient example-impl {:idempotent true})]
-    (doHead stub (str n "carr"))
-    (doPost stub (str n "carr"))))
+(defn-workflow my-workflow [i]
+  (let [sf (stub-function activity-fn)
+        pr (stub-protocol MyActivities {})
 
-;; register the workflow
-(w/register-workflow sqlitestore simpleflow)
+        sres (sf [1])
+        pres (some-stuff pr :X)]
+    ;; use promesa to wait for promises to be realized
+    (p/let [v1 sres
+            v2 pres]
+      (conj [:root]
+            v1
+            v2))))
+
 </code>
 </pre>
 
             <h3>Execution</h3>
             <pre><code>
-(try
-  (simpleflow "foo")
-  (catch js/Object err
-    (js/console.error "Workflow failed!" err)))
+;; create a store
+(def mstore (s/make-memstore))
+;; start some worker that knows how to resolve protocol implementations
+(def worker (w/start-worker! mstore {`MyActivities (->MyActivitiesImpl)}))
+
+;; finally, call your workflow
+(let [res (w/with-env {:store mstore}
+             (my-workflow 1))]
 </code>
 </pre>
             <h3>Live example</h3>
-            <button id="runner">Click to run the code</button>
-            <blockquote>
-                When running the workflow, all events will be stored at the store level.
-                If a workflow fails, you can retry the workflow; if it is retryable it will resume from the
-                last known good "event".
-            </blockquote>
+            <h4>Results</h4>
             <pre id="results">;;Results go here</pre>
-            <button id="retry" disabled>Click to retry (enabled when workflow fails)</button>
-            <blockquote>
-                Observe the events on the table; you will see new events for the given runid, starting from the last
-                successful event. Intemporal "replays" the persisted events then resumes execution.
-            </blockquote>
 
             <h3>In-browser results</h3>
-            <h4>Metadata</h4>
-            <div id="metadata"></div>
+            <h4>Tasks</h4>
+            <div id="tasks"></div>
 
             <h4>Events</h4>
             <div id="events"></div>
