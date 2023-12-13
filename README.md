@@ -1,6 +1,6 @@
 # intemporal
 
-![example workflow](https://github.com/mping/intemporal/actions/workflows/clojure.yml/badge.svg)
+![Continuous Integration](https://github.com/mping/intemporal/actions/workflows/clojure.yml/badge.svg)
 
 ## (in)temporal - NOT temporal
 
