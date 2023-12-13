@@ -76,12 +76,11 @@ Examples:
 # TODO
 
 - [X] Activites + Workflows
-- [x] Idempotency handling
-- [x] SQL store
 - [x] Pass stub options
   - [x] Discard `ActivityOptions` 
   - [x] Protocol options
   - [x] Regular fn options
 - [x] Convert to `.cljc` 
-- [ ] workers + queues
+- [x] workers + queues
 - [ ] function versioning
+- [ ] saga
