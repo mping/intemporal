@@ -1,6 +1,6 @@
 ;; shadow-cljs configuration
 {:deps {:aliases [:cljs :dev :doc]}
- :nrepl {:init-ns intemporal.example.dev}
+ :nrepl {:init-ns intemporal2.dev}
  :dev-http {8000 "public"}
  :builds {:doc {:target :browser
                 :output-dir "public/js"
@@ -13,5 +13,5 @@
                 :asset-path "."
                 :output-dir "target"
                 :compiler-options {:infer-externs true
-                                                    :optimizations :none}
-                :modules {:dev {:entries [intemporal.example.dev]}}}}}
+                                   :optimizations :none}
+                :modules {:dev {:entries [intemporal2.dev]}}}}}
