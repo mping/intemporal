@@ -173,3 +173,8 @@
     ;; in cljs there are no blocking ops, so we return the result promise
     #?(:clj (deref prom)
        :cljs prom)))
+
+;; TODO implement
+(defn add-compensation [thunk])
+
+(defn compensate [])

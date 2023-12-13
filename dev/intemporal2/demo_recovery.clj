@@ -19,7 +19,7 @@
     (conj [:root] (s [1]))))
 
 ;; make a backup of the db to allow replay
-(io/copy (io/file "./src/intemporal2/recovery.edn") (io/file "/tmp/intemporal-recovery.edn"))
+(io/copy (io/file "./dev/intemporal2/recovery.edn") (io/file "/tmp/intemporal-recovery.edn"))
 (def mstore (store/make-memstore "/tmp/intemporal-recovery.edn"
                                  {'intemporal2.workflow.WorkflowExecutionTask w/map->WorkflowExecutionTask
                                   'intemporal2.workflow.ActivityExecutionTask w/map->ActivityExecutionTask}))
