@@ -49,17 +49,17 @@
      :cljs (.getTime (js/Date.))))
 
 (defn- sym->var [store {:keys [sym fvar] :as task}]
-  #?(:clj (or fvar (requiring-resolve sym))
-     :cljs (or fvar (lookup store sym)))) ;; TODO lookup on store
+  #?(:clj  (or fvar (requiring-resolve sym))
+     :cljs (or fvar (lookup store sym))))                   ;; TODO lookup on store
 
 (defn- read-edn [file readers]
-  #?(:clj (with-open [f (clojure.java.io/reader file)]
-            (edn/read-string {:readers readers} (slurp f)))
+  #?(:clj  (with-open [f (clojure.java.io/reader file)]
+             (edn/read-string {:readers readers} (slurp f)))
      :cljs (let [f (.getItem (.-localStorage js/window) file)]
              (edn/read-string {:readers readers} f))))
 
 (defn- write-edn [file val]
-  #?(:clj (spit file val)
+  #?(:clj  (spit file val)
      :cljs (.setItem (.-localStorage js/window) file (pr-str val))))
 
 (defn- edn-exists? [file]
@@ -83,12 +83,12 @@
    (make-memstore nil nil))
   ([file readers]
    ;; TODO use single atom?
-   (let [tasks        (atom {})
-         history      (atom {})
-         counter      (atom 0)
-         pcounter     (atom 0)
-         ecounter     (atom 0)
-         vars         (atom {})
+   (let [tasks       (atom {})
+         history     (atom {})
+         counter     (atom 0)
+         pcounter    (atom 0)
+         ecounter    (atom 0)
+         vars        (atom {})
 
          ;;persistence
          persist!    (fn [_ _ _ _] (when file
@@ -99,15 +99,15 @@
                                                         :pcounter @pcounter
                                                         :ecounter @ecounter})
                                        (catch #?(:clj Exception :cljs js/Error) e
-                                         #?(:clj (.printStackTrace e)
+                                         #?(:clj  (.printStackTrace e)
                                             :cljs (js/console.error e))))))
 
-         find-task    (fn [this id]
-                        (get @tasks id))
+         find-task   (fn [this id]
+                       (get @tasks id))
 
-         update-task  (fn [this id & kvs]
-                        (when-let [w (find-task this id)]
-                          (swap! tasks assoc id (apply assoc w kvs))))]
+         update-task (fn [this id & kvs]
+                       (when-let [w (find-task this id)]
+                         (swap! tasks assoc id (apply assoc w kvs))))]
 
      ;; deser the db
      (when file
@@ -165,7 +165,7 @@
              (update-task this id :state :failure :result error)
              (save-event this id evt))
 
-           :else ;;(some? result) ;result can be nil
+           :else                                            ;;(some? result) ;result can be nil
            (let [evt {:ref ref :root root :type type :sym sym :result result}]
              (update-task this id :state :success :result result)
              (save-event this id evt))))
@@ -195,7 +195,7 @@
 
        (await-task [this id {:keys [timeout-ms] :as opts}]
          (let [task        (find-task this id)
-               deferred       (p/deferred)
+               deferred    (p/deferred)
                completed?  (fn [{:keys [state]}]
                              (or (= :success state)
                                  (= :failure state)))
@@ -223,11 +223,10 @@
                    (p/then (fn [wrapped]
                              ;; force throw to make it a reject promise in case we're running js
                              (deref wrapped))))
-               #_
-               (let [resolved @(p/timeout deferred timeout-ms ::timeout)]
-                 (if (= ::timeout resolved)
-                   (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
-                   (wrap-result resolved #_(find-task this id))))))))
+               #_(let [resolved @(p/timeout deferred timeout-ms ::timeout)]
+                   (if (= ::timeout resolved)
+                     (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
+                     (wrap-result resolved #_(find-task this id))))))))
 
        (reenqueue-pending-tasks [this f]
          (swap! tasks
