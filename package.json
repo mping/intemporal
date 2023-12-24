@@ -27,6 +27,7 @@
     "node": ">=19.0.0"
   },
   "dependencies": {
-    "serialize-error": "^11.0.0"
+    "serialize-error": "^11.0.0",
+    "ws": "^8.15.1"
   }
 }
