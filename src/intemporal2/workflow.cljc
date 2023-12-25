@@ -8,7 +8,6 @@
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
                             [intemporal2.workflow :refer [with-env]])))
 
-
 #?(:clj (set! *warn-on-reflection* true))
 
 ;;;;
@@ -46,7 +45,8 @@
 ;; runtime
 
 (def ^:dynamic *env* nil)
-(def default-env {:timeout-ms #?(:clj Long/MAX_VALUE
+(def default-env {:compensations (atom [])
+                  :timeout-ms #?(:clj Long/MAX_VALUE
                                  :cljs (.-MAX_SAFE_INTEGER js/Number))})
 
 (defn internal-error? [ex]
@@ -88,9 +88,6 @@
       (cond
         (not res?)
         (try
-          ;; TODO: fix replay
-          ;; - check if there is a pending/new task for this ref
-          ;;   if there is, wait for it
           (let [impl? (if (= :proto-activity type)
                         (get protos proto)
                         nil)
@@ -174,7 +171,10 @@
     #?(:clj (deref prom)
        :cljs prom)))
 
-;; TODO implement
-(defn add-compensation [thunk])
+(defn add-compensation [thunk]
+  (swap! (:compensations *env*) conj thunk))
 
-(defn compensate [])
+(defn compensate []
+  (let [thunks (-> *env* :compensations deref)]
+    (doseq [f thunks]
+      (f))))
