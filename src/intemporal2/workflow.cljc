@@ -38,7 +38,8 @@
 (defn create-activity-task [ref root sym fvar args]
   (->ActivityExecutionTask :activity (random-id) ref root sym fvar args nil :new))
 
-(defn create-proto-activity-task [proto ref root sym fvar args]
+(defn create-proto-activity-task
+  [proto ref root sym fvar args]
   (->ProtoActivityExecutionTask proto :proto-activity (random-id) ref root sym fvar args nil :new))
 
 ;;;;
@@ -146,7 +147,7 @@
        (store/watch-tasks store
                           task-ready?
                           (fn [_]
-                            ;; should be the store to handle dequeing
+                            ;; the store should handle dequeing atomically
                             (when-let [{:keys [type id] :as task} (store/dequeue-task store)]
                               (let [{last-root :root protos :protos} env]
                                 ;; run in a new thread to avoid deadlocks

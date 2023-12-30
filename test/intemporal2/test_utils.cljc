@@ -1,6 +1,7 @@
 (ns intemporal2.test-utils
-  (:require [intemporal2.workflow :as w]))
-
+  (:require [clojure.test :refer [is]]
+            [intemporal2.workflow :as w]
+            [promesa.core :as p]))
 
 ;;;;
 ;; general
