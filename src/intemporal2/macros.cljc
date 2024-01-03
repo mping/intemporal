@@ -74,7 +74,10 @@
                                                   ref#
                                                   root#
                                                   (symbol aid#)
-                                                  aid#
+                                                  ;aid# ;; >> doesn't work!
+                                                  ;; protos are not reified like in clj https://clojurescript.org/about/differences#_protocols
+                                                  ;; we create a "fake" fvar that can be invokeable just like the real thing
+                                                  (fn [& impl+args#] (apply ~qname impl+args#))
                                                   [~@args]))))))))
 
     :clj

@@ -8,7 +8,6 @@
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
                             [intemporal2.workflow :refer [with-env]])))
 
-
 #?(:clj (set! *warn-on-reflection* true))
 
 ;;;;
@@ -39,14 +38,16 @@
 (defn create-activity-task [ref root sym fvar args]
   (->ActivityExecutionTask :activity (random-id) ref root sym fvar args nil :new))
 
-(defn create-proto-activity-task [proto ref root sym fvar args]
+(defn create-proto-activity-task
+  [proto ref root sym fvar args]
   (->ProtoActivityExecutionTask proto :proto-activity (random-id) ref root sym fvar args nil :new))
 
 ;;;;
 ;; runtime
 
 (def ^:dynamic *env* nil)
-(def default-env {:timeout-ms #?(:clj Long/MAX_VALUE
+(def default-env {:compensations (atom [])
+                  :timeout-ms #?(:clj Long/MAX_VALUE
                                  :cljs (.-MAX_SAFE_INTEGER js/Number))})
 
 (defn internal-error? [ex]
@@ -88,9 +89,6 @@
       (cond
         (not res?)
         (try
-          ;; TODO: fix replay
-          ;; - check if there is a pending/new task for this ref
-          ;;   if there is, wait for it
           (let [impl? (if (= :proto-activity type)
                         (get protos proto)
                         nil)
@@ -149,7 +147,7 @@
        (store/watch-tasks store
                           task-ready?
                           (fn [_]
-                            ;; should be the store to handle dequeing
+                            ;; the store should handle dequeing atomically
                             (when-let [{:keys [type id] :as task} (store/dequeue-task store)]
                               (let [{last-root :root protos :protos} env]
                                 ;; run in a new thread to avoid deadlocks
@@ -174,7 +172,10 @@
     #?(:clj (deref prom)
        :cljs prom)))
 
-;; TODO implement
-(defn add-compensation [thunk])
+(defn add-compensation [thunk]
+  (swap! (:compensations *env*) conj thunk))
 
-(defn compensate [])
+(defn compensate []
+  (let [thunks (-> *env* :compensations deref)]
+    (doseq [f thunks]
+      (f))))
