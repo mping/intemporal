@@ -11,6 +11,7 @@
 ;; main protos
 
 (defprotocol TaskStore
+  (list-tasks [this] "Lists all tasks")
   (apply-fn-event [this id details]
     "Transitions the task. The task should be dequeued beforehand. Returns the event.
     `details` is one of:
@@ -19,7 +20,7 @@
     `{:sym 'ns/f :error <some error>}`
     ")
   (watch-tasks [this predicate callback]
-    "Observes state changes, calling `callback` for any task that matches `predicate`")
+    "Observes state changes, calling `callback` for any task that matches `predicate`. Returns a function to cancel the observation.")
   (await-task [this id] [this id opts]
     "Waits for workflow to finish. Returns a deref'able value. Can throw.
     Opts include
@@ -34,8 +35,9 @@
     "Dequeues some workflow, protocol or activity execution. If the task was deserialized, `fvar` attribute must be a `fn`"))
 
 (defprotocol HistoryStore
-  (save-event [this id event] "Saves the event. Returns the saved event")
-  (all-events [this id] [this id last-event-id] "Returns all the events, optionall after `last-event-id`"))
+  (list-events [this] "Lists all events")
+  (save-event [this id event] "Saves the event for the given workflow id. Returns the saved event")
+  (all-events [this id] [this id last-event-id] "Returns all the eventsf for a given workflow id, optionall after `last-event-id`"))
 
 (defprotocol InternalVarStore
   (register [this sym var] "Register the symbol with the var")
@@ -139,6 +141,8 @@
             :cljs (get @vars sym)))
 
        HistoryStore
+       (list-events [this]
+         (apply concat (vals @history)))
        (save-event [this id event]
          (let [evt+id (assoc event :id (swap! counter inc))]
            (swap! history (fn [v]
@@ -152,6 +156,9 @@
            (filter #(> (:id %) last-event-id) evts)))
 
        TaskStore
+       (list-tasks [this]
+         (vals @tasks))
+
        (apply-fn-event [this id {:keys [ref root type sym args result error]}]
          ;; some redundancy between :result in task and event
          (cond
@@ -170,7 +177,6 @@
              (update-task this id :state :success :result result)
              (save-event this id evt))))
 
-
        (matching-task [this task]
          (let [ks     [:ref :root :type :sym :args]
                match? (select-keys task ks)]
@@ -188,7 +194,8 @@
                              (run! #(f %) changeset))))]
            ;; add a watch but run at least once
            (add-watch tasks k watchfn)
-           (run! f (filter predicate (vals @tasks)))))
+           (run! f (filter predicate (vals @tasks)))
+           (fn [] (remove-watch tasks k))))
 
        (await-task [this id]
          (await-task this id {:timeout-ms 999999999}))
