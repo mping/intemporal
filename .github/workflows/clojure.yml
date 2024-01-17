@@ -53,9 +53,12 @@ jobs:
           key: cljdeps-${{ hashFiles('deps.edn') }}
           restore-keys: cljdeps-
 
-      - name: Lint and test clj
+      - name: Lint
+        run: clj-kondo --parallel --lint {src,test}
+
+      - name: Test clj
         run: bin/kaocha unit
 
-      - name: Lint and test cljs
+      - name: Test cljs
         run: bin/kaocha unit-cljs
 

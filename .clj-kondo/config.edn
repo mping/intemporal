@@ -1,4 +1,9 @@
-{:lint-as {intemporal.workflow/defn-workflow clojure.core/defn}
+;; https://github.com/clj-kondo/clj-kondo/blob/master/doc/linters.md
+{:lint-as {intemporal2.macros/defn-workflow clojure.core/defn
+           promesa.core/let clojure.core/let}
  :linters {:unresolved-symbol {:exclude [(clojure.test/is [thrown-ex-info-type?])]}
-           :unused-binding    {:exclude-unused-as true
-                               :exclude-destructured-as true}}}
+           :unused-binding    {:level :off
+                               :exclude-unused-as true
+                               :exclude-destructured-as true
+                               :exclude-destructured-keys-in-fn-args true
+                               :exclude-defmulti-args true}}}

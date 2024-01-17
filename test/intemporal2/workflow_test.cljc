@@ -1,14 +1,14 @@
 (ns intemporal2.workflow-test
-  (:require [intemporal2.store :as store]
-            [intemporal2.workflow :as w]
-            [promesa.core :as p])
-  #?(:cljs (:require [cljs.test :refer-macros [deftest is testing run-tests]]
+  #?(:cljs (:require [cljs.test :refer-macros [deftest is testing]]
                      [cljs.pprint :as pprint]
                      [intemporal2.store :as store]
                      [intemporal2.workflow :as w]
                      [promesa.core :as p])
      :clj  (:require [clojure.test :refer [deftest is testing]]
-                     [clojure.pprint :as pprint]))
+                     [clojure.pprint :as pprint]
+                     [intemporal2.store :as store]
+                     [intemporal2.workflow :as w]
+                     [promesa.core :as p]))
   #?(:cljs (:require-macros [intemporal2.macros :refer [stub-function stub-protocol defn-workflow]])
      :clj  (:require [intemporal2.macros :refer [stub-function stub-protocol defn-workflow]])))
 

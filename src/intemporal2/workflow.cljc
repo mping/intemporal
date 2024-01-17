@@ -4,9 +4,7 @@
             [intemporal.activity :as-alias a]
             [intemporal.protocol :as-alias p]
             [promesa.core :as promesa])
-  #?(:clj  (:require [net.cgrand.macrovich :as macros])
-     :cljs (:require-macros [net.cgrand.macrovich :as macros]
-                            [intemporal2.workflow :refer [with-env]])))
+  #?(:cljs (:require-macros [intemporal2.workflow :refer [with-env]])))
 
 #?(:clj (set! *warn-on-reflection* true))
 

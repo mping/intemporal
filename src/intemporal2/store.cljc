@@ -1,7 +1,8 @@
 (ns intemporal2.store
   (:require [clojure.tools.reader.edn :as edn]
             [promesa.core :as p]
-            #?(:cljs [cljs.core :refer [IDeref]]))
+            #?(:clj [clojure.java.io :as io]
+               :cljs [cljs.core :refer [IDeref]]))
   #?(:clj (:import [clojure.lang IDeref]
                    [java.io File])))
 
@@ -46,6 +47,7 @@
 ;;;;
 ;; helpers
 
+#_:clj-kondo/ignore
 (defn- now []
   #?(:clj  (System/currentTimeMillis)
      :cljs (.getTime (js/Date.))))
@@ -55,7 +57,7 @@
      :cljs (or fvar (lookup store sym))))                   ;; TODO lookup on store
 
 (defn- read-edn [file readers]
-  #?(:clj  (with-open [f (clojure.java.io/reader file)]
+  #?(:clj  (with-open [f (io/reader file)]
              (edn/read-string {:readers readers} (slurp f)))
      :cljs (let [f (.getItem (.-localStorage js/window) file)]
              (edn/read-string {:readers readers} f))))
@@ -66,7 +68,7 @@
 
 (defn- edn-exists? [file]
   #?(:clj  (.exists (File. ^String file))
-     :cljs (not (empty? (.getItem (.-localStorage js/window) file)))))
+     :cljs (seq (.getItem (.-localStorage js/window) file))))
 
 
 (deftype ResultOK [ok]
@@ -239,6 +241,7 @@
          (swap! tasks
                 update-vals
                 (fn [{:keys [state] :as task}]
+                  #_:clj-kondo/ignore
                   (cond-> task
                           (= :pending state) (do (f task)
                                                  (assoc task :state :new))))))
@@ -256,9 +259,9 @@
            (swap-vals! tasks
                        (fn [v] (let [found (first-new v)]
                                  (if found
-                                   (do (->> (assoc found :state :pending :fvar (sym->var this found))
-                                            (reset! found?)
-                                            (assoc v (:id found))))
+                                   (->> (assoc found :state :pending :fvar (sym->var this found))
+                                        (reset! found?)
+                                        (assoc v (:id found)))
                                    v))))
            ;; highest first
            (->> @found?)))))))

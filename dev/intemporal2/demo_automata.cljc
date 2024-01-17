@@ -47,7 +47,7 @@
 
 (defn-workflow run-fsm-workflow
   [rules init-state init-event]
-  (let [stub      (stub-protocol EventHandler (make-event-handler) {:idempotent true})
+  (let [stub      (stub-protocol EventHandler {:idempotent true})
         initstate {::fsm/rules rules ::fsm/state init-state}]
 
     (loop [state initstate
