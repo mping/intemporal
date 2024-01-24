@@ -54,14 +54,14 @@
     (try
       (let [cid (reserve-car stub "carr")
             _   (println "[workflow fn] car id:" cid)
-            _   (w/add-compensation (fn [] (cancel-car* stub cid n)))
+            _   (w/add-compensation #(cancel-car* stub cid n))
 
             hid (book-hotel stub "hotell")
             _   (println "[workflow fn] hotel id:" hid)
-            _   (w/add-compensation (fn [] (cancel-hotel* stub cid n)))
+            _   (w/add-compensation #(cancel-hotel* stub cid n))
             fid (book-flight stub "flightt")
             _   (println "[workflow fn] flight id:" fid)
-            _   (w/add-compensation (fn [] (cancel-flight* stub cid n)))]
+            _   (w/add-compensation #(cancel-flight* stub cid n))]
 
         (email-stub "user@user.com" "trip confirmed")
         :ok)
@@ -75,8 +75,10 @@
 (def worker (w/start-worker! mstore {`TripBookingActivities example-impl}))
 
 ;; note that in cljs, this returns a promise
-(def res (w/with-env {:store mstore}
-           (book-trip 1)))
+(def res (try
+           (w/with-env {:store mstore}
+             (book-trip 1))
+           (catch Exception e :error)))
 
 (defn pprint-table [table]
   (clojure.pprint/print-table table))

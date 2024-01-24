@@ -54,7 +54,7 @@
 
 (defn- sym->var [store {:keys [sym fvar] :as task}]
   #?(:clj  (or fvar (requiring-resolve sym))
-     :cljs (or fvar (lookup store sym))))                   ;; TODO lookup on store
+     :cljs (or fvar (lookup store sym))))
 
 (defn- read-edn [file readers]
   #?(:clj  (with-open [f (io/reader file)]
@@ -174,7 +174,8 @@
              (update-task this id :state :failure :result error)
              (save-event this id evt))
 
-           :else                                            ;;(some? result) ;result can be nil
+           ;;(some? result) ;result can be nil
+           :else
            (let [evt {:ref ref :root root :type type :sym sym :result result}]
              (update-task this id :state :success :result result)
              (save-event this id evt))))
@@ -228,14 +229,10 @@
                    (p/then (fn [resolved]
                              (if (= ::timeout resolved)
                                (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
-                               (wrap-result resolved #_(find-task this id)))))
+                               (wrap-result resolved))))
                    (p/then (fn [wrapped]
                              ;; force throw to make it a reject promise in case we're running js
-                             (deref wrapped))))
-               #_(let [resolved @(p/timeout deferred timeout-ms ::timeout)]
-                   (if (= ::timeout resolved)
-                     (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
-                     (wrap-result resolved #_(find-task this id))))))))
+                             (deref wrapped))))))))
 
        (reenqueue-pending-tasks [this f]
          (swap! tasks
