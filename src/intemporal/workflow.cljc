@@ -1,7 +1,5 @@
 (ns intemporal.workflow
   (:require [intemporal.store :as store]
-            [intemporal.activity :as-alias a]
-            [intemporal.protocol :as-alias p]
             [intemporal.workflow.internal :as internal]
             [promesa.core :as promesa])
   #?(:cljs (:require-macros [intemporal.workflow :refer [with-env]])))
