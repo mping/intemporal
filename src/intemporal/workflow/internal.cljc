@@ -1,7 +1,6 @@
 (ns ^:private intemporal.workflow.internal
   "Private namespace for workflow support."
-  (:require [intemporal.store :as store])
-  #?(:cljs (:require-macros [intemporal.workflow :refer [with-env]])))
+  (:require [intemporal.store :as store]))
 
 #?(:clj (set! *warn-on-reflection* true))
 

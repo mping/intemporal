@@ -1,6 +1,5 @@
 (ns intemporal.test-utils
-  (:require [intemporal.workflow :as w]
-            [intemporal.workflow.internal :as in]))
+  (:require [intemporal.workflow.internal :as in]))
 
 ;;;;
 ;; general
