@@ -1,7 +1,7 @@
-(ns intemporal2.demo-automata
-  (:require [intemporal2.store :as store]
-            [intemporal2.workflow :as w]
-            [intemporal2.macros :refer [stub-protocol defn-workflow]]
+(ns intemporal.demo-automata
+  (:require [intemporal.store :as store]
+            [intemporal.workflow :as w]
+            [intemporal.macros :refer [stub-protocol defn-workflow]]
             [automata.fsm :as fsm]))
 
 ;;;;

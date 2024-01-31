@@ -1,8 +1,8 @@
-(ns intemporal2.demo-workflow
-  (:require [intemporal2.store :as store]
-            [intemporal2.workflow :as w]
+(ns intemporal.demo-workflow
+  (:require [intemporal.store :as store]
+            [intemporal.workflow :as w]
             [promesa.core :as p])
-  (:require-macros [intemporal2.macros :refer [stub-function stub-protocol defn-workflow]]))
+  (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]))
 
 ;;;;
 ;; demo

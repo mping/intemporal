@@ -1,8 +1,8 @@
-(ns intemporal2.demo-recovery
+(ns intemporal.demo-recovery
   (:require [clojure.java.io :as io]
-            [intemporal2.store :as store]
-            [intemporal2.workflow :as w]
-            [intemporal2.macros :refer [stub-function defn-workflow]]))
+            [intemporal.store :as store]
+            [intemporal.workflow :as w]
+            [intemporal.macros :refer [stub-function defn-workflow]]))
 
 ;;;;
 ;; demo - recovery of a crashed process
@@ -19,10 +19,10 @@
     (conj [:root] (s [1]))))
 
 ;; make a backup of the db to allow replay
-(io/copy (io/file "./dev/intemporal2/recovery.edn") (io/file "/tmp/intemporal-recovery.edn"))
+(io/copy (io/file "./dev/intemporal/recovery.edn") (io/file "/tmp/intemporal-recovery.edn"))
 (def mstore (store/make-memstore "/tmp/intemporal-recovery.edn"
-                                 {'intemporal2.workflow.WorkflowExecutionTask w/map->WorkflowExecutionTask
-                                  'intemporal2.workflow.ActivityExecutionTask w/map->ActivityExecutionTask}))
+                                 {'intemporal.workflow.WorkflowExecutionTask w/map->WorkflowExecutionTask
+                                  'intemporal.workflow.ActivityExecutionTask w/map->ActivityExecutionTask}))
 (def worker (w/start-worker! mstore))
 
 (defn pprint-table [table]

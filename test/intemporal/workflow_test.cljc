@@ -1,16 +1,16 @@
-(ns intemporal2.workflow-test
+(ns intemporal.workflow-test
   #?(:cljs (:require [cljs.test :refer-macros [deftest is testing]]
                      [cljs.pprint :as pprint]
-                     [intemporal2.store :as store]
-                     [intemporal2.workflow :as w]
+                     [intemporal.store :as store]
+                     [intemporal.workflow :as w]
                      [promesa.core :as p])
      :clj  (:require [clojure.test :refer [deftest is testing]]
                      [clojure.pprint :as pprint]
-                     [intemporal2.store :as store]
-                     [intemporal2.workflow :as w]
+                     [intemporal.store :as store]
+                     [intemporal.workflow :as w]
                      [promesa.core :as p]))
-  #?(:cljs (:require-macros [intemporal2.macros :refer [stub-function stub-protocol defn-workflow]])
-     :clj  (:require [intemporal2.macros :refer [stub-function stub-protocol defn-workflow]])))
+  #?(:cljs (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow]])
+     :clj  (:require [intemporal.macros :refer [stub-function stub-protocol defn-workflow]])))
 
 (defn nested-fn [a]
   [a :nested])
@@ -82,20 +82,20 @@
             (pprint/print-table evts)
 
             (testing "workflow events"
-              (is (map-contains? {:type :intemporal.workflow/invoke :sym 'intemporal2.workflow-test/my-workflow- :args [1]} w1))
-              (is (map-contains? {:type :intemporal.workflow/success :sym 'intemporal2.workflow-test/my-workflow- } w2)))
+              (is (map-contains? {:type :intemporal.workflow/invoke :sym 'intemporal.workflow-test/my-workflow- :args [1]} w1))
+              (is (map-contains? {:type :intemporal.workflow/success :sym 'intemporal.workflow-test/my-workflow- } w2)))
 
             (testing "activity events"
-              (is (map-contains? {:type :intemporal.activity/invoke :sym 'intemporal2.workflow-test/activity-fn :args [1]} a1))
-              (is (map-contains? {:type :intemporal.activity/success :sym 'intemporal2.workflow-test/activity-fn } a2)))
+              (is (map-contains? {:type :intemporal.activity/invoke :sym 'intemporal.workflow-test/activity-fn :args [1]} a1))
+              (is (map-contains? {:type :intemporal.activity/success :sym 'intemporal.workflow-test/activity-fn } a2)))
 
             (testing "activity events"
-              (is (map-contains? {:type :intemporal.activity/invoke :sym 'intemporal2.workflow-test/nested-fn :args '(:sub)} n1))
-              (is (map-contains? {:type :intemporal.activity/success :sym 'intemporal2.workflow-test/nested-fn } n2)))
+              (is (map-contains? {:type :intemporal.activity/invoke :sym 'intemporal.workflow-test/nested-fn :args '(:sub)} n1))
+              (is (map-contains? {:type :intemporal.activity/success :sym 'intemporal.workflow-test/nested-fn } n2)))
 
             (testing "protocol activity events"
-              (is (map-contains? {:type :intemporal.protocol/invoke :sym 'intemporal2.workflow-test/some-stuff :args [:pr]} s1))
-              (is (map-contains? {:type :intemporal.protocol/success :sym 'intemporal2.workflow-test/some-stuff } s2)))))
+              (is (map-contains? {:type :intemporal.protocol/invoke :sym 'intemporal.workflow-test/some-stuff :args [:pr]} s1))
+              (is (map-contains? {:type :intemporal.protocol/success :sym 'intemporal.workflow-test/some-stuff } s2)))))
 
         (testing "stored tasks"
           (let [tasks (store/list-tasks mstore)
@@ -103,10 +103,10 @@
             (pprint/print-table tasks)
 
             (testing "workflow task"
-              (is (map-contains? {:type :workflow :sym 'intemporal2.workflow-test/my-workflow- :state :success} w1)))
+              (is (map-contains? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1)))
             (testing "activity task"
-              (is (map-contains? {:type :activity :sym 'intemporal2.workflow-test/activity-fn :state :success :result [:sub :nested]} a1)))
+              (is (map-contains? {:type :activity :sym 'intemporal.workflow-test/activity-fn :state :success :result [:sub :nested]} a1)))
             (testing "nested activty task"
-              (is (map-contains? {:type :activity :sym 'intemporal2.workflow-test/nested-fn :state :success :result [:sub :nested]} n1)))
+              (is (map-contains? {:type :activity :sym 'intemporal.workflow-test/nested-fn :state :success :result [:sub :nested]} n1)))
             (testing "protocol activity task"
-              (is (map-contains? {:type :proto-activity :sym 'intemporal2.workflow-test/some-stuff :state :success :result [:proto :pr]} s1)))))))))
+              (is (map-contains? {:type :proto-activity :sym 'intemporal.workflow-test/some-stuff :state :success :result [:proto :pr]} s1)))))))))

@@ -1,4 +1,4 @@
-(ns intemporal2.store
+(ns intemporal.store
   (:require [clojure.tools.reader.edn :as edn]
             [promesa.core :as p]
             #?(:clj [clojure.java.io :as io]

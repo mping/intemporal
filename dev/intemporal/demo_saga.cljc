@@ -1,7 +1,7 @@
-(ns intemporal2.demo-saga
-  (:require [intemporal2.workflow :as w]
-            [intemporal2.macros :refer [stub-function stub-protocol defn-workflow]]
-            [intemporal2.store :as s]))
+(ns intemporal.demo-saga
+  (:require [intemporal.workflow :as w]
+            [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]
+            [intemporal.store :as s]))
 
 
 (defprotocol TripBookingActivities

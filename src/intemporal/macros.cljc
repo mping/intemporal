@@ -1,9 +1,10 @@
-(ns intemporal2.macros
-  (:require [intemporal2.workflow :as w]
+(ns intemporal.macros
+  (:require [intemporal.workflow :as w]
+            [intemporal.workflow.internal :as i]
             [cljs.analyzer.api :as api])
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
-                            [intemporal2.macros :refer [defn-workflow stub-function stub-protocol]])))
+                            [intemporal.macros :refer [defn-workflow stub-function stub-protocol]])))
 
 (def cljs-available?
   #?(:cljs
@@ -32,14 +33,14 @@
          (let [ref#  (:ref w/*env*)
                root# (:root w/*env*)
                fvar# #'~wname]
-           (w/enqueue-and-wait w/*env* (w/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv)))))))
+           (w/enqueue-and-wait w/*env* (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv)))))))
 
 (defmacro stub-function [f]
   `(fn [& argv#]
      (let [ref#  (:ref w/*env*)
            root# (:root w/*env*)
            fvar# (var ~f)]
-       (w/enqueue-and-wait w/*env* (w/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv#)))))
+       (w/enqueue-and-wait w/*env* (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv#)))))
 
 (defmacro stub-protocol
   "Stub a protocol definition. Opts are currently unused.
@@ -70,7 +71,7 @@
                         act-opts# ~(first opts)
                         ref#      (:ref w/*env*)
                         root#     (:root w/*env*)]
-                    (w/enqueue-and-wait w/*env* (w/create-proto-activity-task
+                    (w/enqueue-and-wait w/*env* (i/create-proto-activity-task
                                                   (symbol ~pname)
                                                   ref#
                                                   root#
@@ -106,7 +107,7 @@
                       act-opts# ~(first opts)
                       ref#      (:ref w/*env*)
                       root#     (:root w/*env*)]
-                  (w/enqueue-and-wait w/*env* (w/create-proto-activity-task
+                  (w/enqueue-and-wait w/*env* (i/create-proto-activity-task
                                                 (-> ~proto :var symbol)
                                                 ref#
                                                 root#

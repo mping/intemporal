@@ -17,16 +17,16 @@ Two concepts apply:
 ## Usage
 
 Examples:
-- [demo_workflow.clj](./dev/intemporal2/demo_workflow.clj)
-- [demo_automata.clj](./dev/intemporal2/demo_automata.clj)
-- [demo_saga.cljc](./dev/intemporal2/demo_saga.cljc)
+- [demo_workflow.clj](./dev/intemporal/demo_workflow.clj)
+- [demo_automata.clj](./dev/intemporal/demo_automata.clj)
+- [demo_saga.cljc](./dev/intemporal/demo_saga.cljc)
 
 ```clojure
 
-(ns intemporal2.demo-workflow
-  (:require [intemporal2.store :as store]
-            [intemporal2.workflow :as w]
-            [intemporal2.macros :refer [stub-function stub-protocol defn-workflow]]))
+(ns intemporal.demo-workflow
+  (:require [intemporal.store :as store]
+            [intemporal.workflow :as w]
+            [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]))
 
 ;;;;
 ;; demo

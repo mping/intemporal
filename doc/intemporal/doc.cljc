@@ -1,9 +1,9 @@
 (ns intemporal.doc
-  (:require [intemporal2.store :as s]
-            [intemporal2.workflow :as w]
+  (:require [intemporal.store :as s]
+            [intemporal.workflow :as w]
             [promesa.core :as p]
             [hiccups.runtime :as hiccupsrt])
-  (:require-macros [intemporal2.macros :refer [stub-function stub-protocol defn-workflow]]
+  (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]
                    [hiccups.core :as hiccups :refer [html]]))
 ;;;;
 ;; main code

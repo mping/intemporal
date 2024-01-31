@@ -1,5 +1,6 @@
-(ns intemporal2.test-utils
-  (:require [intemporal2.workflow :as w]))
+(ns intemporal.test-utils
+  (:require [intemporal.workflow :as w]
+            [intemporal.workflow.internal :as in]))
 
 ;;;;
 ;; general
@@ -38,7 +39,7 @@
 (defn- make-task [& {:keys [proto type id ref root sym fvar args result state]
                      :or   {proto nil
                             type   :workflow
-                            id     (w/random-id)
+                            id     (in/random-id)
                             ref    'some-ref
                             root   'some-root
                             sym    'identity
@@ -48,11 +49,11 @@
                             state  :new}}]
   (cond
     (= type :workflow)
-    (w/->WorkflowExecutionTask type id ref root sym fvar args result state)
+    (in/->WorkflowExecutionTask type id ref root sym fvar args result state)
     (= type :activity)
-    (w/->ActivityExecutionTask type id ref root sym fvar args result state)
+    (in/->ActivityExecutionTask type id ref root sym fvar args result state)
     (= type :proto-activity)
-    (w/->ProtoActivityExecutionTask proto type id ref root sym fvar args result state)))
+    (in/->ProtoActivityExecutionTask proto type id ref root sym fvar args result state)))
 
 (defn make-workflow-task [& {:keys [] :as args}]
   (make-task (assoc args :type :workflow)))

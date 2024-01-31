@@ -1,7 +1,7 @@
-(ns intemporal2.store-test
+(ns intemporal.store-test
   (:require [clojure.test :refer [deftest is testing]]
-            [intemporal2.test-utils :as tu]
-            [intemporal2.store :as s]
+            [intemporal.test-utils :as tu]
+            [intemporal.store :as s]
             [promesa.core :as p]))
 
 (defn- is-promise-ok [prom]
