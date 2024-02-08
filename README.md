@@ -18,7 +18,7 @@ Two concepts apply:
 
 Examples:
 - [demo_workflow.clj](./dev/intemporal/demo_workflow.clj)
-- [demo_automata.clj](./dev/intemporal/demo_automata.clj)
+- [demo_automata.cljc](./dev/intemporal/demo_automata.cljc)
 - [demo_saga.cljc](./dev/intemporal/demo_saga.cljc)
 
 ```clojure
