@@ -2,7 +2,7 @@
   (:require [intemporal.store :as store]
             [intemporal.workflow :as w]
             [intemporal.macros :refer [stub-protocol defn-workflow]]
-            [automata.fsm :as fsm]))
+            \)))
 
 ;;;;
 ;; demo
