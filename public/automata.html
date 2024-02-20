@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en-us">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@latest/css/pico.min.css">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/default.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/clojure.min.js"></script>
+    <script>hljs.highlightAll();</script>
+
+    <title>Intemporal demo</title>
+    <style>
+        table {font-size: small}
+        tr.\:intemporal\.workflow\/failure,
+        tr.\:intemporal\.activity\/failure {background: #ffbaad}
+        tr.\:intemporal\.workflow\/invoke {font-size: large !important}
+    </style>
+</head>
+<body>
+<main class="container">
+    <h1>Intemporal demo with sqlite.js</h1>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <script src="js/shared.js"></script>
+    <script src="js/automata.js"></script>
+    <p>This demo is running intemporal with a sql-on-wasm backing store.</p>
+    Demos:
+    <ul>
+        <li><a href="index.html">main</a></li>
+        <li><a href="automata.html">automata</a></li>
+    </ul>
+    <div class="grid">
+        <div>
+            <h3>Requirements</h3>
+            <pre><code>
+(ns intemporal.doc
+  (:require
+    [intemporal.doc.sqlite :as sqlite]
+    [intemporal.doc.sqlite-store :as sstore]
+    [intemporal.store :as s]
+    [intemporal.workflow :as w]
+    [intemporal.activity :as a]
+    [automata.fsm :as fsm]))
+</code>
+</pre>
+
+            <h3>Implementing an FSM</h3>
+            <pre><code>
+(def resource-rules
+  {:state/init     [{::fsm/event :event/create ::fsm/to :state/creating ::fsm/actions [:action/create]}
+                    {::fsm/event :event/kill ::fsm/to :state/killed}]
+   :state/creating [{::fsm/event :event/created ::fsm/to :state/down}
+                    {::fsm/event :event/error ::fsm/to :state/init}]
+   :state/down     [{::fsm/event :event/start ::fsm/to :state/starting ::fsm/actions [:action/start]}
+                    {::fsm/event :event/kill ::fsm/to :state/killing ::fsm/actions [:action/kill]}]
+   :state/starting [{::fsm/event :event/started ::fsm/to :state/up}
+                    {::fsm/event :event/error ::fsm/to :state/down}]
+   :state/stopping [{::fsm/event :event/stopped ::fsm/to :state/down}
+                    {::fsm/event :event/error ::fsm/to :state/up}]
+   :state/up       [{::fsm/event :event/stop ::fsm/to :state/stopping ::fsm/actions [:action/stop]}
+                    {::fsm/event :event/kill ::fsm/to :state/killing ::fsm/actions [:action/kill]}]
+   :state/killing  [{::fsm/event :event/killed ::fsm/to :state/killed}
+                    {::fsm/event :event/error ::fsm/to :state/killing}]
+   :state/killed   []})
+
+</code>
+</pre>
+            <h3>Implementation</h3>
+            <pre><code>
+;; event producer
+(defprotocol EventHandler
+  (process-event [this event] "Processes the event, returns the next event"))
+
+(defn make-event-handler []
+  (reify EventHandler
+    (process-event [this event]
+      (let [nxt (condp = event
+                  :event/create :event/created
+                  :event/created :event/start
+                  :event/start :event/started
+                  :event/started :event/stop
+                  :event/stop :event/stopped
+                  :event/stopped :event/kill
+                  :event/kill :event/killed
+                  nil)]
+        nxt))))
+</code>
+</pre>
+            <h3>Workflow definition</h3>
+            <pre><code>
+
+(defn run-fsm-workflow
+  [rules init-state init-event]
+  (let [stub      (a/stub-protocol EventHandler (make-event-handler) {:idempotent true})
+        initstate {::fsm/rules rules ::fsm/state init-state}]
+
+    (loop [state initstate
+           evt   init-event]
+      (if-let [nxt (process-event stub evt)]
+        (recur (fsm/transit state evt) nxt)
+        state))))
+</code>
+</pre>
+
+            <h3>Execution</h3>
+            <pre><code>
+(try
+  (run-fsm-workflow resource-rules :state/init :event/create)
+  (catch  js/Object err
+    (js/console.error "Workflow failed!" err)))
+
+</code>
+</pre>
+            <h3>Live example</h3>
+            <h4>Results</h4>
+            <pre id="results">;;Results go here</pre>
+
+            <h3>In-browser results</h3>
+            <h4>Tasks</h4>
+            <div id="tasks"></div>
+
+            <h4>Events</h4>
+            <div id="events"></div>
+        </div>
+    </div>
+</main>
+<script src="js/shared.js"></script>
+<script src="js/automata.js"></script>
+</body>
+</html>
