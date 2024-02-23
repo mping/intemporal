@@ -27,13 +27,13 @@
     Opts include
     - `timeout-ms`: timeout for task await")
   (matching-task [this task]
-    "Finds the matching task on the db, comparing the following tuple: `:ref :root :type :sym :args`")
+    "Finds the task on the db that matches `task`, comparing the following attributes: `:ref :root :type :sym :args`")
   (reenqueue-pending-tasks [this callback]
     "Marks all pending tasks as `new`")
   (enqueue-task [this task]
-    "Enqueues a workflow or activity execution")
+    "Atomically enqueues a protocol, workflow or activity task execution")
   (dequeue-task [this]
-    "Dequeues some workflow, protocol or activity execution. If the task was deserialized, `fvar` attribute must be a `fn`"))
+    "Atomically dequeues some workflow, protocol or activity task execution. If the task was deserialized, its `fvar` attribute must be a `fn`"))
 
 (defprotocol HistoryStore
   (list-events [this] "Lists all events")
