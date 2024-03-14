@@ -1,13 +1,17 @@
 (ns intemporal.store-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :as t :refer [deftest is testing]]
             [intemporal.test-utils :as tu]
             [intemporal.store :as s]
+            [matcher-combinators.test :refer [match?]]
             [promesa.core :as p]))
 
 (defn- is-promise-ok [prom]
   (-> prom
       (p/then (fn [_] (is true)))
       (p/catch (fn [err] (is false (prn-str err))))))
+
+(defn- to-map [rec]
+  (into {} rec))
 
 (deftest basic-store-tests
 
@@ -17,8 +21,24 @@
       (s/enqueue-task store task)
 
       (testing "dequeueing updates state"
-        (is (= (assoc task :state :pending)
-               (s/dequeue-task store))))))
+        (is (match? (to-map (assoc task :state :pending))
+                    (to-map (s/dequeue-task store)))))))
+
+
+  (testing "enqueue/dequeue with lease"
+    (let [store (s/make-memstore)
+          task  (tu/make-workflow-task)]
+      (s/enqueue-task store task)
+
+      (testing "dequeueing with lease"
+        (is (match? (to-map (assoc task :state :pending))
+                    (to-map (s/dequeue-task store {:lease-ms 100}))))
+        ;; wait for expire
+        @(p/then (p/delay 1000)
+                 (fn [_]
+                   (is (match?
+                          (to-map (assoc task :state :pending))
+                          (to-map (s/dequeue-task store)))))))))
 
   (testing "await task"
     (let [store (s/make-memstore)
@@ -41,7 +61,7 @@
       (s/enqueue-task store task)
 
       (testing "apply fn event"
-        (s/apply-fn-event store (:id task) evt)
+        (s/task<-event store (:id task) evt)
 
         (testing "task state updated"
           (let [db-task (s/matching-task store task)]
