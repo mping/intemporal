@@ -1,23 +1,20 @@
 version: '3.5'
-
-networks:
-  intemporal:
-
 services:
-
-  mariadb:
-    image: bitnami/mariadb:10.6.11
-    networks:
-      - intemporal
+  foundation:
+    image: "foundationdb/foundationdb:7.1.31"
     environment:
-      MARIADB_ROOT_PASSWORD: root
-      MARIADB_ROOT_USER: root
-      MARIADB_DATABASE: root
-      MARIADB_SKIP_TEST_DB: "true"
-      MARIADB_ENABLE_SLOW_QUERY: "true"
-    healthcheck:
-      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
-      timeout: 20s
-      retries: 10
+      FDB_NETWORKING_MODE: host
+    entrypoint: ["/usr/bin/tini", "-g", "--", "sh", "/fdb-init.bash"]
+    volumes:
+      - ./docker/fdb-init.bash:/fdb-init.bash
+      - ./docker:/var/fdb/run:rw      
     ports:
-      - 3306:3306
+      - 4500:4500/tcp
+
+  postgresql:
+    image: postgres:16.2
+    environment:
+      POSTGRES_PASSWORD: root
+      POSTGRES_USER: root
+    ports:
+      - 5432:5432

@@ -3,62 +3,103 @@ name: Clojure CI
 #on: [push, pull_request]
 on: [push]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
 
     runs-on: ubuntu-latest
+    env:
+      JAVA_OPTS: "-Dio.netty.tryUnsafe=false"
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4.0.2
         with:
           node-version: 19.3.0
 
-      - name: install node deps
-        run: npm install
+      # required for the native fdb lib
+      - name: Install foundationdb
+        uses: foundationdb-rs/foundationdb-actions-install@v2.1.0
+        with:
+          version: 7.1.31
 
-      - name: Cache nodejs dependencies
-        uses: actions/cache@v3
+      - name: Restore node dependencies
+        id: cache-node-deps
+        uses: actions/cache/restore@v4
         with:
           path: |
             node_modules
           key: nodedeps-${{ hashFiles('package-lock.json') }}
-          restore-keys: nodedeps-
+
+      - name: Install node dependencies
+        if: steps.cache-node-deps.outputs.cache-hit != 'true'
+        run: npm install
+
+      - name: Save node dependencies
+        uses: actions/cache/save@v4
+        if: steps.cache-node-deps.outputs.cache-hit != 'true'
+        with:
+          path: |
+            node_modules
+          key: ${{ steps.cache-node-deps.outputs.cache-primary-key }}
 
       - name: Install clojure tools
-        uses: DeLaGuardo/setup-clojure@10.0
+        uses: DeLaGuardo/setup-clojure@12.5
         with:
           # Install just one or all simultaneously
           # The value must indicate a particular version of the tool, or use 'latest'
           # to always provision the latest version
           cli: 1.11.1.1105             # Clojure CLI based on tools.deps
-          clj-kondo: 2022.05.31        # Clj-kondo
+          clj-kondo: 2024.03.13        # Clj-kondo
           cljstyle: 0.15.0             # cljstyle
 
-      # requires clojure
-      - name: compile cljs
-        run: npx shadow-cljs compile dev
-
-      # requires clojure
-      - name: compile docs
-        run: npx shadow-cljs compile doc
-
-      # will cache shadow deps too
-      - name: Cache clojure dependencies
-        uses: actions/cache@v3
+      - name: Restore clojure dependencies
+        id: cache-clojure-deps
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.m2/repository
-          key: cljdeps-${{ hashFiles('deps.edn') }}
-          restore-keys: cljdeps-
+          key: deps-${{ hashFiles('deps.edn') }}
+
+      - name: Install clj dependencies
+        run: clojure -A:dev:doc:cljs:fdb:jdbc -Stree
+      - name: Compile cljs
+        run: npx shadow-cljs compile dev
+      - name: Compile docs
+        run: npx shadow-cljs compile doc
+
+      - name: Save clojure dependencies
+        uses: actions/cache/save@v4
+        if: steps.cache-clojure-deps.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.m2/repository
+          key: ${{ steps.cache-clojure-deps.outputs.cache-primary-key }}
 
       - name: Lint
         run: clj-kondo --parallel --lint {src,test}
 
-      - name: Test clj
-        run: bin/kaocha unit
+      - uses: adambirds/docker-compose-action@v1.3.0
+        with:
+          # foundation is already running
+          services: |            
+            postgresql
+          down-flags: "--volumes"
 
       - name: Test cljs
         run: bin/kaocha unit-cljs
+
+      - name: Test clj
+        run: bin/kaocha unit
+
+      - name: Test Report
+        uses: mikepenz/action-junit-report@v4
+        if: success() || failure()
+        with:
+          report_paths: '**/target/test-reports/report.xml'
+
 

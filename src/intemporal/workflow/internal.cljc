@@ -6,7 +6,7 @@
 #?(:clj (set! *warn-on-reflection* true))
 
 (def ^:dynamic *env* nil)
-(def default-env {:compensations (atom [])
+(def default-env {:compensations (atom '())
                   :timeout-ms    #?(:clj  Long/MAX_VALUE
                                     :cljs 2147483647)})
 
@@ -33,6 +33,18 @@
       (str (rand-nth left) "-" (rand-nth right)))
     (str (random-uuid))))
 
+;;;;
+;; Tasks
+
+;; type: workflow|activity|proto-activity
+;; id: unique identifier
+;; ref: what task triggered execution
+;; root: parent trigger
+;; sym: the fn being executed
+;; fvar: the function var, to call (apply fvar
+;; result: either a value, or error
+;; state: state of task new|pending|failure|success
+
 (defrecord WorkflowExecutionTask [type id ref root sym fvar args result state]
   Object
   (toString [this] (str "#WorkflowExecutionTask" (into {} this))))
@@ -46,17 +58,22 @@
   (toString [this] (str "#ProtoActivityExecutionTask" (into {} this))))
 
 (defn create-workflow-task
-  [ref root sym fvar args]
-  (->WorkflowExecutionTask :workflow (random-id) ref root sym fvar args nil :new))
+  ([ref root sym fvar args]
+   (create-workflow-task ref root sym fvar args (random-id) nil :new))
+  ([ref root sym fvar args id result state]
+   (->WorkflowExecutionTask :workflow id ref root sym fvar args result state)))
 
 (defn create-activity-task
-  [ref root sym fvar args]
-  (->ActivityExecutionTask :activity (random-id) ref root sym fvar args nil :new))
+  ([ref root sym fvar args]
+   (create-activity-task ref root sym fvar args (random-id) nil :new))
+  ([ref root sym fvar args id result state]
+   (->ActivityExecutionTask :activity id ref root sym fvar args result state)))
 
 (defn create-proto-activity-task
-  [proto ref root sym fvar args]
-  (->ProtoActivityExecutionTask proto :proto-activity (random-id) ref root sym fvar args nil :new))
-
+  ([proto ref root sym fvar args]
+   (create-proto-activity-task proto ref root sym fvar args (random-id) nil :new))
+  ([proto ref root sym fvar args id result state]
+   (->ProtoActivityExecutionTask proto :proto-activity id ref root sym fvar args result state)))
 
 (defn event-matches? [{t :type s :sym} {t2 :type s2 :sym}]
   (and (= t t2) (= s s2)))
@@ -64,11 +81,12 @@
 ;;;;
 ;; task execution/replay
 
-
 (defn resume-fn-task
   "Resumes a generic fn call task"
   [env store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
   ;; TODO check if proto exists in protos
+
+  ;; do we have invocation and result events for this task?
   (let [[inv? res?] (store/all-events store id)]
 
     ;; mark invoke/replay
@@ -87,6 +105,7 @@
 
       (cond
         (not res?)
+        ;; the p/let is mostly to deal with the (apply...) call for js runtimes
         (-> (p/let [impl? (if (= :proto-activity type)
                             (get protos proto)
                             nil)
@@ -104,19 +123,12 @@
               (fn [e]
                 (when-not (internal-error? e)
                   (store/task<-event store id (assoc next-failure :error e)))
-                (throw e))))
+                (p/rejected e))))
 
-        ;; replay ok
-        (event-matches? res? next-event)
-        (:result next-event)
-
-        ;; replay failure
-        (event-matches? res? next-failure)
-        (throw (:error next-failure))
-
-        :else
+        (not (or (event-matches? res? next-event) ;; replay success
+                 (event-matches? res? next-failure))) ;; replay failure
         (throw (internal-exception "Transition unexpected" {:type     (:type res?)
-                                                            :expected #{success failure}}))))))
+                                                              :expected #{success failure}}))))))
 
 #?(:clj (ns-unmap *ns* 'resume-task))
 (defmulti resume-task
@@ -137,6 +149,9 @@
   (resume-fn-task env store protos task [:intemporal.protocol/invoke :intemporal.protocol/success :intemporal.protocol/failure]))
 
 (defn enqueue-and-wait
+  "Enqueues `task` onto the store and awaits its execution.
+  If the exact task is alread present (eg we are resuming a crashed workflow),
+  the existing task will be awaited instead."
   [{:keys [store] :as opts} task]
   ;; because execution engine is supposed to be deterministic,
   ;; we can safely assume that if an identic task exists at this point
@@ -144,7 +159,7 @@
   (assert (some? store) "store should exist")
   (assert (some? task) "task should exist")
 
-  (let [t    (or (store/matching-task store task)
+  (let [t    (or (store/find-task store (:id task))
                  (store/enqueue-task store task))
 
         prom (store/await-task store (:id t) opts)]

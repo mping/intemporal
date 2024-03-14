@@ -1,5 +1,7 @@
 (ns intemporal.demo-workflow
   (:require [intemporal.store :as store]
+            [intemporal.store.foundationdb :as fdb]
+            [intemporal.store.jdbc :as jdbc]
             [intemporal.workflow :as w]
             [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]))
 
@@ -27,10 +29,12 @@
           (sf [1])
           (some-stuff pr :X))))
 
-(def mstore (store/make-memstore))
-(def worker (w/start-worker! mstore {`MyActivities (->MyActivitiesImpl)}))
+(def mstore (store/make-store))
+;(def mstore (fdb/make-store))
+;(def mstore (jdbc/make-store {:jdbcUrl "jdbc:postgresql://localhost:5432/root?user=root&password=root"
+;                              :migration-dir "migrations/postgres"}))
+(def worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
 
-;; note that in cljs, this returns a promise
 (def res (w/with-env {:store mstore}
            (my-workflow 1)))
 
@@ -38,9 +42,8 @@
   (clojure.pprint/print-table table))
 
 (defn print-tables []
-  (let [tasks (vals @(::store/task-store @mstore))
-        events (->> (vals @(::store/history-store @mstore))
-                    (flatten)
+  (let [tasks  (->> (store/list-tasks mstore))
+        events (->> (store/list-events mstore)
                     (sort-by :id))]
     (pprint-table tasks)
     (pprint-table events)))

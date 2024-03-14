@@ -66,9 +66,8 @@ Examples:
   (clojure.pprint/print-table table))
 
 (defn print-tables []
-  (let [tasks (vals @(::store/task-store @mstore))
-        events (->> (vals @(::store/history-store @mstore))
-                    (flatten)
+  (let [tasks (store/list-tasks mstore)
+        events (->> (store/list-events mstore)
                     (sort-by :id))]
     (pprint-table tasks)
     (pprint-table events)))
@@ -85,5 +84,6 @@ Examples:
   - [x] Regular fn options
 - [x] Convert to `.cljc` 
 - [x] workers + queues
-- [ ] function versioning
 - [x] saga
+- [ ] retries
+- [ ] signals

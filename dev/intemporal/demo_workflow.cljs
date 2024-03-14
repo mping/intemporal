@@ -12,8 +12,9 @@
   [a :nested])
 
 (defn activity-fn [a]
-  (env-let [f (stub-function nested-fn)]
-    (conj a :activity (f :sub))))
+  (env-let [f (stub-function nested-fn)
+            v (f :sub)]
+    (conj a :activity v)))
 
 (defprotocol MyActivities
   (some-stuff [this a]))
@@ -34,8 +35,8 @@
             v1
             v2))))
 
-(def mstore (store/make-memstore))
-(def worker (w/start-worker! mstore {`MyActivities (->MyActivitiesImpl)}))
+(def mstore (store/make-store))
+(def worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
 
 ;; note that in cljs, this returns a promise
 (def res (w/with-env {:store mstore}
@@ -50,9 +51,8 @@
        (cljs.pprint/print-table)))
 
 (defn print-tables []
-  (let [tasks  (vals @(::store/task-store @mstore))
-        events (->> (vals @(::store/history-store @mstore))
-                    (flatten)
+  (let [tasks (store/list-tasks mstore)
+        events (->> (store/list-events mstore)
                     (sort-by :id))]
     (pprint-table tasks)
     (pprint-table events)))

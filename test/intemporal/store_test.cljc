@@ -16,7 +16,7 @@
 (deftest basic-store-tests
 
   (testing "enqueue/dequeue"
-    (let [store (s/make-memstore)
+    (let [store (s/make-store)
           task  (tu/make-workflow-task)]
       (s/enqueue-task store task)
 
@@ -24,9 +24,8 @@
         (is (match? (to-map (assoc task :state :pending))
                     (to-map (s/dequeue-task store)))))))
 
-
   (testing "enqueue/dequeue with lease"
-    (let [store (s/make-memstore)
+    (let [store (s/make-store)
           task  (tu/make-workflow-task)]
       (s/enqueue-task store task)
 
@@ -52,7 +51,7 @@
                           (done))))))))
 
   (testing "await task"
-    (let [store (s/make-memstore)
+    (let [store (s/make-store)
           task  (tu/make-workflow-task)
           prom  (p/vthread
                   (s/await-task store (:id task) {:timeout-ms 1000}))]
@@ -60,21 +59,21 @@
       (is-promise-ok prom)))
 
   (testing "watch task"
-    (let [store   (s/make-memstore)
+    (let [store   (s/make-store)
           task    (tu/make-workflow-task)
           evt     {:ref 'ref :root 'root :type :invoke :args []}
           called? (p/deferred)]
 
       (is-promise-ok (p/timeout called? 1000))
       ;; if the watch doesnt happen, the test times out
-      (s/watch-tasks store #(= (:id %) (:id task)) #(p/resolve! called? %))
+      (s/watch-task store (:id task) #(p/resolve! called? %))
       (s/enqueue-task store task)
 
       (testing "apply fn event"
         (s/task<-event store (:id task) evt)
 
         (testing "task state updated"
-          (let [db-task (s/matching-task store task)]
+          (let [db-task (s/find-task store (:id task))]
             (is (= (dissoc db-task :id)
                    {:type :workflow, :ref 'some-ref, :root 'some-root,
                     :sym 'identity, :fvar #'clojure.core/identity, :args [],

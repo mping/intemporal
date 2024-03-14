@@ -34,8 +34,8 @@
             v1
             v2))))
 
-(def mstore (s/make-memstore))
-(def worker (w/start-worker! mstore {`MyActivities (->MyActivitiesImpl)}))
+(def mstore (s/make-store))
+(def worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
 ;;;;
 ;; workflow registration
 

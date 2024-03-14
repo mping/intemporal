@@ -47,13 +47,13 @@
          (w/with-env ~env-sym
            ~@body)))))
 
-(defmacro
-  defn-workflow
+(defmacro defn-workflow
   "Defines a workflow. Workflows are functions that are resillient to crashes, as
   long as side-effects are run via activities."
   [sym argv & body]
   (let [wname (symbol (str sym "-"))]
-    ;; capture bindings to propagate it correctly for activities
+        ;sig   (Integer/toHexString (hash body))]
+    ;; TODO save signature
     `(do
        (defn- ~wname ~argv (do ~@body))
        (defn ~sym ~argv
@@ -72,11 +72,12 @@
      (let [ref#  (:ref i/*env*)
            root# (:root i/*env*)
            fvar# (var ~f)]
+       ;; TODO we can use &form to determine eg checksum of activity
        (w/enqueue-and-wait i/*env* (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv#)))))
 
 (defmacro stub-protocol
   "Stub a protocol definition. Opts are currently unused.
-  Example: `(stub-protocol EventHandler {:idempotent true})`"
+  Example: `(stub-protocol EventHandler {:some-opts true})`"
   [proto & opts]
   (macros/case
     :cljs
@@ -93,6 +94,7 @@
                                                    (str (namespace proto) "/" (name sig)))]]
                                [(name sig) arglist (symbol invname) (symbol qname) (str (:name resolved))])
                              (doall))]
+        ;; TODO we can use &form to determine eg checksum of proto def
         `(reify ~proto
            ~@(for [[mname arglist invname qname pname] sig+args
                    :let [sname (symbol mname)
@@ -128,7 +130,6 @@
                                                  (str (namespace proto) "/" (name sig)))]]
                              [(name sig) arglist (symbol invname) (symbol qname)])
                            (doall))]
-
       `(reify ~proto
          ~@(for [[mname arglist invname qname] sig+args
                  :let [sname (symbol mname)
@@ -146,3 +147,16 @@
                                                 (symbol aid#)
                                                 (var-get (requiring-resolve aid#))
                                                 [~@args])))))))))
+
+(defmacro with-failure
+  "Call `fcall` in a way that compensation always runs.
+  - if `fcall` fails, `binding` will have the value `intemporal.activity/failure`.
+  - if `fcall` succeeds, `binding` will have its return value
+
+  (with-failure [v (book-hotel stub \"hotel\")]
+    (cancel-hotel stub v n))
+  "
+  [[binding fcall] comp-fn]
+  `(let [val# (atom :intemporal.activity/failure)]
+     (w/add-compensation (fn [] (let [~binding @val#] (do ~comp-fn))))
+     (reset! val# (do ~fcall))))

@@ -1,8 +1,7 @@
 (ns intemporal.demo-saga
   (:require [intemporal.workflow :as w]
-            [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]
+            [intemporal.macros :refer [stub-function stub-protocol defn-workflow with-failure]]
             [intemporal.store :as s]))
-
 
 (defprotocol TripBookingActivities
   (reserve-car [this name])
@@ -43,25 +42,23 @@
 
 ;;;;
 ;; workflow registration
-(comment)
+
 (defn-workflow book-trip
   [n]
   (let [email-stub     (stub-function send-email)
-        stub           (stub-protocol TripBookingActivities)
-        cancel-car*    (stub-function cancel-car)
-        cancel-hotel*  (stub-function cancel-hotel)
-        cancel-flight* (stub-function cancel-flight)]
+        stub           (stub-protocol TripBookingActivities)]
     (try
-      (let [cid (reserve-car stub "carr")
+      (let [cid (with-failure [v (reserve-car stub "car")]
+                  (cancel-car stub v n))
             _   (println "[workflow fn] car id:" cid)
-            _   (w/add-compensation #(cancel-car* stub cid n))
 
-            hid (book-hotel stub "hotell")
+            hid (with-failure [v (book-hotel stub "hotel")]
+                  (cancel-hotel stub v n))
             _   (println "[workflow fn] hotel id:" hid)
-            _   (w/add-compensation #(cancel-hotel* stub cid n))
-            fid (book-flight stub "flightt")
-            _   (println "[workflow fn] flight id:" fid)
-            _   (w/add-compensation #(cancel-flight* stub cid n))]
+
+            fid (with-failure [v (book-flight stub "flight")]
+                  (cancel-flight stub v n))
+            _   (println "[workflow fn] flight id:" fid)]
 
         (email-stub "user@user.com" "trip confirmed")
         :ok)
@@ -71,24 +68,26 @@
         (email-stub "user@user.com" "trip failed")
         (throw e)))))
 
-(def mstore (s/make-memstore))
-(def worker (w/start-worker! mstore {`TripBookingActivities example-impl}))
+
+(def mstore (s/make-store))
+(def worker (w/start-worker! mstore {:protocols {`TripBookingActivities example-impl}}))
 
 ;; note that in cljs, this returns a promise
 (def res (try
            (w/with-env {:store mstore}
              (book-trip 1))
-           (catch Exception e :error)))
+           (catch #?(:clj Exception :cljs js/Error) e :error)))
 
 (defn pprint-table [table]
   (clojure.pprint/print-table table))
 
 (defn print-tables []
-  (let [tasks (vals @(::s/task-store @mstore))
-        events (->> (vals @(::s/history-store @mstore))
-                    (flatten)
+  (let [tasks  (->> (s/list-tasks mstore)
+                    (map #(dissoc %  :ref :root  :fvar)))
+        events (->> (s/list-events mstore)
                     (sort-by :id))]
     (pprint-table tasks)
     (pprint-table events)))
 
 (print-tables)
+

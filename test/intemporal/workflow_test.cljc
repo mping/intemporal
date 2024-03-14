@@ -23,7 +23,7 @@
 
      :cljs
      (env-let [f (stub-function nested-fn)]
-       (f :sub))))
+              (f :sub))))
 
 (defprotocol MyActivities
   (some-stuff [this a]))
@@ -47,11 +47,11 @@
 
 (deftest workflow-happy-path-test
   (testing "workflow"
-    (let [mstore (store/make-memstore)
-          worker (w/start-worker! mstore {`MyActivities (->MyActivitiesImpl)})
+    (let [mstore       (store/make-store)
+          stop-worker  (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})
 
-          v    (w/with-env {:store mstore}
-                 (my-workflow 1))
+          v            (w/with-env {:store mstore}
+                         (my-workflow 1))
 
           run-asserts! (fn [v]
 
@@ -88,7 +88,7 @@
                            (let [tasks (store/list-tasks mstore)
                                  ;; due to promises,
                                  ;; the order of execution is not exactly the same between clj/cljs
-                                 #?(:clj [w1 a1 n1 p1]
+                                 #?(:clj  [w1 a1 n1 p1]
                                     :cljs [w1 a1 p1 n1]) tasks]
                              (pprint/print-table tasks)
 
@@ -106,8 +106,9 @@
          (run-asserts! v)
          :cljs
          (t/async done
-                  (p/finally v
-                             (fn [v c]
-                               (t/is (nil? c))
-                               (run-asserts! v)
-                               (done))))))))
+           (p/finally v
+                      (fn [v c]
+                        (t/is (nil? c))
+                        (stop-worker)
+                        (run-asserts! v)
+                        (done))))))))

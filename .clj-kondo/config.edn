@@ -1,6 +1,8 @@
 ;; https://github.com/clj-kondo/clj-kondo/blob/master/doc/linters.md
 {:lint-as {intemporal.macros/defn-workflow clojure.core/defn
            intemporal.macros/env-let clojure.core/let
+           intemporal.macros/with-failure clojure.core/let
+           intemporal.store.foundationdb/with-tx clojure.core/with-open
            promesa.core/let clojure.core/let}
  :linters {:unresolved-symbol {:exclude [(clojure.test/is [thrown-ex-info-type?])]}
            :unused-binding    {:level :off

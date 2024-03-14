@@ -64,8 +64,8 @@
                    (process-event stub evt)))
         (::fsm/state state)))))
 
-(def mstore (s/make-memstore))
-(def worker (w/start-worker! mstore {`EventHandler (make-event-handler)}))
+(def mstore (s/make-store))
+(def worker (w/start-worker! mstore {:protocols {`EventHandler (make-event-handler)}}))
 ;;;;
 ;; workflow registration
 

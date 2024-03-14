@@ -1,8 +1,8 @@
 (ns intemporal.demo-automata
   (:require [intemporal.store :as store]
             [intemporal.workflow :as w]
-            [intemporal.macros :refer [stub-protocol defn-workflow]]
-            \)))
+            [intemporal.fsm :as fsm]
+            [intemporal.macros :refer [stub-protocol defn-workflow]]))
 
 ;;;;
 ;; demo
@@ -56,8 +56,8 @@
         (recur (fsm/transit state evt) (process-event stub evt))
         (::fsm/state state)))))
 
-(def mstore (store/make-memstore))
-(def worker (w/start-worker! mstore {`EventHandler (make-event-handler)}))
+(def mstore (store/make-store))
+(def worker (w/start-worker! mstore {:protocols {`EventHandler (make-event-handler)}}))
 
 ;; note that in cljs, this returns a promise
 (def res (w/with-env {:store mstore}
@@ -67,9 +67,8 @@
   (clojure.pprint/print-table table))
 
 (defn print-tables []
-  (let [tasks (vals @(::store/task-store @mstore))
-        events (->> (vals @(::store/history-store @mstore))
-                    (flatten)
+  (let [tasks (store/list-tasks mstore)
+        events (->> (store/list-events mstore)
                     (sort-by :id))]
     (pprint-table tasks)
     (pprint-table events)))

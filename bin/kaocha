@@ -3,4 +3,4 @@
 [ -d "node_modules/ws" ] || npm install ws
 
 #clojure -M:test "$@"
-clojure -A:dev:test -M:test "$@"
+JAVA_OPTS="-Dio.netty.tryUnsafe=false" clojure -A:dev:test:jdbc:fdb -M:test "$@"

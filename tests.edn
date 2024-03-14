@@ -1,6 +1,29 @@
 #kaocha/v1
-{:tests [{type :kaocha.type/clojure.test
-          :id   :unit
+{:plugins [:kaocha.plugin/cloverage
+           :kaocha.plugin/randomize
+           :kaocha.plugin/filter
+           :kaocha.plugin/capture-output
+           :kaocha.plugin/junit-xml
+           :kaocha.plugin/cloverage]
+ :reporter [kaocha.report/documentation]
+ :color? true
+ :fail-fast? false
+ :kaocha.plugin.junit-xml/target-file "target/test-reports/report.xml"
+ :cloverage/opts {:ns-exclude-regex [],
+                  :text? false,
+                  :lcov? true,
+                  :high-watermark 80,
+                  :fail-threshold 0,
+                  :output "target/coverage",
+                  :low-watermark 50,
+                  :ns-regex [],
+                  :summary? true,
+                  :coveralls? false,
+                  :emma-xml? false,
+                  :html? true,
+                  :nop? false,
+                  :codecov? true}
+ :tests [{:id   :unit
           :ns-patterns   ["-test$"]
           :source-paths  ["src"]
           :test-paths    ["test"]}
