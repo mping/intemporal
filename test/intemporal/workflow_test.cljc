@@ -1,23 +1,29 @@
 (ns intemporal.workflow-test
-  #?(:cljs (:require [cljs.test :refer-macros [deftest is testing]]
+  #?(:cljs (:require [cljs.test :as t :refer-macros [deftest is testing]]
                      [cljs.pprint :as pprint]
                      [intemporal.store :as store]
                      [intemporal.workflow :as w]
+                     [matcher-combinators.test :refer [match?]]
                      [promesa.core :as p])
-     :clj  (:require [clojure.test :refer [deftest is testing]]
+     :clj  (:require [clojure.test :as t :refer [deftest is testing]]
                      [clojure.pprint :as pprint]
                      [intemporal.store :as store]
                      [intemporal.workflow :as w]
-                     [promesa.core :as p]))
-  #?(:cljs (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow]])
+                     [matcher-combinators.test :refer [match?]]))
+  #?(:cljs (:require-macros [intemporal.macros :refer [env-let stub-function stub-protocol defn-workflow]])
      :clj  (:require [intemporal.macros :refer [stub-function stub-protocol defn-workflow]])))
 
 (defn nested-fn [a]
   [a :nested])
 
 (defn activity-fn [a]
-  (let [f (stub-function nested-fn)]
-    (f :sub)))
+  #?(:clj
+     (let [f (stub-function nested-fn)]
+       (f :sub))
+
+     :cljs
+     (env-let [f (stub-function nested-fn)]
+       (f :sub))))
 
 (defprotocol MyActivities
   (some-stuff [this a]))
@@ -27,86 +33,81 @@
   (some-stuff [this a] [:proto a]))
 
 (defn-workflow my-workflow [i]
-  (let [sf (stub-function activity-fn)
-        pr (stub-protocol MyActivities {})
+  (let [sf  (stub-function activity-fn)
+        pr  (stub-protocol MyActivities {})
         sfr (sf 1)
         prr (some-stuff pr :pr)]
     ;; chain values: ensure tests work under cljs too
-    (p/let [v1 sfr
-            v2 prr]
+    #_:clj-kondo/ignore
+    (#?(:clj let :cljs p/let) [v1 sfr
+                               v2 prr]
       [:root v1 v2])))
 
-(defn resolve?
-  "Resolves `p?`. If it is a promise, tries to deref for 1s.
-  Throws in case of timeout."
-  [p?]
-  (if (p/deferred? p?)
-    (deref (p/timeout p? 1000))
-    p?))
-
-(defn same? [a b]
-  (if (symbol? a)
-    (is (= (-> a #?(:clj identity :cljs str))
-           (-> b #?(:clj identity :cljs str))))
-    (is (= a b))))
-
-(defn map-contains?
-  "Indicates if `m2` contains all the KVs in `m1`"
-  [m1 m2]
-  (reduce-kv (fn [acc k v]
-               (and acc
-                    (contains? m2 k)
-                    (is (same? (resolve? v)
-                               (resolve? (get m2 k))))))
-             true
-             m1))
+;;;; test proper
 
 (deftest workflow-happy-path-test
   (testing "workflow"
     (let [mstore (store/make-memstore)
           worker (w/start-worker! mstore {`MyActivities (->MyActivitiesImpl)})
 
-          ;; note that in cljs, this returns a promise
-          res    (w/with-env {:store mstore}
-                   (my-workflow 1))
-          res? (p/timeout res 1000)]
+          v    (w/with-env {:store mstore}
+                 (my-workflow 1))
 
-      (p/let [v res?]
-        (testing "workflow result"
-          (is (= v [:root [:sub :nested] [:proto :pr]])))
+          run-asserts! (fn [v]
 
-        (testing "stored events"
+                         (testing "workflow result"
+                           (is (= v [:root [:sub :nested] [:proto :pr]])))
 
-          (let [evts (store/list-events mstore)
-                [w1 w2 a1 a2 n1 n2 s1 s2] (sort-by evts :id)]
-            (pprint/print-table evts)
+                         (testing "stored events"
+                           (let [evts (store/list-events mstore)
+                                 evts (sort-by :id evts)
+                                 ;; cljs is promise based, so stubs dont run in lexical order
+                                 ;; due to p/let
+                                 #?(:clj  [w1 a1 n1 n2 a2 p1 p2 w2]
+                                    :cljs [w1 a1 p1 p2 n1 n2 a2 w2]) evts]
 
-            (testing "workflow events"
-              (is (map-contains? {:type :intemporal.workflow/invoke :sym 'intemporal.workflow-test/my-workflow- :args [1]} w1))
-              (is (map-contains? {:type :intemporal.workflow/success :sym 'intemporal.workflow-test/my-workflow- } w2)))
+                             (pprint/print-table evts)
 
-            (testing "activity events"
-              (is (map-contains? {:type :intemporal.activity/invoke :sym 'intemporal.workflow-test/activity-fn :args [1]} a1))
-              (is (map-contains? {:type :intemporal.activity/success :sym 'intemporal.workflow-test/activity-fn } a2)))
+                             (testing "workflow events"
+                               (is (match? {:type :intemporal.workflow/invoke :sym 'intemporal.workflow-test/my-workflow- :args [1]} w1))
+                               (is (match? {:type :intemporal.workflow/success :sym 'intemporal.workflow-test/my-workflow-} w2)))
 
-            (testing "activity events"
-              (is (map-contains? {:type :intemporal.activity/invoke :sym 'intemporal.workflow-test/nested-fn :args '(:sub)} n1))
-              (is (map-contains? {:type :intemporal.activity/success :sym 'intemporal.workflow-test/nested-fn } n2)))
+                             (testing "activity events"
+                               (is (match? {:type :intemporal.activity/invoke :sym 'intemporal.workflow-test/activity-fn :args [1]} a1))
+                               (is (match? {:type :intemporal.activity/success :sym 'intemporal.workflow-test/activity-fn} a2)))
 
-            (testing "protocol activity events"
-              (is (map-contains? {:type :intemporal.protocol/invoke :sym 'intemporal.workflow-test/some-stuff :args [:pr]} s1))
-              (is (map-contains? {:type :intemporal.protocol/success :sym 'intemporal.workflow-test/some-stuff } s2)))))
+                             (testing "nested activity events"
+                               (is (match? {:type :intemporal.activity/invoke :sym 'intemporal.workflow-test/nested-fn :args '(:sub)} n1))
+                               (is (match? {:type :intemporal.activity/success :sym 'intemporal.workflow-test/nested-fn} n2)))
 
-        (testing "stored tasks"
-          (let [tasks (store/list-tasks mstore)
-                [w1 a1 n1 s1] tasks]
-            (pprint/print-table tasks)
+                             (testing "protocol activity events"
+                               (is (match? {:type :intemporal.protocol/invoke :sym 'intemporal.workflow-test/some-stuff :args [:pr]} p1))
+                               (is (match? {:type :intemporal.protocol/success :sym 'intemporal.workflow-test/some-stuff} p2)))))
 
-            (testing "workflow task"
-              (is (map-contains? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1)))
-            (testing "activity task"
-              (is (map-contains? {:type :activity :sym 'intemporal.workflow-test/activity-fn :state :success :result [:sub :nested]} a1)))
-            (testing "nested activty task"
-              (is (map-contains? {:type :activity :sym 'intemporal.workflow-test/nested-fn :state :success :result [:sub :nested]} n1)))
-            (testing "protocol activity task"
-              (is (map-contains? {:type :proto-activity :sym 'intemporal.workflow-test/some-stuff :state :success :result [:proto :pr]} s1)))))))))
+                         (testing "stored tasks"
+                           (let [tasks (store/list-tasks mstore)
+                                 ;; due to promises,
+                                 ;; the order of execution is not exactly the same between clj/cljs
+                                 #?(:clj [w1 a1 n1 p1]
+                                    :cljs [w1 a1 p1 n1]) tasks]
+                             (pprint/print-table tasks)
+
+                             (testing "workflow task"
+                               (is (match? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1)))
+                             (testing "activity task"
+                               (is (match? {:type :activity :sym 'intemporal.workflow-test/activity-fn :state :success :result [:sub :nested]} a1)))
+                             (testing "nested activty task"
+                               (is (match? {:type :activity :sym 'intemporal.workflow-test/nested-fn :state :success :result [:sub :nested]} n1)))
+                             (testing "protocol activity task"
+                               (is (match? {:type :proto-activity :sym 'intemporal.workflow-test/some-stuff :state :success :result [:proto :pr]} p1))))))]
+
+      ;; TODO: use a better macro for asserts?
+      #?(:clj
+         (run-asserts! v)
+         :cljs
+         (t/async done
+                  (p/finally v
+                             (fn [v c]
+                               (t/is (nil? c))
+                               (run-asserts! v)
+                               (done))))))))

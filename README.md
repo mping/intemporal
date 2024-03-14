@@ -9,10 +9,10 @@ Lets you define a function with side effects, and persist/resume the state of th
 
 > :warning: use at your own peril, NOT production ready
 
-
 Two concepts apply:
-- **Activities**: either a protocol+impl, or a function. Handles side-effects
-- **Workflows**: pure functions that make use of `Activities`. Can be arbitrarily stopped/resumed 
+- **Activities**: Either a protocol+impl, or a function. Handles side-effects
+- **Workflows**: Functions that orchestrate activities, and are resillient. 
+                 If a process crashes, the workflow should be able to safely resume with `at-least-once` semantics
 
 ## Usage
 
@@ -20,6 +20,9 @@ Examples:
 - [demo_workflow.clj](./dev/intemporal/demo_workflow.clj)
 - [demo_automata.cljc](./dev/intemporal/demo_automata.cljc)
 - [demo_saga.cljc](./dev/intemporal/demo_saga.cljc)
+
+> Note that when the runtime is javascript, all activities will return a promise.
+> Thus, the use of `promesa.core/let` and/or `intemporal.macros/env-let` is advised
 
 ```clojure
 
@@ -83,4 +86,4 @@ Examples:
 - [x] Convert to `.cljc` 
 - [x] workers + queues
 - [ ] function versioning
-- [ ] saga
+- [x] saga

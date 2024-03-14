@@ -1,7 +1,7 @@
 (ns intemporal.store
   (:require [clojure.tools.reader.edn :as edn]
             [promesa.core :as p]
-            #?(:clj [clojure.java.io :as io]
+            #?(:clj  [clojure.java.io :as io]
                :cljs [cljs.core :refer [IDeref]]))
   #?(:clj (:import [clojure.lang IDeref]
                    [java.io File])))
@@ -13,9 +13,9 @@
 
 (defprotocol TaskStore
   (list-tasks [this] "Lists all tasks")
-  (apply-fn-event [this id details]
+  (task<-event [this id event-descr]
     "Transitions the task. The task should be dequeued beforehand. Returns the event.
-    `details` is one of:
+    `event-descr` is one of:
     `{:sym 'ns/f :args [1]}`
     `{:sym 'ns/f :result :ok}`
     `{:sym 'ns/f :error <some error>}`
@@ -32,8 +32,10 @@
     "Marks all pending tasks as `new`")
   (enqueue-task [this task]
     "Atomically enqueues a protocol, workflow or activity task execution")
-  (dequeue-task [this]
-    "Atomically dequeues some workflow, protocol or activity task execution. If the task was deserialized, its `fvar` attribute must be a `fn`"))
+  (dequeue-task [this] [this opts]
+    "Atomically dequeues some workflow, protocol or activity task execution. If the task was deserialized, its `fvar` attribute must be a `fn`
+    Opts:
+    * `lease-ms`- duration of lease for dequeue. After lease expires, the task is eligible for dequeueing again"))
 
 (defprotocol HistoryStore
   (list-events [this] "Lists all events")
@@ -51,6 +53,10 @@
 (defn- now []
   #?(:clj  (System/currentTimeMillis)
      :cljs (.getTime (js/Date.))))
+
+(def max-lease "Maximum lease time in millis"
+  #?(:clj  Long/MAX_VALUE
+     :cljs (.-MAX_SAFE_INTEGER js/Number)))
 
 (defn- sym->var [store {:keys [sym fvar] :as task}]
   #?(:clj  (or fvar (requiring-resolve sym))
@@ -161,24 +167,27 @@
        (list-tasks [this]
          (vals @tasks))
 
-       (apply-fn-event [this id {:keys [ref root type sym args result error]}]
+       (task<-event [this id {:keys [ref root type sym args result error] :as event-descr}]
          ;; some redundancy between :result in task and event
+         ;; note that we save the event first, because update-task can trigger some watchers
+         ;; and they would expect the event to be present in the history
          (cond
            (some? args)
            (let [evt {:ref ref :root root :type type :sym sym :args args}]
-             (update-task this id :state :pending)
-             (save-event this id evt))
+             (save-event this id evt)
+             (update-task this id :state :pending))
 
            (some? error)
            (let [evt {:ref ref :root root :type type :sym sym :error error}]
-             (update-task this id :state :failure :result error)
-             (save-event this id evt))
+             (save-event this id evt)
+             (update-task this id :state :failure :result error))
 
            ;;(some? result) ;result can be nil
            :else
            (let [evt {:ref ref :root root :type type :sym sym :result result}]
-             (update-task this id :state :success :result result)
-             (save-event this id evt))))
+             (save-event this id evt)
+             (update-task this id :state :success :result result))))
+
 
        (matching-task [this task]
          (let [ks     [:ref :root :type :sym :args]
@@ -201,7 +210,7 @@
            (fn [] (remove-watch tasks k))))
 
        (await-task [this id]
-         (await-task this id {:timeout-ms 999999999}))
+         (await-task this id {:timeout-ms max-lease}))
 
        (await-task [this id {:keys [timeout-ms] :as opts}]
          (let [task        (find-task this id)
@@ -249,14 +258,24 @@
          task)
 
        (dequeue-task [this]
-         (let [first-new (fn [v] (->> (vals v)
-                                      (filter #(= :new (:state %)))
-                                      (first)))
-               found?    (atom nil)]
+         (dequeue-task this {:lease-ms max-lease}))
+
+       (dequeue-task [this {:keys [lease-ms]}]
+         (let [first-new     (fn [v] (->> (vals v)
+                                          (filter #(or (= :new (:state %))
+                                                       (< (:lease-end %) (now))))
+                                          (first)))
+               found?        (atom nil)]
            (swap-vals! tasks
                        (fn [v] (let [found (first-new v)]
                                  (if found
-                                   (->> (assoc found :state :pending :fvar (sym->var this found))
+                                   (->> (assoc found :state :pending
+                                                     :fvar (sym->var this found)
+                                                     ;; watch for overflow?
+                                                     :lease-end (if (= max-lease lease-ms)
+                                                                  max-lease
+                                                                  (+ (now) lease-ms)))
+
                                         (reset! found?)
                                         (assoc v (:id found)))
                                    v))))

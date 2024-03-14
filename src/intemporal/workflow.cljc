@@ -2,22 +2,21 @@
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as internal]
             [promesa.core :as promesa])
-  #?(:cljs (:require-macros [intemporal.workflow :refer [with-env]])))
+  #?(:cljs (:require-macros
+             #_ :clj-kondo/ignore
+             [intemporal.workflow.internal :refer [with-env-internal]]
+             [intemporal.workflow :refer [with-env]])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
 ;;;;
 ;; runtime
 
-(def ^:dynamic *env* nil)
-(def default-env {:compensations (atom [])
-                  :timeout-ms #?(:clj Long/MAX_VALUE
-                                 :cljs (.-MAX_SAFE_INTEGER js/Number))})
-
 (defmacro with-env [m & body]
-  `(binding [*env* (merge default-env ~m)]
-     (do ~@body)))
+  `(internal/with-env-internal ~m ~@body))
 
+(defn current-env []
+  internal/*env*)
 
 ;;;;
 ;; worker
@@ -29,21 +28,23 @@
   ([store worker-protos]
    (promesa/vthread
      (let [task-ready? #(= :new (:state %))
-           env *env*]
+           env internal/*env*]
        (store/watch-tasks store
                           task-ready?
                           (fn [_]
                             ;; the store should handle dequeing atomically
+                            ;; todo: dequeue with lease
                             (when-let [{:keys [type id] :as task} (store/dequeue-task store)]
-                              (let [{last-root :root protos :protos} env]
+                              (let [{last-root :root protos :protos} env
+                                    internal-env {:store store
+                                                  :type  type
+                                                  :ref   id
+                                                  :root  (or last-root id)
+                                                  :protos (or protos worker-protos)}]
                                 ;; run in a new thread to avoid deadlocks
                                 (promesa/vthread
-                                  (with-env {:store store
-                                             :type  type
-                                             :ref   id
-                                             :root  (or last-root id)
-                                             :protos (or protos worker-protos)}
-                                    (internal/resume-task store worker-protos task)))))))))))
+                                  (with-env internal-env
+                                    (internal/resume-task internal-env store worker-protos task)))))))))))
 
 (defn enqueue-and-wait
   [{:keys [store] :as opts} task]
@@ -53,11 +54,11 @@
   "Adds a compensation action to the current workflow."
   [thunk]
   (assert (ifn? thunk) "Compensation action should implement IFn")
-  (swap! (:compensations *env*) conj thunk))
+  (swap! (:compensations internal/*env*) conj thunk))
 
 (defn compensate
   "Runs compensation in program order. A failure of the compensation action will stop running other compensations."
   []
-  (let [thunks (-> *env* :compensations deref)]
+  (let [thunks (-> internal/*env* :compensations deref)]
     (doseq [f thunks]
       (f))))

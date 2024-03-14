@@ -2,7 +2,8 @@
   (:require [intemporal.store :as store]
             [intemporal.workflow :as w]
             [promesa.core :as p])
-  (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]))
+  (:require-macros [intemporal.macros :refer [env-let stub-function stub-protocol defn-workflow]]
+                   [intemporal.workflow :refer [with-env]]))
 
 ;;;;
 ;; demo
@@ -11,19 +12,19 @@
   [a :nested])
 
 (defn activity-fn [a]
-  (let [f (stub-function nested-fn)]
-    (f :sub)))
+  (env-let [f (stub-function nested-fn)]
+    (conj a :activity (f :sub))))
 
 (defprotocol MyActivities
   (some-stuff [this a]))
 
 (defrecord MyActivitiesImpl []
   MyActivities
-  (some-stuff [this a] (println "record was called:" ) [a :child]))
+  (some-stuff [this a] (println "record was called:") [a :child]))
 
 (defn-workflow my-workflow [i]
-  (let [sf (stub-function activity-fn)
-        pr (stub-protocol MyActivities {})
+  (let [sf   (stub-function activity-fn)
+        pr   (stub-protocol MyActivities {})
 
         sres (sf [1])
         pres (some-stuff pr :X)]
@@ -41,10 +42,15 @@
            (my-workflow 1)))
 
 (defn pprint-table [table]
-  (cljs.pprint/print-table table))
+  ;; fvar in clj can get really long
+  (->> table
+       (map (fn [r]
+              (cond-> r
+                (contains? r :fvar) (assoc :fvar "<fn...>"))))
+       (cljs.pprint/print-table)))
 
 (defn print-tables []
-  (let [tasks (vals @(::store/task-store @mstore))
+  (let [tasks  (vals @(::store/task-store @mstore))
         events (->> (vals @(::store/history-store @mstore))
                     (flatten)
                     (sort-by :id))]
