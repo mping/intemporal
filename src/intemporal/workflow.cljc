@@ -3,6 +3,7 @@
             [intemporal.workflow.internal :as internal]
             [promesa.core :as promesa])
   #?(:cljs (:require-macros
+             #_ :clj-kondo/ignore
              [intemporal.workflow.internal :refer [with-env-internal]]
              [intemporal.workflow :refer [with-env]])))
 

@@ -3,11 +3,13 @@
                      [cljs.pprint :as pprint]
                      [intemporal.store :as store]
                      [intemporal.workflow :as w]
+                     [matcher-combinators.test :refer [match?]]
                      [promesa.core :as p])
      :clj  (:require [clojure.test :as t :refer [deftest is testing]]
                      [clojure.pprint :as pprint]
                      [intemporal.store :as store]
                      [intemporal.workflow :as w]
+                     [matcher-combinators.test :refer [match?]]
                      [promesa.core :as p]))
   #?(:cljs (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow]])
      :clj  (:require [intemporal.macros :refer [stub-function stub-protocol defn-workflow]])))
@@ -48,6 +50,12 @@
       [:root v1 v2])))
 
 ;;;; test proper
+
+(defmacro testing-proms
+  "Runs `body`"
+  [vs & body]
+  `(p/let [~@vs]
+     ~@body))
 
 (deftest workflow-happy-path-test
   (testing "workflow"

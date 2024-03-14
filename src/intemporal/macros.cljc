@@ -4,7 +4,6 @@
             [cljs.analyzer.api :as api])
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
-                            [intemporal.workflow.internal :refer [with-env-internal]]
                             [intemporal.macros :refer [defn-workflow stub-function stub-protocol]])))
 
 (def cljs-available?
