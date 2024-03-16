@@ -78,9 +78,6 @@
                                  #?(:clj  [w1 a1 n1 n2 a2 p1 p2 w2]
                                     :cljs [w1 a1 p1 n1 p2 n2 a2 w2]) evts]
 
-                             #?(:cljs (doseq [e evts]
-                                        (js/console.log (str (:type e)))))
-
                              (pprint/print-table evts)
 
                              (testing "workflow events"

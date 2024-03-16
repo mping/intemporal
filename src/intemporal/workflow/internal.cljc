@@ -103,8 +103,7 @@
             (p/catch
               (fn [e]
                 (when-not (internal-error? e)
-                  (store/task<-event store id (assoc next-failure :error e))
-                  (println (str (:type next-failure)) "!!!!!!"))
+                  (store/task<-event store id (assoc next-failure :error e)))
                 (throw e))))
 
         ;; replay ok
