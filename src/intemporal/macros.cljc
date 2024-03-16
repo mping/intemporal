@@ -1,10 +1,11 @@
 (ns intemporal.macros
   (:require [intemporal.workflow :as w]
             [intemporal.workflow.internal :as i]
-            [cljs.analyzer.api :as api])
+            [cljs.analyzer.api :as api]
+            [promesa.core :as p])
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
-                            [intemporal.macros :refer [defn-workflow stub-function stub-protocol]])))
+                            [intemporal.macros :refer [env-let defn-workflow stub-function stub-protocol]])))
 
 (def cljs-available?
   #?(:cljs
@@ -19,7 +20,37 @@
 ;;;;
 ;; userland
 
-(defmacro defn-workflow
+
+;; utility function: since stubs return promises,
+;; we want to use p/let
+;; but p/let runs a thunk that is not env-aware so we fix that
+;; actually, since js promises can't block, we need a new fn
+;; to chain the value, hence we will always need to wrap any thunk
+;; in a `(with-env...)
+(defmacro env-let
+  "Only useful for clojurescript. Wraps the `body` and each `bindings` val with a `(with-env current-env val)`), ensuring
+  that if the binding value is function stub, its value will be unrapped
+  with the same environment at the callsite.
+
+  Uses `(promesa.core/let ...` under the hood so promises are resolved via
+  a thunk with the current environment."
+  [bindings & body]
+  (let [env-sym   (gensym)
+        wrap-vals (fn [i b]
+                    (if (even? i)
+                      b
+                      `(w/with-env ~env-sym ~b)))
+        wrapped   (map-indexed wrap-vals bindings)]
+
+    `(let [~env-sym (w/current-env)]
+       (p/let ~wrapped
+         (w/with-env ~env-sym
+           ~@body)))))
+
+(defmacro
+  defn-workflow
+  "Defines a workflow. Workflows are functions that are resillient to crashes, as
+  long as side-effects are run via activities."
   [sym argv & body]
   (let [wname (symbol (str sym "-"))]
     ;; capture bindings to propagate it correctly for activities
@@ -34,7 +65,9 @@
                fvar# #'~wname]
            (w/enqueue-and-wait i/*env* (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv)))))))
 
-(defmacro stub-function [f]
+(defmacro stub-function
+  "Stubs `f`, wrapping it in an activity-aware function."
+  [f]
   `(fn [& argv#]
      (let [ref#  (:ref i/*env*)
            root# (:root i/*env*)

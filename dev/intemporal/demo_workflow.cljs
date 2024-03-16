@@ -2,7 +2,7 @@
   (:require [intemporal.store :as store]
             [intemporal.workflow :as w]
             [promesa.core :as p])
-  (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]
+  (:require-macros [intemporal.macros :refer [env-let stub-function stub-protocol defn-workflow]]
                    [intemporal.workflow :refer [with-env]]))
 
 ;;;;
@@ -12,14 +12,8 @@
   [a :nested])
 
 (defn activity-fn [a]
-  (let [f (stub-function nested-fn)
-        e (w/current-env)]
-
-    ;; p/let will run code inside a fn, so we need to make sure we propagate the
-    ;; environment
-    (p/let [v (w/with-env e
-                (f :sub))]
-      (conj a :activity v))))
+  (env-let [f (stub-function nested-fn)]
+    (conj a :activity (f :sub))))
 
 (defprotocol MyActivities
   (some-stuff [this a]))

@@ -11,8 +11,8 @@
                      [intemporal.workflow :as w]
                      [matcher-combinators.test :refer [match?]]
                      [promesa.core :as p]))
-  #?(:cljs (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow]])
-     :clj  (:require [intemporal.macros :refer [stub-function stub-protocol defn-workflow]])))
+  #?(:cljs (:require-macros [intemporal.macros :refer [env-let stub-function stub-protocol defn-workflow]])
+     :clj  (:require [intemporal.macros :refer [env-let stub-function stub-protocol defn-workflow]])))
 
 (defn nested-fn [a]
   [a :nested])
@@ -23,14 +23,8 @@
        (f :sub))
 
      :cljs
-     (let [f (stub-function nested-fn)
-           e (w/current-env)]
-
-       ;; p/let will run code inside a fn, so we need to make sure we propagate the
-       ;; environment
-       (p/let [v (w/with-env e
-                   (f :sub))]
-         v))))
+     (env-let [f (stub-function nested-fn)]
+       (f :sub))))
 
 (defprotocol MyActivities
   (some-stuff [this a]))
@@ -45,17 +39,11 @@
         sfr (sf 1)
         prr (some-stuff pr :pr)]
     ;; chain values: ensure tests work under cljs too
-    (p/let [v1 sfr
-            v2 prr]
+    (#?(:clj let :cljs p/let) [v1 sfr
+                               v2 prr]
       [:root v1 v2])))
 
 ;;;; test proper
-
-(defmacro testing-proms
-  "Runs `body`"
-  [vs & body]
-  `(p/let [~@vs]
-     ~@body))
 
 (deftest workflow-happy-path-test
   (testing "workflow"
@@ -76,7 +64,7 @@
                                  ;; cljs is promise based, so stubs dont run in lexical order
                                  ;; due to p/let
                                  #?(:clj  [w1 a1 n1 n2 a2 p1 p2 w2]
-                                    :cljs [w1 a1 p1 n1 p2 n2 a2 w2]) evts]
+                                    :cljs [w1 a1 p1 p2 n1 n2 a2 w2]) evts]
 
                              (pprint/print-table evts)
 
