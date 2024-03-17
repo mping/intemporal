@@ -83,4 +83,4 @@ Examples:
 - [x] Convert to `.cljc` 
 - [x] workers + queues
 - [ ] function versioning
-- [ ] saga
+- [x] saga
