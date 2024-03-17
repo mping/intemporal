@@ -38,6 +38,7 @@
         sfr (sf 1)
         prr (some-stuff pr :pr)]
     ;; chain values: ensure tests work under cljs too
+    #_:clj-kondo/ignore
     (#?(:clj let :cljs p/let) [v1 sfr
                                v2 prr]
       [:root v1 v2])))
