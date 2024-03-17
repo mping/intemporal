@@ -34,11 +34,22 @@
         (is (match? (to-map (assoc task :state :pending))
                     (to-map (s/dequeue-task store {:lease-ms 100}))))
         ;; wait for expire
-        @(p/then (p/delay 1000)
-                 (fn [_]
-                   (is (match?
-                          (to-map (assoc task :state :pending))
-                          (to-map (s/dequeue-task store)))))))))
+        #?(:clj
+           (do
+             @(p/delay 1000)
+             (is (match?
+                   (to-map (assoc task :state :pending))
+                   (to-map (s/dequeue-task store)))))
+
+           :cljs
+           (t/async done
+             (p/finally (p/delay 1000)
+                        (fn [_ c]
+                          (t/is (nil? c))
+                          (is (match?
+                                (to-map (assoc task :state :pending))
+                                (to-map (s/dequeue-task store))))
+                          (done))))))))
 
   (testing "await task"
     (let [store (s/make-memstore)
@@ -46,8 +57,7 @@
           prom  (p/vthread
                   (s/await-task store (:id task) {:timeout-ms 1000}))]
 
-      (is-promise-ok prom)
-      (s/enqueue-task store task)))
+      (is-promise-ok prom)))
 
   (testing "watch task"
     (let [store   (s/make-memstore)
@@ -66,5 +76,7 @@
         (testing "task state updated"
           (let [db-task (s/matching-task store task)]
             (is (= (dissoc db-task :id)
-                   {:type :workflow, :ref 'some-ref, :root 'some-root, :sym 'identity, :fvar #'clojure.core/identity, :args [], :result nil, :state :pending}))))))))
+                   {:type :workflow, :ref 'some-ref, :root 'some-root,
+                    :sym 'identity, :fvar #'clojure.core/identity, :args [],
+                    :result nil, :state :pending}))))))))
 
