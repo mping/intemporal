@@ -9,10 +9,9 @@
                      [clojure.pprint :as pprint]
                      [intemporal.store :as store]
                      [intemporal.workflow :as w]
-                     [matcher-combinators.test :refer [match?]]
-                     [promesa.core :as p]))
+                     [matcher-combinators.test :refer [match?]]))
   #?(:cljs (:require-macros [intemporal.macros :refer [env-let stub-function stub-protocol defn-workflow]])
-     :clj  (:require [intemporal.macros :refer [env-let stub-function stub-protocol defn-workflow]])))
+     :clj  (:require [intemporal.macros :refer [stub-function stub-protocol defn-workflow]])))
 
 (defn nested-fn [a]
   [a :nested])
