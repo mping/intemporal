@@ -25,3 +25,4 @@ dev/example.db
 .idea/
 *.iml
 .tool-versions
+docker/fdb.cluster
