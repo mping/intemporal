@@ -5,7 +5,8 @@
   #?(:cljs (:require-macros
              #_:clj-kondo/ignore
              [intemporal.workflow.internal :refer [with-env-internal]]
-             [intemporal.workflow :refer [with-env]])))
+             [intemporal.workflow :refer [with-env]]))
+  #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -20,9 +21,79 @@
 
 ;;;;
 ;; worker
+(defprotocol ITaskExecutor
+  (submit [this f] "Submits the function `f` for execution")
+  (shutdown [this grace-period-ms] "Shuts down the task executor")
+  (running? [this] "Indicates if the executor is running"))
+
+;; make sure that any given executor service can implement ITaskExecutor
+#?(:clj (extend-type ExecutorService
+          ITaskExecutor
+          (submit [executor f]
+            (.submit ^ExecutorService executor ^Runnable f))
+          (shutdown [executor grace-period-ms]
+            (.shutdown ^ExecutorService executor)
+            (when-not (.awaitTermination ^ExecutorService executor grace-period-ms TimeUnit/MILLISECONDS)
+              (.shutdownNow ^ExecutorService executor)))
+          (running? [executor]
+            (not (.isShutdown ^ExecutorService executor)))))
+
+(defn make-task-executor
+  "Creates an object that satisfies `ITaskExecutor`."
+  []
+  (let [run? (atom true)]
+    #?(:cljs
+       (reify ITaskExecutor
+         (submit [_ f]
+           (when @run?
+             (p/vthread (f))))
+         (shutdown [_ grace-period-ms] (reset! run? false))
+         (running? [_] @run?))
+       :clj
+       (Executors/newVirtualThreadPerTaskExecutor))))
+
+(defn- worker-execute-fn
+  "Executes a given protocol, activity or workflow `task`"
+  [store protocols {:keys [type id root] :as task}]
+  (let [internal-env {:store  store
+                      :type   type
+                      :ref    id
+                      :root   (or root id)
+                      :protos protocols}]
+    ;; run in a new thread to avoid deadlocks
+    ;; also, exceptions will not bubble
+    (with-env internal-env
+      (-> (internal/resume-task internal-env store protocols task)
+          (p/then (fn [_v] #_"TODO: LOG"))
+          (p/catch (fn [_e] #_"TODO: LOG"))))))
+
+(defn- worker-poll-fn
+  "Continously polls for task while `task-executor` is active."
+  [store protocols task-executor polling-ms]
+  (p/loop []
+    (-> (p/delay polling-ms)
+        (p/chain (fn [_]
+                   (loop []
+                     (when-let [task (store/dequeue-task store)]
+                       (submit task-executor (fn [] (worker-execute-fn store protocols task)))
+                       (recur)))
+                   (when (running? task-executor)
+                     (p/recur)))))))
+
+(defn poll+submit!
+  "Starts a poller that will submit tasks to the `task-executor`.
+  For clj runtimes, task-executor should be `(Executors/newVirtualThreadPerTaskExecutor)`, as
+  each execution will be blocked while they await for a given task dependencie's execution."
+  ([store {:keys [protocols polling-ms] :or {protocols {} polling-ms 100} :as opts}]
+   (poll+submit! store (make-task-executor) opts))
+  ([store task-executor & {:keys [protocols polling-ms] :or {protocols {} polling-ms 100}}]
+   (let [polling-fn (fn [] (worker-poll-fn store protocols task-executor polling-ms))]
+     (submit task-executor polling-fn))
+   task-executor))
 
 (defn start-worker!
-  "Starts a worker thread."
+  "Starts a single worker thread that periodically polls for tasks and executes them in a
+  separate thread. Mostly used for testing purposes."
   ([store]
    (start-worker! store {}))
   ([store & {:keys [protocols polling-ms] :or {protocols {} polling-ms 100}}]

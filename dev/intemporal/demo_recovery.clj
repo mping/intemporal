@@ -21,9 +21,7 @@
 
 ;; make a backup of the db to allow replay
 (io/copy (io/file "./dev/intemporal/recovery.edn") (io/file "/tmp/intemporal-recovery.edn"))
-(def mstore (store/make-store "/tmp/intemporal-recovery.edn"
-                                 {'intemporal.workflow.internal.WorkflowExecutionTask i/map->WorkflowExecutionTask
-                                  'intemporal.workflow.internal.ActivityExecutionTask i/map->ActivityExecutionTask}))
+(def mstore (store/make-store "/tmp/intemporal-recovery.edn" {}))
 (def worker (w/start-worker! mstore))
 
 (defn pprint-table [table]
@@ -41,3 +39,5 @@
 ;;;;
 ;; all pending tasks are marked as new again, so they will be reexecuted
 (store/reenqueue-pending-tasks mstore println)
+;; print again
+(print-tables)

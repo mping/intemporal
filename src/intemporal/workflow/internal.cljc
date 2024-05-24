@@ -44,36 +44,23 @@
 ;; fvar: the function var, to call (apply fvar
 ;; result: either a value, or error
 ;; state: state of task new|pending|failure|success
-
-(defrecord WorkflowExecutionTask [type id ref root sym fvar args result state]
-  Object
-  (toString [this] (str "#WorkflowExecutionTask" (into {} this))))
-
-(defrecord ActivityExecutionTask [type id ref root sym fvar args result state]
-  Object
-  (toString [this] (str "#ActivityExecutionTask" (into {} this))))
-
-(defrecord ProtoActivityExecutionTask [proto type id ref root sym fvar args result state]
-  Object
-  (toString [this] (str "#ProtoActivityExecutionTask" (into {} this))))
-
 (defn create-workflow-task
   ([ref root sym fvar args]
    (create-workflow-task ref root sym fvar args (random-id) nil :new))
   ([ref root sym fvar args id result state]
-   (->WorkflowExecutionTask :workflow id ref root sym fvar args result state)))
+   {:type :workflow :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state}))
 
 (defn create-activity-task
   ([ref root sym fvar args]
    (create-activity-task ref root sym fvar args (random-id) nil :new))
   ([ref root sym fvar args id result state]
-   (->ActivityExecutionTask :activity id ref root sym fvar args result state)))
+   {:type :activity :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state}))
 
 (defn create-proto-activity-task
   ([proto ref root sym fvar args]
    (create-proto-activity-task proto ref root sym fvar args (random-id) nil :new))
   ([proto ref root sym fvar args id result state]
-   (->ProtoActivityExecutionTask proto :proto-activity id ref root sym fvar args result state)))
+   {:type :proto-activity :proto proto :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state}))
 
 (defn event-matches? [{t :type s :sym} {t2 :type s2 :sym}]
   (and (= t t2) (= s s2)))

@@ -33,11 +33,17 @@
 ;(def mstore (fdb/make-store))
 ;(def mstore (jdbc/make-store {:jdbcUrl "jdbc:postgresql://localhost:5432/root?user=root&password=root"
 ;                              :migration-dir "migrations/postgres"}))
-(def worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
+;(def worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
+(def ex (w/poll+submit! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
 
 (def res (w/with-env {:store mstore}
            (my-workflow 1)))
 
+;; if we reach here, all tasks are finished
+(w/shutdown ex 1000)
+
+;;;;
+;; show the results
 (defn pprint-table [table]
   (clojure.pprint/print-table table))
 
