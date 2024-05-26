@@ -1,12 +1,13 @@
 {:paths   ["src" "dev" "target"]
- :deps    {org.clojure/clojure  {:mvn/version "1.11.1"}
-           thheller/shadow-cljs {:mvn/version "2.22.9"}
-           com.taoensso/timbre  {:mvn/version "6.0.1"}
+ :deps    {org.clojure/clojure      {:mvn/version "1.11.1"}
+           thheller/shadow-cljs     {:mvn/version "2.22.9"}
+           com.taoensso/timbre      {:mvn/version "6.0.1"}
            ;;stuff
-           net.cgrand/macrovich {:mvn/version "0.2.1"}
-           funcool/promesa      {:mvn/version "11.0.678"}}
+           net.cgrand/macrovich     {:mvn/version "0.2.1"}
+           funcool/promesa          {:mvn/version "11.0.678"}
+           thedavidmeister/cljc-md5 {:mvn/version "0.0.2"}}
  :aliases {:dev  {:extra-paths ["dev" "test"]
-                  :jvm-opts ["-Djdk.attach.allowAttachSelf"]
+                  :jvm-opts    ["-Djdk.attach.allowAttachSelf"]
                   :extra-deps  {lambdaisland/kaocha                      {:mvn/version "1.71.1119"}
                                 lambdaisland/kaocha-cloverage            {:mvn/version "1.1.89"}
                                 lambdaisland/kaocha-junit-xml            {:mvn/version "1.17.101"}

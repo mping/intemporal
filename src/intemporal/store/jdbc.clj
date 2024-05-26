@@ -207,7 +207,7 @@
 
       (dequeue-task [this {:keys [lease-ms]}]
         (let [found? (jdbc/with-transaction [tx db-spec]
-                       (when-let [task (some-> (jdbc/execute-one! tx ["select * from tasks where (state='new' or lease_end < now()) limit 1"] default-opts)
+                       (when-let [task (some-> (jdbc/execute-one! tx ["select * from tasks where (state='new' or lease_end < now()) order by id asc limit 1"] default-opts)
                                                (db->task))]
                          (let [lease-epoch (when lease-ms
                                              (* 1000 (+ (store/now) lease-ms)))

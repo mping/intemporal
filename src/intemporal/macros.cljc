@@ -1,7 +1,8 @@
 (ns intemporal.macros
-  (:require [intemporal.workflow :as w]
+  (:require [cljs.analyzer.api :as api]
+            [intemporal.workflow :as w]
             [intemporal.workflow.internal :as i]
-            [cljs.analyzer.api :as api]
+            [md5.core :as md5]
             [promesa.core :as p])
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
@@ -51,8 +52,8 @@
   "Defines a workflow. Workflows are functions that are resillient to crashes, as
   long as side-effects are run via activities."
   [sym argv & body]
-  (let [wname (symbol (str sym "-"))]
-        ;sig   (Integer/toHexString (hash body))]
+  (let [wname (symbol (str sym "-"))
+        sig   (md5/string->md5-hex (str body))]
     ;; TODO save signature
     `(do
        (defn- ~wname ~argv (do ~@body))

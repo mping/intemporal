@@ -31,7 +31,9 @@
   (enqueue-task [this task]
     "Atomically enqueues a protocol, workflow or activity task execution")
   (dequeue-task [this] [this opts]
-    "Atomically dequeues some workflow, protocol or activity task execution. If the task was deserialized, its `fvar` attribute must be a `fn`
+    "Atomically dequeues some workflow, protocol or activity task execution.
+    For deterministic purposes, should dequeue the oldest task first.
+    If the task was deserialized, its `fvar` attribute must be a `fn`
     Opts:
     * `lease-ms`- duration of lease for dequeue. After lease expires, the task is eligible for dequeueing again")
   (clear-tasks [this]
@@ -90,6 +92,7 @@
          counter     (atom 0)
          pcounter    (atom 0)
          ecounter    (atom 0)
+         tcounter    (atom 0)
          vars        (atom {})
 
          ;;persistence
@@ -230,16 +233,23 @@
                                (wrap-result resolved)))))))))
 
        (reenqueue-pending-tasks [this f]
-         (swap! tasks
-                update-vals
-                (fn [{:keys [state] :as task}]
-                  #_:clj-kondo/ignore
-                  (cond-> task
-                          (= :pending state) (do (f task)
-                                                 (assoc task :state :new))))))
+         (let [task->run? (atom #{})]
+           (swap! tasks
+                  update-vals
+                  (fn [{:keys [state] :as task}]
+                    #_:clj-kondo/ignore
+                    (cond-> task
+                            (= :pending state)
+                            (do
+                              ;; ensure we only run f once - swap! might run the fn multiple times
+                              (when-not (contains? @task->run? task)
+                                (f task)
+                                (swap! task->run? conj task))
+                              (assoc task :state :new)))))))
 
        (enqueue-task [this task]
-         (swap! tasks assoc (:id task) task)
+         (swap! tasks assoc
+                (:id task) (assoc task :order (swap! tcounter inc)))
          #?(:cljs (register this (:sym task) (:fvar task)))
          task)
 
@@ -251,6 +261,7 @@
                                       (filter #(or (= :new (:state %))
                                                    (some-> (:lease-end %)
                                                            (< (now)))))
+                                      (sort-by :order)
                                       (first)))
                found?    (atom nil)]
            (swap-vals! tasks
