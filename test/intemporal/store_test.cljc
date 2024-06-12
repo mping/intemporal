@@ -77,5 +77,6 @@
             (is (= (dissoc db-task :id)
                    {:type :workflow, :ref 'some-ref, :root 'some-root,
                     :sym 'identity, :fvar #'clojure.core/identity, :args [],
-                    :result nil, :state :pending}))))))))
+                    :result nil, :state :pending
+                    :order 1}))))))))
 
