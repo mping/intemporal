@@ -15,6 +15,7 @@
      (do ~@body)))
 
 (defn internal-error? [ex]
+  ;; TODO this should be a store predicate, or every store exception should be wrapped in this
   (= :internal (-> ex ex-data ::type)))
 
 (defn internal-exception [msg data]
@@ -89,34 +90,35 @@
 
     ;; mark success/failure or replay
     (let [next-event   {:ref id :root (or root id) :type success :sym sym}
-          next-failure (assoc next-event :type failure)]
+          next-failure (assoc next-event :type failure)
 
-      (cond
-        (not res?)
-        ;; the p/let is mostly to deal with the (apply...) call for js runtimes
-        (-> (p/let [impl? (if (= :proto-activity type)
-                            (get protos proto)
-                            nil)
-                    args' (if (= :proto-activity type)
-                            (cons impl? args)
-                            args)
-                    r     (binding [*env* (merge default-env env)]
-                            (apply fvar args'))]
-              r)
-            (p/then
-              (fn [r]
-                (store/task<-event store id (assoc next-event :result r))
-                r))
-            (p/catch
-              (fn [e]
-                (when-not (internal-error? e)
-                  (store/task<-event store id (assoc next-failure :error e)))
-                (p/rejected e))))
+          retval (cond
+                   (not res?)
+                   ;; the p/let is mostly to deal with the (apply...) call for js runtimes
+                   (-> (p/let [impl? (if (= :proto-activity type)
+                                       (get protos proto)
+                                       nil)
+                               args' (if (= :proto-activity type)
+                                       (cons impl? args)
+                                       args)
+                               r     (binding [*env* (merge default-env env)]
+                                       (apply fvar args'))]
+                         r)
+                       (p/then
+                         (fn [r]
+                           (store/task<-event store id (assoc next-event :result r))
+                           r))
+                       (p/catch
+                         (fn [e]
+                           (when-not (internal-error? e)
+                             (store/task<-event store id (assoc next-failure :error e)))
+                           (p/rejected e))))
 
-        (not (or (event-matches? res? next-event) ;; replay success
-                 (event-matches? res? next-failure))) ;; replay failure
-        (throw (internal-exception "Transition unexpected" {:type     (:type res?)
-                                                              :expected #{success failure}}))))))
+                   (not (or (event-matches? res? next-event) ;; replay success
+                            (event-matches? res? next-failure))) ;; replay failure
+                   (throw (internal-exception "Transition unexpected" {:type     (:type res?)
+                                                                       :expected #{success failure}})))]
+      retval)))
 
 #?(:clj (ns-unmap *ns* 'resume-task))
 (defmulti resume-task

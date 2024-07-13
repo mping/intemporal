@@ -63,9 +63,7 @@
     ;; run in a new thread to avoid deadlocks
     ;; also, exceptions will not bubble
     (with-env internal-env
-      (-> (internal/resume-task internal-env store protocols task)
-          (p/then (fn [_v] #_"TODO: LOG"))
-          (p/catch (fn [_e] #_"TODO: LOG"))))))
+      (internal/resume-task internal-env store protocols task))))
 
 (defn- worker-poll-fn
   "Continously polls for task while `task-executor` is active."
@@ -113,9 +111,7 @@
                             ;; also, exceptions will not bubble
                             (p/vthread
                               (with-env internal-env
-                                (-> (internal/resume-task internal-env store protocols task)
-                                    (p/then (fn [_v] #_"TODO: LOG"))
-                                    (p/catch (fn [_e] #_"TODO: LOG")))))))
+                                (internal/resume-task internal-env store protocols task)))))
                         (when @run?
                           (p/recur)))))))
      (fn [] (reset! run? false)))))

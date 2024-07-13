@@ -42,7 +42,6 @@
                       b
                       `(w/with-env ~env-sym ~b)))
         wrapped   (map-indexed wrap-vals bindings)]
-
     `(let [~env-sym (w/current-env)]
        (p/let ~wrapped
          (w/with-env ~env-sym
@@ -74,7 +73,19 @@
            root# (:root i/*env*)
            fvar# (var ~f)]
        ;; TODO we can use &form to determine eg checksum of activity
-       (w/enqueue-and-wait i/*env* (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv#)))))
+
+       ;; prepare call
+       (let [store#  (:store i/*env*)
+             protos# (:protos i/*env*)
+             ref#    nil ;; no enqueued task => no ref
+             task#   (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv#)
+             res#    (i/resume-task i/*env* store# protos# task#)]
+         ;; an embedded workflow engine doesn't need to have a task per invocation
+         #_
+         (w/enqueue-and-wait i/*env* (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv#))
+         (macros/case
+           :cljs res#
+           :clj (deref res#))))))
 
 (defmacro stub-protocol
   "Stub a protocol definition. Opts are currently unused.
@@ -106,16 +117,26 @@
                         act-opts# ~(first opts)
                         ref#      (:ref i/*env*)
                         root#     (:root i/*env*)]
-                    (w/enqueue-and-wait i/*env* (i/create-proto-activity-task
-                                                  (symbol ~pname)
-                                                  ref#
-                                                  root#
-                                                  (symbol aid#)
-                                                  ;aid# ;; >> doesn't work!
-                                                  ;; protos are not reified like in clj https://clojurescript.org/about/differences#_protocols
-                                                  ;; we create a "fake" fvar that can be invokeable just like the real thing
-                                                  (fn [& impl+args#] (apply ~qname impl+args#))
-                                                  [~@args]))))))))
+
+                    ;; prepare call
+                    (let [store#  (:store i/*env*)
+                          protos# (:protos i/*env*)
+                          ref#    nil ;; no task => no ref
+                          task#   (i/create-proto-activity-task
+                                    (symbol ~pname)
+                                    ref#
+                                    root#
+                                    (symbol aid#)
+                                    ;aid# ;; >> doesn't work!
+                                    ;; protos are not reified like in clj https://clojurescript.org/about/differences#_protocols
+                                    ;; we create a "fake" fvar that can be invokeable just like the real thing
+                                    (fn [& impl+args#] (apply ~qname impl+args#))
+                                    [~@args])]
+
+                      ;; resume-task returns a promise
+                      (i/resume-task i/*env* store# protos# task#))))))))
+                    ;; an embedded runner doesnt need a task per invocation
+                    ;; (w/enqueue-and-wait i/*env* task#)))))))
 
     :clj
     #_{:clj-kondo/ignore [:unresolved-symbol]}
@@ -141,13 +162,22 @@
                       act-opts# ~(first opts)
                       ref#      (:ref i/*env*)
                       root#     (:root i/*env*)]
-                  (w/enqueue-and-wait i/*env* (i/create-proto-activity-task
-                                                (-> ~proto :var symbol)
-                                                ref#
-                                                root#
-                                                (symbol aid#)
-                                                (var-get (requiring-resolve aid#))
-                                                [~@args])))))))))
+
+                  ;; prepare call
+                  (let [store#  (:store i/*env*)
+                        protos# (:protos i/*env*)
+                        ref#    nil ;; no task => no ref
+                        task#   (i/create-proto-activity-task
+                                  (-> ~proto :var symbol)
+                                  ref#
+                                  root#
+                                  (symbol aid#)
+                                  (var-get (requiring-resolve aid#))
+                                  [~@args])]
+                    ;; resume-task returns a promise
+                    @(i/resume-task i/*env* store# protos# task#)))))))))
+                  ;; an embedded runner doesn't need a task per invocation
+                  ;; (w/enqueue-and-wait i/*env* task#))))))))
 
 (defmacro with-failure
   "Call `fcall` in a way that compensation always runs.
