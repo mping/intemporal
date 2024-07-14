@@ -47,6 +47,20 @@
          (w/with-env ~env-sym
            ~@body)))))
 
+(defmacro vthread
+  "Runs `body` within a virtual thread.
+  Locks the workflow, meaning only one thread at a time can save the history events.
+  The body execution will ensure that "
+  [& body]
+  `(let [id# (i/try-lock!)]
+     (p/vthread
+       (try
+         (i/with-env-internal (merge i/*env* {:lockid id#}))
+         ~@body
+         (finally
+           ;; if `body` doesnt actually release, we ensure its released
+           (i/ensure-release! id#))))))
+
 (defmacro defn-workflow
   "Defines a workflow. Workflows are functions that are resillient to crashes, as
   long as side-effects are run via activities."

@@ -3,8 +3,8 @@
            :kaocha.plugin/randomize
            :kaocha.plugin/filter
            :kaocha.plugin/capture-output
-           :kaocha.plugin/junit-xml]
-           ;:kaocha.plugin/cloverage]
+           :kaocha.plugin/junit-xml
+           :kaocha.plugin/cloverage]
  :reporter [kaocha.report/documentation]
  :color? true
  :fail-fast? false

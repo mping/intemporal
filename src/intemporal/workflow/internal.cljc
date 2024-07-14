@@ -7,8 +7,30 @@
 
 (def ^:dynamic *env* nil)
 (def default-env {:compensations (atom '())
+                  :lock   #?(:clj (java.util.concurrent.Semaphore. 1)
+                             :cljs nil)
                   :timeout-ms    #?(:clj  Long/MAX_VALUE
                                     :cljs 2147483647)})
+
+(defn try-lock!
+  "CLJ: uses a lock to ensure serial access to a given section, typically to serialize activity
+  event history, so it becomes deterministic (in case of eg: multithreads)."
+  []
+  (when-let [lock (:lock *env*)]
+    #?(:clj (do
+              (.acquire ^java.util.concurrent.Semaphore lock)
+              (random-uuid)))))
+
+(defn ensure-release!
+  "Releases the lock only if `lockid` matches current env lock id.
+  Mostly for threaded situations."
+  [lockid]
+  (when-let [lock (:lock *env*)]
+    (let [lockid? (:lock-id *env*)]
+      #?(:clj (when (and
+                      (= lockid lockid?)
+                      (zero? (.availablePermits ^java.util.concurrent.Semaphore lock)))
+                (.release ^java.util.concurrent.Semaphore lock))))))
 
 (defmacro with-env-internal [m & body]
   `(binding [*env* (merge default-env ~m)]
@@ -72,21 +94,28 @@
 
 (defn resume-fn-task
   "Resumes a generic fn call task"
-  [env store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
+  [{:keys [lock lockid] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
   ;; TODO check if proto exists in protos
 
   ;; do we have invocation and result events for this task?
-  (let [[inv? res?] (store/all-events store id)]
+  (let [released?   (atom false)
+        [inv? res?] (store/all-events store id)]
 
     ;; mark invoke/replay
     (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
-      (cond
-        (not inv?)
-        (store/task<-event store id next-event)
+      (try
+        (cond
+          ;; do we have an invocation event? if not, save this one
+          (not inv?)
+          (store/task<-event store id next-event)
 
-        (not (event-matches? inv? next-event))
-        (throw (internal-exception "Transition unexpected" {:type     (:type inv?)
-                                                            :expected invoke}))))
+          ;; we do have an invocation event, is it a match of the above?
+          (not (event-matches? inv? next-event))
+          (throw (internal-exception "Transition unexpected" {:type     (:type inv?)
+                                                              :expected invoke})))
+        (finally
+          ;; release the lock
+          (ensure-release! lockid))))
 
     ;; mark success/failure or replay
     (let [next-event   {:ref id :root (or root id) :type success :sym sym}

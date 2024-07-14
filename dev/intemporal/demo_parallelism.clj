@@ -2,7 +2,7 @@
   (:require [intemporal.store :as store]
             [intemporal.workflow :as w]
             [promesa.core :as p])
-  (:require [intemporal.macros :refer [stub-protocol defn-workflow]]
+  (:require [intemporal.macros :refer [stub-protocol defn-workflow vthread]]
             [intemporal.workflow]))
 
 ;;;;
@@ -14,12 +14,13 @@
 (defrecord ThreadActivityImpl []
   ThreadActivity
   (with-thread [this id]
-    (format "in %s" id)))
+    (Thread/sleep 200)
+    id))
 
 (defn-workflow my-workflow []
   (let [pr   (stub-protocol ThreadActivity {})
         proms (for [i (range 10)]
-                (p/vthread
+                (vthread
                   (with-thread pr i)))]
     ;; at this point, all of `with-thread` calls are queued, so
     ;; this code is deterministic up to here
