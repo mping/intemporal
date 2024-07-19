@@ -9,7 +9,7 @@
  :aliases {:dev  {:extra-paths ["dev" "test"]
                   :jvm-opts    ["-Djdk.attach.allowAttachSelf"]
                   :extra-deps  {lambdaisland/kaocha                      {:mvn/version "1.71.1119"}
-                                lambdaisland/kaocha-cloverage            {:mvn/version "1.1.89"}
+                                ;lambdaisland/kaocha-cloverage            {:mvn/version "1.1.89"}
                                 lambdaisland/kaocha-junit-xml            {:mvn/version "1.17.101"}
                                 ;lambdaisland/kaocha-cljs2     {:mvn/version "0.1.58"}
                                 com.lambdaisland/kaocha-cljs             {:mvn/version "1.4.130"}
