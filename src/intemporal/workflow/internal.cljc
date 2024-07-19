@@ -1,6 +1,7 @@
 (ns ^:private intemporal.workflow.internal
   "Private namespace for workflow support."
-  (:require [intemporal.store :as store]
+  (:require [taoensso.timbre :as log]
+            [intemporal.store :as store]
             [promesa.core :as p]))
 
 #?(:clj (set! *warn-on-reflection* true))
@@ -17,20 +18,27 @@
   event history, so it becomes deterministic (in case of eg: multithreads)."
   []
   (when-let [lock (:lock *env*)]
-    #?(:clj (do
+    #?(:clj (let [id (random-uuid)]
               (.acquire ^java.util.concurrent.Semaphore lock)
-              (random-uuid)))))
+              (log/tracef "Acquiring lock %s with id %s" lock id)
+              id))))
 
-(defn ensure-release!
+(defn try-release!
   "Releases the lock only if `lockid` matches current env lock id.
   Mostly for threaded situations."
   [lockid]
-  (when-let [lock (:lock *env*)]
-    (let [lockid? (:lock-id *env*)]
-      #?(:clj (when (and
-                      (= lockid lockid?)
+  (when lockid
+    (when-let [lock (:lock *env*)]
+      (let [lockid? (:lockid *env*)]
+        #?(:clj (if (and
+                      (= (str lockid) (str lockid?))
                       (zero? (.availablePermits ^java.util.concurrent.Semaphore lock)))
-                (.release ^java.util.concurrent.Semaphore lock))))))
+                  (.release ^java.util.concurrent.Semaphore lock)
+                  (log/tracef "Tried to release lock %s (lockid %s, env lockid %s, permits: %d)"
+                             lock
+                             lockid
+                             lockid?
+                             (.availablePermits ^java.util.concurrent.Semaphore lock))))))))
 
 (defmacro with-env-internal [m & body]
   `(binding [*env* (merge default-env ~m)]
@@ -96,7 +104,7 @@
   "Resumes a generic fn call task"
   [{:keys [lock lockid] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
   ;; TODO check if proto exists in protos
-
+  (log/tracef "Resuming task %s" task)
   ;; do we have invocation and result events for this task?
   (let [[inv? res?] (store/all-events store id)]
 
@@ -114,7 +122,7 @@
                                                               :expected invoke})))
         (finally
           ;; release the lock
-          (ensure-release! lockid))))
+          (try-release! lockid))))
 
     ;; mark success/failure or replay
     (let [next-event   {:ref id :root (or root id) :type success :sym sym}

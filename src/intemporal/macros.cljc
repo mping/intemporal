@@ -60,12 +60,12 @@
            (do ~@body))
          (finally
            ;; if `body` doesnt actually release, we ensure its released
-           (i/ensure-release! id#))))))
+           (i/try-release! id#))))))
 
 (defmacro vthread
-  "Runs `body` within a virtual thread.
+  "Runs `body` within a virtual thread, returning a promise.
   Locks the workflow, meaning only one thread at a time can save the history events.
-  The body execution will ensure that "
+  "
   [& body]
   `(let [env# (w/current-env)
          id#  (i/try-lock!)]
@@ -76,13 +76,9 @@
                  (try
                    (do ~@body)
                    (finally
-                     (i/ensure-release! id#))))
+                     (i/try-release! id#))))
                (p/then resolve#)
-               (p/catch reject#)
-               ;; TODO: is this finally really required?
-               (p/finally
-                 (fn [] (i/ensure-release! id#)))))))))
-
+               (p/catch reject#)))))))
 
 (defmacro defn-workflow
   "Defines a workflow. Workflows are functions that are resillient to crashes, as
@@ -217,9 +213,9 @@
                   ;; (w/enqueue-and-wait i/*env* task#))))))))
 
 (defmacro with-failure
-  "Call `fcall` in a way that compensation always runs.
+  "Runs `fcall`, ensuring that if it fails, compensation will always run.
   - if `fcall` fails, `binding` will have the value `intemporal.activity/failure`.
-  - if `fcall` succeeds, `binding` will have its return value
+  - if `fcall` succeeds, but later compensation is invoked, `binding` will have its return value
 
   (with-failure [v (book-hotel stub \"hotel\")]
     (cancel-hotel stub v n))
