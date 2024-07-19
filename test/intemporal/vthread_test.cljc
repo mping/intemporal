@@ -25,18 +25,19 @@
   (sleep [this id ms]
     #?(:clj (do (Thread/sleep (long ms))
                 id)
-       :cljs (do
-               (p/then (p/delay ms)
-                       (constantly id))))))
+       :cljs (p/then (p/delay ms)
+                     (fn [_] id)))))
 
 (defn-workflow my-workflow []
   (let [pr   (stub-protocol ThreadActivity {})
         proms (for [i (range 10)]
                 (vthread
                   (sleep pr i 1000)))]
+
     ;; at this point, all of `with-thread` calls are queued, so
     ;; this code is deterministic up to here
-    @(p/all proms)))
+    #?(:clj @(p/all proms)
+       :cljs (p/all proms))))
 
 (deftest workflow-happy-path-test
   (testing "workflow"
@@ -53,7 +54,8 @@
         (try
           (testing "ran every activity concurrently"
             (let [elapsed (- (store/now) start)]
-              (is (< elapsed 1) "Should not take more than 2s to run")))
+              (is (>= elapsed 1000) "Should take at least 1s to run")
+              (is (< elapsed 2000) "Should not take more than 2s to run")))
           (finally
             (stop-worker)
 

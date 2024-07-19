@@ -47,19 +47,42 @@
          (w/with-env ~env-sym
            ~@body)))))
 
+(defmacro vthread2
+  "Runs `body` within a virtual thread.
+  Locks the workflow, meaning only one thread at a time can save the history events.
+  The body execution will ensure that "
+  [& body]
+  `(let [env# (w/current-env)
+         id#  (i/try-lock!)]
+     (p/vthread
+       (try
+         (i/with-env-internal (merge env# {:lockid id#})
+           (do ~@body))
+         (finally
+           ;; if `body` doesnt actually release, we ensure its released
+           (i/ensure-release! id#))))))
+
 (defmacro vthread
   "Runs `body` within a virtual thread.
   Locks the workflow, meaning only one thread at a time can save the history events.
   The body execution will ensure that "
   [& body]
-  `(let [id# (i/try-lock!)]
-     (p/vthread
-       (try
-         (i/with-env-internal (merge i/*env* {:lockid id#}))
-         ~@body
-         (finally
-           ;; if `body` doesnt actually release, we ensure its released
-           (i/ensure-release! id#))))))
+  `(let [env# (w/current-env)
+         id#  (i/try-lock!)]
+     (p/create
+       (fn [resolve# reject#]
+         (p/vthread
+           (-> (i/with-env-internal (merge env# {:lockid id#})
+                 (try
+                   (do ~@body)
+                   (finally
+                     (i/ensure-release! id#))))
+               (p/then resolve#)
+               (p/catch reject#)
+               ;; TODO: is this finally really required?
+               (p/finally
+                 (fn [] (i/ensure-release! id#)))))))))
+
 
 (defmacro defn-workflow
   "Defines a workflow. Workflows are functions that are resillient to crashes, as

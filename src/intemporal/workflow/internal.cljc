@@ -98,8 +98,7 @@
   ;; TODO check if proto exists in protos
 
   ;; do we have invocation and result events for this task?
-  (let [released?   (atom false)
-        [inv? res?] (store/all-events store id)]
+  (let [[inv? res?] (store/all-events store id)]
 
     ;; mark invoke/replay
     (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
