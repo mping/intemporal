@@ -19,11 +19,11 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS events (
     id        SERIAL PRIMARY KEY,
     type      varchar(50) NOT NULL,
-    ref       varchar(50) NOT NULL,
+    ref       varchar(50) NULL, --NOT NULL,
     root      varchar(50) NOT NULL,
     sym       varchar(50) NOT NULL,
     args      bytea       NULL,
     result    bytea       NULL,
-    FOREIGN KEY (ref) REFERENCES tasks(id)  on delete set null,
+    --FOREIGN KEY (ref) REFERENCES tasks(id)  on delete set null,
     FOREIGN KEY (root) REFERENCES tasks(id) on delete set null
 )

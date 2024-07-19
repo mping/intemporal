@@ -60,12 +60,9 @@
                       :ref    id
                       :root   (or root id)
                       :protos protocols}]
-    ;; run in a new thread to avoid deadlocks
-    ;; also, exceptions will not bubble
+    ;; root task: we only enqueue workflows
     (with-env internal-env
-      (-> (internal/resume-task internal-env store protocols task)
-          (p/then (fn [_v] #_"TODO: LOG"))
-          (p/catch (fn [_e] #_"TODO: LOG"))))))
+      (internal/resume-task internal-env store protocols task))))
 
 (defn- worker-poll-fn
   "Continously polls for task while `task-executor` is active."
@@ -104,18 +101,8 @@
          (-> (p/delay polling-ms)
              (p/chain (fn [_]
                         (when-let [{:keys [type id root] :as task} (store/dequeue-task store)]
-                          (let [internal-env {:store  store
-                                              :type   type
-                                              :ref    id
-                                              :root   (or root id)
-                                              :protos protocols}]
-                            ;; run in a new thread to avoid deadlocks
-                            ;; also, exceptions will not bubble
                             (p/vthread
-                              (with-env internal-env
-                                (-> (internal/resume-task internal-env store protocols task)
-                                    (p/then (fn [_v] #_"TODO: LOG"))
-                                    (p/catch (fn [_e] #_"TODO: LOG")))))))
+                              (worker-execute-fn store protocols task)))
                         (when @run?
                           (p/recur)))))))
      (fn [] (reset! run? false)))))
