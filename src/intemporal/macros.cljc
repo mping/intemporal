@@ -47,21 +47,6 @@
          (w/with-env ~env-sym
            ~@body)))))
 
-(defmacro vthread2
-  "Runs `body` within a virtual thread.
-  Locks the workflow, meaning only one thread at a time can save the history events.
-  The body execution will ensure that "
-  [& body]
-  `(let [env# (w/current-env)
-         id#  (i/try-lock!)]
-     (p/vthread
-       (try
-         (i/with-env-internal (merge env# {:lockid id#})
-           (do ~@body))
-         (finally
-           ;; if `body` doesnt actually release, we ensure its released
-           (i/try-release! id#))))))
-
 (defmacro vthread
   "Runs `body` within a virtual thread, returning a promise.
   Locks the workflow, meaning only one thread at a time can save the history events.
@@ -93,10 +78,13 @@
          ;; workflow should be called within a with-env block:
          ;; (with-env {:store ..}
          ;;   (my-workflow ...
-         (let [ref#  (:ref i/*env*)
-               root# (:root i/*env*)
-               fvar# #'~wname]
-           (w/enqueue-and-wait i/*env* (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv)))))))
+         ;; TODO: fixme: task id generator must be deterministic for a given workflow
+         (let [ref#   (:ref i/*env*)
+               root#  (:root i/*env*)
+               ;; id can be passed by env if we're dequeuing a task from store
+               id#    (or (:id i/*env*) (i/random-id))
+               fvar#  #'~wname]
+           (w/enqueue-and-wait i/*env* (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv id#)))))))
 
 (defmacro stub-function
   "Stubs `f`, wrapping it in an activity-aware function."
@@ -110,8 +98,9 @@
        ;; prepare call
        (let [store#  (:store i/*env*)
              protos# (:protos i/*env*)
+             id#     ((:next-id i/*env*))
              ref#    nil ;; no enqueued task => no ref
-             task#   (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv#)
+             task#   (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv# id#)
              res#    (i/resume-task i/*env* store# protos# task#)]
          ;; an embedded workflow engine doesn't need to have a task per invocation
          #_
@@ -154,6 +143,7 @@
                     ;; prepare call
                     (let [store#  (:store i/*env*)
                           protos# (:protos i/*env*)
+                          id#     ((:next-id i/*env*))
                           ref#    nil ;; no task => no ref
                           task#   (i/create-proto-activity-task
                                     (symbol ~pname)
@@ -164,7 +154,8 @@
                                     ;; protos are not reified like in clj https://clojurescript.org/about/differences#_protocols
                                     ;; we create a "fake" fvar that can be invokeable just like the real thing
                                     (fn [& impl+args#] (apply ~qname impl+args#))
-                                    [~@args])]
+                                    [~@args]
+                                    id#)]
 
                       ;; resume-task returns a promise
                       (i/resume-task i/*env* store# protos# task#))))))))
@@ -199,6 +190,7 @@
                   ;; prepare call
                   (let [store#  (:store i/*env*)
                         protos# (:protos i/*env*)
+                        id#     ((:next-id i/*env*))
                         ref#    nil ;; no task => no ref
                         task#   (i/create-proto-activity-task
                                   (-> ~proto :var symbol)
@@ -206,7 +198,8 @@
                                   root#
                                   (symbol aid#)
                                   (var-get (requiring-resolve aid#))
-                                  [~@args])]
+                                  [~@args]
+                                  id#)]
                     ;; resume-task returns a promise
                     @(i/resume-task i/*env* store# protos# task#)))))))))
                   ;; an embedded runner doesn't need a task per invocation

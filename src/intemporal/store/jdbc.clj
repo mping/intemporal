@@ -108,7 +108,7 @@
                (jdbc/execute! tx ["select * from tasks"] default-opts))
              (map db->task)))
 
-      (task<-event [this task-id {:keys [ref root type sym args result error] :as event-descr}]
+      (task<-event [this task-id {:keys [id ref root type sym args result error] :as event-descr}]
         ;; some redundancy between :result in task and event
         ;; note that we save the event first, because update-task can trigger some watchers
         ;; and they would expect the event to be present in the history
@@ -123,7 +123,8 @@
                                (some? error) (assoc evt :error error)
                                :else (assoc evt :result result))]
 
-            (store/save-event this task-id updated-evt)
+            (when-not id
+              (store/save-event this task-id updated-evt))
             (jdbc/execute-one! tx (builder/for-update "tasks" updated-task {:id task-id} default-opts))
             updated-evt)))
 

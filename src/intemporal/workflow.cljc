@@ -1,7 +1,8 @@
 (ns intemporal.workflow
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as internal]
-            [promesa.core :as p])
+            [promesa.core :as p]
+            [taoensso.timbre :as log])
   #?(:cljs (:require-macros
              #_:clj-kondo/ignore
              [intemporal.workflow.internal :refer [with-env-internal]]
@@ -55,13 +56,16 @@
 (defn- worker-execute-fn
   "Executes a given protocol, activity or workflow `task`"
   [store protocols {:keys [type id root] :as task}]
-  (let [internal-env {:store  store
+  (let [root-counter (atom 0)
+        internal-env {:store  store
                       :type   type
                       :ref    id
                       :root   (or root id)
-                      :protos protocols}]
+                      :protos protocols
+                      :next-id (fn [] (str (or root id) "-" (swap! root-counter inc)))}]
     ;; root task: we only enqueue workflows
     (with-env internal-env
+      (log/debugf "Resuming task: %s" task)
       (internal/resume-task internal-env store protocols task))))
 
 (defn- worker-poll-fn
@@ -100,7 +104,7 @@
        (p/loop []
          (-> (p/delay polling-ms)
              (p/chain (fn [_]
-                        (when-let [{:keys [type id root] :as task} (store/dequeue-task store)]
+                        (when-let [task (store/dequeue-task store)]
                             (p/vthread
                               (worker-execute-fn store protocols task)))
                         (when @run?

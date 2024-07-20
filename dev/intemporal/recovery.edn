@@ -1,5 +1,4 @@
-{:tasks {"nice-black" {:type :workflow, :id "nice-black", :ref nil, :root nil, :sym intemporal.demo-recovery/my-workflow-, :args [1], :state :pending, :result nil},
-         "stupefied-kepler"{:type :activity, :id "stupefied-kepler", :ref "nice-black", :root "nice-black", :sym intemporal.demo-recovery/activity-fn, :args ([1]), :state :pending, :result nil}},
+{:tasks {"nice-black" {:type :workflow, :id "nice-black", :ref nil, :root nil, :sym intemporal.demo-recovery/my-workflow-, :args [1], :state :pending, :result nil}},
  :history {"nice-black" [{:ref "nice-black", :root "nice-black", :type :intemporal.workflow/invoke, :sym intemporal.demo-recovery/my-workflow-, :args [1], :id 1}],
            "stupefied-kepler" [{:ref "stupefied-kepler", :root "nice-black", :type :intemporal.activity/invoke, :sym intemporal.demo-recovery/activity-fn, :args ([1]), :id 2}]},
  :counter 2, :pcounter 3}
