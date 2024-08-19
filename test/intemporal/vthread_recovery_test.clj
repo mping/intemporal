@@ -35,6 +35,7 @@
   (io/copy (io/file "./dev/intemporal/vthread-recovery.edn")
            (io/file "/tmp/intemporal-vthread-recovery.edn"))
   (let [mstore  (store/make-store "/tmp/intemporal-vthread-recovery.edn" {})
+        -       (store/reenqueue-pending-tasks mstore println)
         stop-fn (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
         print-tables (fn []
                        (let [tasks  (store/list-tasks mstore)
@@ -42,21 +43,18 @@
                                          (sort-by :id))]
                          (pprint/print-table tasks)
                          (pprint/print-table events)))]
+    
+    ;; wait a bit; we dont have facilities to query workflow state
+    (Thread/sleep 1000)
+    (print-tables)
 
-    (try
-      (store/reenqueue-pending-tasks mstore println)
-      (finally
-        ;; wait a bit; we dont have facilities to query workflow state
-        (Thread/sleep 1000)
-        (print-tables)
+    (testing "linear history"
+      (testing "stored events"
+        (let [evts (store/list-events mstore)
+              evts (sort-by :id evts)]
 
-        (testing "linear history"
-          (testing "stored events"
-            (let [evts (store/list-events mstore)
-                  evts (sort-by :id evts)]
+          (testing "workflow has result"
+            (is (= (into [] (range 10))
+                   (-> evts last :result)))))))
 
-              (testing "workflow has result"
-                (is (= (into [] (range 10))
-                       (-> evts last :result)))))))
-
-        (stop-fn)))))
+    (stop-fn)))
