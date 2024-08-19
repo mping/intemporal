@@ -57,6 +57,14 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      - name: Restore clojure dependencies
+        id: cache-clojure-deps
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.m2/repository
+          key: deps-${{ hashFiles('deps.edn') }}
+
       - name: Install clojure tools
         uses: DeLaGuardo/setup-clojure@12.5
         with:
@@ -66,14 +74,6 @@ jobs:
           cli: 1.11.3.1463             # Clojure CLI based on tools.deps
           clj-kondo: 2024.08.01        # Clj-kondo
           cljstyle: 0.16.626           # cljstyle
-
-      - name: Restore clojure dependencies
-        id: cache-clojure-deps
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.m2/repository
-          key: deps-${{ hashFiles('deps.edn') }}
 
       - name: Install clj dependencies
         run: clojure -A:dev:doc:cljs:fdb:jdbc -Stree
