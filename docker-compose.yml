@@ -1,7 +1,7 @@
 version: '3.5'
 services:
   foundation:
-    image: "foundationdb/foundationdb:7.1.60"
+    image: "foundationdb/foundationdb:7.1.30"
     environment:
       FDB_NETWORKING_MODE: host
     entrypoint: ["/usr/bin/tini", "-g", "--", "sh", "/fdb-init.bash"]
