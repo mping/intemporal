@@ -1,5 +1,5 @@
 {:paths   ["src" "dev" "target"]
- :deps    {org.clojure/clojure      {:mvn/version "1.11.3"}
+ :deps    {org.clojure/clojure      {:mvn/version "1.11.4"}
            thheller/shadow-cljs     {:mvn/version "2.28.11"}
            com.taoensso/timbre      {:mvn/version "6.5.0"}
            ;;stuff
@@ -9,11 +9,11 @@
  :aliases {:dev  {:extra-paths ["dev" "test"]
                   :jvm-opts    ["-Djdk.attach.allowAttachSelf"]
                   :extra-deps  {lambdaisland/kaocha                      {:mvn/version "1.91.1392"}
-                                ;lambdaisland/kaocha-cloverage            {:mvn/version "1.1.89"}
+                                lambdaisland/kaocha-cloverage            {:mvn/version "1.1.89"}
                                 lambdaisland/kaocha-junit-xml            {:mvn/version "1.17.101"}
                                 ;lambdaisland/kaocha-cljs2     {:mvn/version "0.1.58"}
                                 com.lambdaisland/kaocha-cljs             {:mvn/version "1.5.154"}
-                                ch.qos.logback/logback-classic           {:mvn/version "1.5.6"}
+                                ch.qos.logback/logback-classic           {:mvn/version "1.5.7"}
                                 tortue/spy                               {:mvn/version "2.15.0"}
                                 nubank/matcher-combinators               {:mvn/version "3.9.1"}
                                 com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.2.2"}}}
@@ -26,7 +26,7 @@
                                migratus/migratus                 {:mvn/version "1.5.6"}}}
            :doc  {:extra-paths ["doc"]}
            :cljs {:extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}
-                               thheller/shadow-cljs      {:mvn/version "2.28.11"}
+                               thheller/shadow-cljs      {:mvn/version "2.28.12"}
                                hiccups/hiccups           {:mvn/version "0.3.0"}}}
 
            :test {:main-opts ["-m" "kaocha.runner"]}}}
