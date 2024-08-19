@@ -43,7 +43,7 @@
              :postgres (jdbc/make-store {:jdbcUrl       "jdbc:postgresql://localhost:5432/root?user=root&password=root"
                                          :migration-dir "migrations/postgres"})})
 
-(deftest test-stores
+(deftest saga-test
   (doseq [[label store] stores]
     (testing (format "store: %s" label)
 

@@ -12,7 +12,7 @@
               :postgres (jdbc/make-store {:jdbcUrl       "jdbc:postgresql://localhost:5432/root?user=root&password=root"
                                           :migration-dir "migrations/postgres"})})
 
-(deftest test-stores
+(deftest stores-test
   (doseq [[label store] stores]
     (testing (format "store: %s" label)
       (let [evt {:ref  "some-ref" :root "some-root"
@@ -27,10 +27,10 @@
         (testing "event store"
           (testing "event save"
 
-            (let [t1 (internal/create-workflow-task nil nil 'clojure.core/+ (var-get #'+) nil)
+            (let [t1 (internal/create-workflow-task nil nil 'clojure.core/+ (var-get #'+) nil "1")
                   t1 (store/enqueue-task store t1)
 
-                  t2 (internal/create-workflow-task (:id t1) (:id t1) 'clojure.core/+ (var-get #'+) nil)
+                  t2 (internal/create-workflow-task (:id t1) (:id t1) 'clojure.core/+ (var-get #'+) nil "2")
                   t2 (store/enqueue-task store t2)
 
                   ev (store/save-event store 1 (assoc evt :ref (:id t2) :root (:id t2)))]
@@ -172,7 +172,7 @@
                                 task))))))))
 
         (testing "task await+watch"
-          (let [task    (internal/create-workflow-task "self" "self" 'clojure.core/- (var-get #'-) ["invoke" 333])
+          (let [task    (internal/create-workflow-task "self" "self" 'clojure.core/- (var-get #'-) ["invoke" 333] "4")
                 task-id (:id task)
                 storage (atom nil)]
 

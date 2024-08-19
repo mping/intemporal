@@ -1,6 +1,7 @@
 (ns intemporal.store
   (:require [clojure.tools.reader.edn :as edn]
             [promesa.core :as p]
+            [taoensso.timbre :as log]
             #?(:clj [clojure.java.io :as io]))
   #?(:clj (:import [java.io File])))
 
@@ -98,6 +99,7 @@
          ;;persistence
          persist!    (fn [_ _ _ _] (when file
                                      (try
+                                       (log/tracef "Persisting store to file %s" file)
                                        (write-edn file {:tasks    @tasks
                                                         :history  @history
                                                         :counter  @counter
@@ -124,6 +126,7 @@
        (add-watch ecounter :persist persist!)
 
        (when (edn-exists? file)
+         (log/infof "Reading store file %s" file)
          (let [data (read-edn file readers)]
            (reset! tasks (:tasks data))
            (reset! history (:history data))
@@ -158,27 +161,30 @@
        (list-tasks [this]
          (vals @tasks))
 
-       (task<-event [this task-id {:keys [ref root type sym args result error] :as event-descr}]
+       (task<-event [this task-id {:keys [id ref root type sym args result error] :as event-descr}]
          ;; some redundancy between :result in task and event
          ;; note that we save the event first, because update-task can trigger some watchers
          ;; and they would expect the event to be present in the history
          (cond
            (some? args)
            (let [evt {:ref ref :root root :type type :sym sym :args args :error nil :result nil}]
-             (save-event this task-id evt)
+             (when-not id
+               (save-event this task-id evt))
              (update-task this task-id :state :pending)
              evt)
 
            (some? error)
            (let [evt {:ref ref :root root :type type :sym sym :args nil :error error :result nil}]
-             (save-event this task-id evt)
+             (when-not id
+               (save-event this task-id evt))
              (update-task this task-id :state :failure :result error)
              evt)
 
            ;;(some? result) ;result can be nil
            :else
            (let [evt {:ref ref :root root :type type :sym sym :args nil :error nil :result result}]
-             (save-event this task-id evt)
+             (when-not id
+               (save-event this task-id evt))
              (update-task this task-id :state :success :result result)
              evt)))
 

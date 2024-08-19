@@ -69,7 +69,7 @@
                (fc/get-range tx subspace-tasks {:valfn deserialize}))
              (vals)))
 
-       (task<-event [this task-id {:keys [ref root type sym args result error] :as event-descr}]
+       (task<-event [this task-id {:keys [id ref root type sym args result error] :as event-descr}]
          ;; some redundancy between :result in task and event
          ;; note that we save the event first, because update-task can trigger some watchers
          ;; and they would expect the event to be present in the history
@@ -85,7 +85,8 @@
                                 (some? error) (assoc evt :error error)
                                 :else (assoc evt :result result))]
              (assert (serializable? task) "task is not serializable")
-             (store/save-event this task-id updated-evt)
+             (when-not id
+               (store/save-event this task-id updated-evt))
              (fc/set tx subspace-tasks task-id (serialize updated-task))
              updated-evt)))
 
@@ -189,7 +190,7 @@
 
 (comment
   (def s (make-store "docker/fdb.cluster"))
-  (def t (i/create-workflow-task "ref#" "root#" 'clojure.core/+ (var-get #'+) []))
+  (def t (i/create-workflow-task "ref#" "root#" 'clojure.core/+ (var-get #'+) [] 1))
 
   (store/save-event s 1 {:a 1})
   (store/list-events s)
