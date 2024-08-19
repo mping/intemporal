@@ -64,8 +64,8 @@ jobs:
           # The value must indicate a particular version of the tool, or use 'latest'
           # to always provision the latest version
           cli: 1.11.3.1463             # Clojure CLI based on tools.deps
-          clj-kondo: 2024.05.24        # Clj-kondo
-          cljstyle: 0.16.626             # cljstyle
+          clj-kondo: 2024.08.01        # Clj-kondo
+          cljstyle: 0.16.626           # cljstyle
 
       - name: Restore clojure dependencies
         id: cache-clojure-deps
@@ -93,7 +93,7 @@ jobs:
       - name: Lint
         run: clj-kondo --parallel --lint {src,test}
 
-      - uses: adambirds/docker-compose-action@v1.3.0
+      - uses: adambirds/docker-compose-action@v1.4.0
         with:
           services: |
             postgresql
