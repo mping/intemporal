@@ -30,8 +30,7 @@
     @(p/all proms)))
 
 
-
-(deftest test-vthread-recovery
+(deftest vthread-recovery-test
   ;; make a backup of the db to allow replay
   (io/copy (io/file "./dev/intemporal/vthread-recovery.edn")
            (io/file "/tmp/intemporal-vthread-recovery.edn"))
