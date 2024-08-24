@@ -23,19 +23,16 @@
   (let [pr   (stub-protocol ThreadActivity {})
         proms (for [i (range 10)]
                 (vthread
-                  (println "inside vthread")
                   (with-thread pr i)))]
     ;; at this point, all of `with-thread` calls are queued, so
     ;; this code is deterministic up to here
     @(p/all proms)))
-
 
 (deftest vthread-recovery-test
   ;; make a backup of the db to allow replay
   (io/copy (io/file "./dev/intemporal/vthread-recovery.edn")
            (io/file "/tmp/intemporal-vthread-recovery.edn"))
   (let [mstore  (store/make-store "/tmp/intemporal-vthread-recovery.edn" {})
-        -       (store/reenqueue-pending-tasks mstore println)
         stop-fn (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
         print-tables (fn []
                        (let [tasks  (store/list-tasks mstore)
@@ -45,6 +42,7 @@
                          (pprint/print-table events)))]
     
     ;; wait a bit; we dont have facilities to query workflow state
+    (store/reenqueue-pending-tasks mstore println)
     (Thread/sleep 1000)
     (print-tables)
 

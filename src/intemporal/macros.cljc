@@ -61,9 +61,13 @@
                  (try
                    (do ~@body)
                    (finally
+                     ;; TODO: I think releasing here causes a race, sometimes
+                     ;; vthread recovery test fails, it seems theres a race condition somewhere
+                     #_
                      (i/try-release! id#))))
                (p/then resolve#)
-               (p/catch reject#)))))))
+               (p/catch reject#)
+               (p/finally (fn [] (i/try-release! id#)))))))))
 
 (defmacro defn-workflow
   "Defines a workflow. Workflows are functions that are resillient to crashes, as

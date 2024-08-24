@@ -110,6 +110,10 @@
 
     ;; mark invoke/replay
     (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
+      (when inv?
+        (log/infof "Found replay event for task %s" task))
+      (when res?
+        (log/infof "Found result event for task %s" task))
       (try
         (cond
           ;; do we have an invocation event? if not, save this one
