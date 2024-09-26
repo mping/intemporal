@@ -2,7 +2,7 @@
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as internal]
             [promesa.core :as p]
-            [taoensso.timbre :as log])
+            [taoensso.telemere :as t])
   #?(:cljs (:require-macros
              #_:clj-kondo/ignore
              [intemporal.workflow.internal :refer [with-env-internal]]
@@ -65,7 +65,7 @@
                       :next-id (fn [] (str (or root id) "-" (swap! root-counter inc)))}]
     ;; root task: we only enqueue workflows
     (with-env internal-env
-      (log/debugf "Resuming task: %s" task)
+      (t/log! {:level :debug :data task}  ["Resuming task"])
       (internal/resume-task internal-env store protocols task))))
 
 (defn- worker-poll-fn

@@ -10,6 +10,8 @@
 ;;;;
 ;; demo - recovery of a crashed process
 
+;; (use-fixtures :once tu/with-telemere) ;; not working
+
 (defprotocol ThreadActivity
   (with-thread [this id]))
 

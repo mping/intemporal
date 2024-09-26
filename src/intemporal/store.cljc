@@ -1,7 +1,7 @@
 (ns intemporal.store
   (:require [clojure.tools.reader.edn :as edn]
             [promesa.core :as p]
-            [taoensso.timbre :as log]
+            [taoensso.telemere :as t]
             #?(:clj [clojure.java.io :as io]))
   #?(:clj (:import [java.io File])))
 
@@ -99,7 +99,7 @@
          ;;persistence
          persist!    (fn [_ _ _ _] (when file
                                      (try
-                                       (log/tracef "Persisting store to file %s" file)
+                                       (t/log! :debug ["Persisting store to file" file])
                                        (write-edn file {:tasks    @tasks
                                                         :history  @history
                                                         :counter  @counter
@@ -126,7 +126,7 @@
        (add-watch ecounter :persist persist!)
 
        (when (edn-exists? file)
-         (log/infof "Reading store file %s" file)
+         (t/log! :info ["Reading store file" file])
          (let [data (read-edn file readers)]
            (reset! tasks (:tasks data))
            (reset! history (:history data))

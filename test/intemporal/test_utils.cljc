@@ -1,6 +1,7 @@
 (ns intemporal.test-utils
   (:require [intemporal.workflow.internal :as in]
             [promesa.core :as p]
+            [taoensso.telemere :as telemere]
     #?(:cljs [cljs.test :as t])
     #?(:clj [net.cgrand.macrovich :as macros]))
   #?(:cljs (:require-macros [net.cgrand.macrovich :as macros])))
@@ -38,6 +39,7 @@
 
 ;;;;
 ;; macros
+
 (defmacro with-promise?
   "Waits for `val` before running `body`. Mostly for cljs & promise-based values.
   Usage.
@@ -60,3 +62,7 @@
                     (let [~val res#]
                       (do ~@body))
                     (done#))))))
+
+(defn with-telemere [f]
+  (telemere/with-min-level :trace
+    (f)))

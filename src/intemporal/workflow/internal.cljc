@@ -1,15 +1,15 @@
 (ns ^:private intemporal.workflow.internal
   "Private namespace for workflow support."
-  (:require [taoensso.timbre :as log]
-            [intemporal.store :as store]
-            [promesa.core :as p]))
+  (:require [intemporal.store :as store]
+            [promesa.core :as p]
+            [taoensso.telemere :as t]))
 
 #?(:clj (set! *warn-on-reflection* true))
 
 (def ^:dynamic *env* nil)
 (def default-env {:compensations (atom '())
-                  :lock   #?(:clj (java.util.concurrent.Semaphore. 1)
-                             :cljs nil)
+                  :lock          #?(:clj  (java.util.concurrent.Semaphore. 1)
+                                    :cljs nil)
                   :timeout-ms    #?(:clj  Long/MAX_VALUE
                                     :cljs 2147483647)})
 
@@ -31,7 +31,7 @@
   (when-let [lock (:lock *env*)]
     #?(:clj (let [id (random-uuid)]
               (.acquire ^java.util.concurrent.Semaphore lock)
-              (log/tracef "Acquiring lock %s with id %s" lock id)
+              (t/log! {:level :trace :data {:lock lock :id id}} ["Acquiring lock"])
               id))))
 
 (defn try-release!
@@ -45,11 +45,8 @@
                       (= (str lockid) (str lockid?))
                       (zero? (.availablePermits ^java.util.concurrent.Semaphore lock)))
                   (.release ^java.util.concurrent.Semaphore lock)
-                  (log/tracef "Tried to release lock %s (lockid %s, env lockid %s, permits: %d)"
-                             lock
-                             lockid
-                             lockid?
-                             (.availablePermits ^java.util.concurrent.Semaphore lock))))))))
+                  (t/log! {:level :trace :data {:lock lock :id lockid :env lockid? :permits (.availablePermits ^java.util.concurrent.Semaphore lock)}}
+                          ["Tried to release lock"])))))))
 
 (defmacro with-env-internal [m & body]
   `(binding [*env* (merge default-env ~m)]
@@ -104,16 +101,16 @@
   "Resumes a generic fn call task"
   [{:keys [lock lockid] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
   ;; TODO check if proto exists in protos
-  (log/tracef "Resuming task %s" task)
+  (t/log! {:level :trace :data task}  ["Resuming task"])
   ;; do we have invocation and result events for this task?
   (let [[inv? res?] (store/all-events store id)]
 
     ;; mark invoke/replay
     (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
       (when inv?
-        (log/infof "Found replay event for task %s" task))
+        (t/log! {:level :debug :data task}  ["Found replay event for task"]))
       (when res?
-        (log/infof "Found result event for task %s" task))
+        (t/log! {:level :debug :data task}  ["Found result event for task"]))
       (try
         (cond
           ;; do we have an invocation event? if not, save this one
@@ -132,41 +129,41 @@
     (let [next-event   {:ref id :root (or root id) :type success :sym sym}
           next-failure (assoc next-event :type failure)
 
-          retval (cond
-                   (some? res?)
-                   (let [success? (some? (:result res?))
-                         retval   (if success? (:result res?) (:error? res?))
-                         etype    (if success? :result :error)]
-                     (store/task<-event store id res?)
-                     (if success?
-                       (p/resolved retval)
-                       (p/rejected retval)))
+          retval       (cond
+                         (some? res?)
+                         (let [success? (some? (:result res?))
+                               retval   (if success? (:result res?) (:error? res?))
+                               etype    (if success? :result :error)]
+                           (store/task<-event store id res?)
+                           (if success?
+                             (p/resolved retval)
+                             (p/rejected retval)))
 
-                   (not res?)
-                   ;; the p/let is mostly to deal with the (apply...) call for js runtimes
-                   (-> (p/let [impl? (if (= :proto-activity type)
-                                       (get protos proto)
-                                       nil)
-                               args' (if (= :proto-activity type)
-                                       (cons impl? args)
-                                       args)
-                               r     (binding [*env* (merge default-env env)]
-                                       (apply fvar args'))]
-                         r)
-                       (p/then
-                         (fn [r]
-                           (store/task<-event store id (assoc next-event :result r))
-                           r))
-                       (p/catch
-                         (fn [e]
-                           (when-not (internal-error? e)
-                             (store/task<-event store id (assoc next-failure :error e)))
-                           (p/rejected e))))
+                         (not res?)
+                         ;; the p/let is mostly to deal with the (apply...) call for js runtimes
+                         (-> (p/let [impl? (if (= :proto-activity type)
+                                             (get protos proto)
+                                             nil)
+                                     args' (if (= :proto-activity type)
+                                             (cons impl? args)
+                                             args)
+                                     r     (binding [*env* (merge default-env env)]
+                                             (apply fvar args'))]
+                               r)
+                             (p/then
+                               (fn [r]
+                                 (store/task<-event store id (assoc next-event :result r))
+                                 r))
+                             (p/catch
+                               (fn [e]
+                                 (when-not (internal-error? e)
+                                   (store/task<-event store id (assoc next-failure :error e)))
+                                 (p/rejected e))))
 
-                   (not (or (event-matches? res? next-event) ;; replay success
-                            (event-matches? res? next-failure))) ;; replay failure
-                   (throw (internal-exception "Transition unexpected" {:type     (:type res?)
-                                                                       :expected #{success failure}})))]
+                         (not (or (event-matches? res? next-event) ;; replay success
+                                  (event-matches? res? next-failure))) ;; replay failure
+                         (throw (internal-exception "Transition unexpected" {:type     (:type res?)
+                                                                             :expected #{success failure}})))]
       retval)))
 
 #?(:clj (ns-unmap *ns* 'resume-task))
