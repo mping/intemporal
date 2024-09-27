@@ -63,6 +63,10 @@
                       (do ~@body))
                     (done#))))))
 
-(defn with-trace-logging [f]
-  (telemere/set-min-level! :trace)
-  (f))
+#?(:cljs
+   (def with-trace-logging {:before (fn []
+                                      (telemere/set-min-level! :trace))})
+   :clj
+   (defn with-trace-logging [f]
+     (telemere/set-min-level! :trace)
+     (f)))

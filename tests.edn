@@ -3,6 +3,7 @@
            :kaocha.plugin/filter
            :kaocha.plugin/capture-output
            :kaocha.plugin/junit-xml
+           #_
            :kaocha.plugin/cloverage]
  :reporter [kaocha.report/documentation]
  :color? true

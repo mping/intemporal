@@ -70,7 +70,7 @@
                (p/then resolve#)
                (p/catch reject#)
                (p/finally (fn [_# _#]
-                            (t/log! {:level :trace} (format "Requesting vthread release for lock id %s" id#))
+                            (t/log! {:level :trace} ["Requesting vthread release for lock id %s" id#])
                             (i/try-release! id#)))))))))
 
 
@@ -216,7 +216,7 @@
                     (t/log! {:level :trace :data {:env i/*env* :task task#}}  ["Invoking task"])
                     (if (:task-per-activity? i/*env*)
                       (w/enqueue-and-wait i/*env* task#)
-                      (i/resume-task i/*env* store# protos# task#))))))))))
+                      @(i/resume-task i/*env* store# protos# task#))))))))))
 
 
 (defmacro with-failure

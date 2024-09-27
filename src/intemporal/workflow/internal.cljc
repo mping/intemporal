@@ -31,7 +31,7 @@
   []
   (when-let [lock (:lock *env*)]
     #?(:clj (let [id (:root *env*)]
-              (t/log! {:level :trace :data {:env *env*}} (format "Acquiring lock id %s" id))
+              (t/log! {:level :trace :data {:env *env*}} ["Acquiring lock id %s" id])
               (.acquire ^java.util.concurrent.Semaphore lock)
               id))))
 
@@ -44,10 +44,10 @@
       #?(:clj (if (zero? (.availablePermits ^java.util.concurrent.Semaphore lock))
                 (do
                   (t/log! {:level :trace}
-                          (format "Releasing lock for lock id %s, permits: %d" lockid (.availablePermits ^java.util.concurrent.Semaphore lock)))
+                          ["Releasing lock for lock id" lockid ", permits" (.availablePermits ^java.util.concurrent.Semaphore lock)])
                   (.release ^java.util.concurrent.Semaphore lock))
                 (t/log! {:level :trace}
-                        (format "Tried to release lock id %s, but still have permits %d" lockid (.availablePermits ^java.util.concurrent.Semaphore lock))))))))
+                        ["Tried to release lock id" lockid " , but still have permits" (.availablePermits ^java.util.concurrent.Semaphore lock)]))))))
 
 (defmacro with-env-internal [m & body]
   `(binding [*env* (merge default-env ~m)]
