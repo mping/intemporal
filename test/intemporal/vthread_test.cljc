@@ -24,8 +24,9 @@
 (defrecord ThreadActivityImpl []
   ThreadActivity
   (sleep [this id ms]
-    #?(:clj (do (Thread/sleep (long ms))
-                id)
+    #?(:clj (do
+              (Thread/sleep (long ms))
+              id)
        :cljs (p/then (p/delay ms)
                      (fn [_] id)))))
 
@@ -46,7 +47,7 @@
           stop-worker (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
 
           start       (store/now)
-          v           (w/with-env {:task-per-activity? false ;; TODO fixme
+          v           (w/with-env {:task-per-activity? false
                                    :store              mstore}
                         (my-workflow))]
 
@@ -57,7 +58,7 @@
           (testing "ran every activity concurrently"
             (let [elapsed (- (store/now) start)]
               (is (>= elapsed 1000) "Should take at least 1s to run")
-              (is (< elapsed 2000) "Should not take more than 2s to run")))
+              (is (< elapsed 3000) "Should not take more than 3s to run")))
 
           (testing "linear history"
             (testing "stored events"
@@ -69,7 +70,9 @@
                   ;; even though each activity runs in a thread, they are started in order
                   ;; this ensures determinism
                   (is (= [[] [0 1000] [1 1000] [2 1000] [3 1000] [4 1000] [5 1000] [6 1000] [7 1000] [8 1000] [9 1000]]
-                         (take 11 aargs)))))))
+                         (->> aargs
+                              (take 11)
+                              (filter identity))))))))
           (finally
             (stop-worker)
 

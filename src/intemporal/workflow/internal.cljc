@@ -30,9 +30,9 @@
   event history, so it becomes deterministic (in case of eg: multithreads)."
   []
   (when-let [lock (:lock *env*)]
-    #?(:clj (let [id (random-uuid)]
+    #?(:clj (let [id (:root *env*)]
+              (t/log! {:level :trace :data {:env *env*}} (format "Acquiring lock id %s" id))
               (.acquire ^java.util.concurrent.Semaphore lock)
-              (t/log! {:level :trace :data {:lock lock :id id}} ["Acquiring lock"])
               id))))
 
 (defn try-release!
@@ -41,13 +41,13 @@
   [lockid]
   (when lockid
     (when-let [lock (:lock *env*)]
-      (let [lockid? (:lockid *env*)]
-        #?(:clj (if (and
-                      (= (str lockid) (str lockid?))
-                      (zero? (.availablePermits ^java.util.concurrent.Semaphore lock)))
-                  (.release ^java.util.concurrent.Semaphore lock)
-                  (t/log! {:level :trace :data {:lock lock :id lockid :env lockid? :permits (.availablePermits ^java.util.concurrent.Semaphore lock)}}
-                          ["Tried to release lock"])))))))
+      #?(:clj (if (zero? (.availablePermits ^java.util.concurrent.Semaphore lock))
+                (do
+                  (t/log! {:level :trace}
+                          (format "Releasing lock for lock id %s, permits: %d" lockid (.availablePermits ^java.util.concurrent.Semaphore lock)))
+                  (.release ^java.util.concurrent.Semaphore lock))
+                (t/log! {:level :trace}
+                        (format "Tried to release lock id %s, but still have permits %d" lockid (.availablePermits ^java.util.concurrent.Semaphore lock))))))))
 
 (defmacro with-env-internal [m & body]
   `(binding [*env* (merge default-env ~m)]
@@ -102,16 +102,16 @@
   "Resumes a generic fn call task"
   [{:keys [lock lockid] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
   ;; TODO check if proto exists in protos
-  (t/log! {:level :trace :data {:task task :env env}} ["Resuming activity task"])
   ;; do we have invocation and result events for this task?
+  (t/log! :debug ["Resuming task with id" id])
   (let [[inv? res?] (store/all-events store id)]
 
     ;; mark invoke/replay
     (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
       (when inv?
-        (t/log! {:level :debug :data {:task task}} ["Found replay event for task"]))
+        (t/log! {:level :debug :_data {:task task}} ["Found replay event for task with id" (:id task)]))
       (when res?
-        (t/log! {:level :debug :data {:task task}} ["Found result event for task"]))
+        (t/log! {:level :debug :_data {:task task}} ["Found result event for task with id" (:id task)]))
       (try
         (cond
           ;; do we have an invocation event? if not, save this one
@@ -124,7 +124,8 @@
                                                               :expected invoke})))
         (finally
           ;; release the lock
-          (try-release! lockid))))
+          (t/log! {:level :trace} ["Requesting resume-task release for lock id" root])
+          (try-release! root))))
 
     ;; mark success/failure or replay
     (let [next-event   {:ref id :root (or root id) :type success :sym sym}
@@ -149,14 +150,17 @@
                                              (cons impl? args)
                                              args)
                                      r     (binding [*env* (merge default-env env)]
+                                             (t/log! {:level :debug :data {:fvar fvar :args args'}} ["Calling actual function for task" id])
                                              (apply fvar args'))]
                                r)
                              (p/then
                                (fn [r]
+                                 (t/log! {:level :debug :data {:fvar fvar :result r}} ["Got actual function result for task" id])
                                  (store/task<-event store id (assoc next-event :result r))
                                  r))
                              (p/catch
                                (fn [e]
+                                 (t/log! {:level :debug :data {:fvar fvar :exception e}} ["Exception caught during actual function invocation for task" id])
                                  (when-not (internal-error? e)
                                    (store/task<-event store id (assoc next-failure :error e)))
                                  (p/rejected e))))
@@ -165,6 +169,7 @@
                                   (event-matches? res? next-failure))) ;; replay failure
                          (throw (internal-exception "Transition unexpected" {:type     (:type res?)
                                                                              :expected #{success failure}})))]
+      (t/log! {:level :debug :data {:retval retval}} ["Finished internal execution for task" id])
       retval)))
 
 #?(:clj (ns-unmap *ns* 'resume-task))
@@ -196,6 +201,7 @@
   (assert (some? store) "store should exist")
   (assert (some? task) "task should exist")
 
+  ;; TODO: env: write env into task?
   (let [t    (or (store/find-task store (:id task))
                  (store/enqueue-task store task))
 
