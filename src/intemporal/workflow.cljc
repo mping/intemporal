@@ -14,7 +14,11 @@
 ;;;;
 ;; runtime
 
-(defmacro with-env [m & body]
+(defmacro with-env
+  "Creates a new environment for workflow execution. Options:
+  - :task-per-activity?
+  - :timeout-ms "
+  [m & body]
   `(internal/with-env-internal ~m ~@body))
 
 (defn current-env []
@@ -64,8 +68,9 @@
                       :protos protocols
                       :next-id (fn [] (str (or root id) "-" (swap! root-counter inc)))}]
     ;; root task: we only enqueue workflows
+    ;; TODO: figure a way to propagate original env/runtime from the workflow task
     (with-env internal-env
-      (t/log! {:level :debug :data task}  ["Resuming task"])
+      (t/log! {:level :trace :data {:task task :env internal-env}}  ["Resuming workflow task"])
       (internal/resume-task internal-env store protocols task))))
 
 (defn- worker-poll-fn

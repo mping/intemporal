@@ -1,12 +1,15 @@
 (ns intemporal.saga-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [intemporal.store :as store]
             [intemporal.store.foundationdb :as fdb]
             [intemporal.store.jdbc :as jdbc]
             [intemporal.workflow :as w]
             [intemporal.macros :as macros :refer [stub-protocol defn-workflow with-failure]]
+            [intemporal.test-utils :as tu]
             [spy.core :as spy]
             [spy.protocol :as pspy]))
+
+(use-fixtures :once tu/with-trace-logging)
 
 (defprotocol ProtocolActivity
   (some-io [this val])

@@ -63,6 +63,6 @@
                       (do ~@body))
                     (done#))))))
 
-(defn with-telemere [f]
-  (telemere/with-min-level :trace
-    (f)))
+(defn with-trace-logging [f]
+  (telemere/set-min-level! :trace)
+  (f))

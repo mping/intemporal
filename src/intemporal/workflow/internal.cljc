@@ -7,11 +7,12 @@
 #?(:clj (set! *warn-on-reflection* true))
 
 (def ^:dynamic *env* nil)
-(def default-env {:compensations (atom '())
-                  :lock          #?(:clj  (java.util.concurrent.Semaphore. 1)
-                                    :cljs nil)
-                  :timeout-ms    #?(:clj  Long/MAX_VALUE
-                                    :cljs 2147483647)})
+(def default-env {:compensations      (atom '())
+                  :task-per-activity? false
+                  :lock               #?(:clj  (java.util.concurrent.Semaphore. 1)
+                                         :cljs nil)
+                  :timeout-ms         #?(:clj  Long/MAX_VALUE
+                                         :cljs 2147483647)})
 
 (defn random-id []
   ;; debugging purposes only
@@ -65,14 +66,14 @@
 ;;;;
 ;; Tasks
 
-;; type: workflow|activity|proto-activity
-;; id: unique identifier
-;; ref: what task triggered execution
-;; root: parent trigger
-;; sym: the fn being executed
-;; fvar: the function var, to call (apply fvar
+;;   type: workflow|activity|proto-activity
+;;     id: unique identifier
+;;    ref: what task triggered execution
+;;   root: parent trigger
+;;    sym: the fn being executed
+;;   fvar: the function var, to call (apply fvar
 ;; result: either a value, or error
-;; state: state of task new|pending|failure|success
+;;  state: state of task new|pending|failure|success
 (defn create-workflow-task
   ([ref root sym fvar args id]
    (create-workflow-task ref root sym fvar args id nil :new))
@@ -101,16 +102,16 @@
   "Resumes a generic fn call task"
   [{:keys [lock lockid] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
   ;; TODO check if proto exists in protos
-  (t/log! {:level :trace :data task}  ["Resuming task"])
+  (t/log! {:level :trace :data {:task task :env env}} ["Resuming activity task"])
   ;; do we have invocation and result events for this task?
   (let [[inv? res?] (store/all-events store id)]
 
     ;; mark invoke/replay
     (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
       (when inv?
-        (t/log! {:level :debug :data task}  ["Found replay event for task"]))
+        (t/log! {:level :debug :data {:task task}} ["Found replay event for task"]))
       (when res?
-        (t/log! {:level :debug :data task}  ["Found result event for task"]))
+        (t/log! {:level :debug :data {:task task}} ["Found result event for task"]))
       (try
         (cond
           ;; do we have an invocation event? if not, save this one

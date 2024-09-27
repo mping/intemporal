@@ -1,16 +1,17 @@
 (ns intemporal.vthread-recovery-test
   (:require [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.pprint :as pprint]
             [intemporal.store :as store]
             [intemporal.workflow :as w]
             [intemporal.macros :refer [stub-protocol vthread defn-workflow]]
+            [intemporal.test-utils :as tu]
             [promesa.core :as p]))
 
 ;;;;
 ;; demo - recovery of a crashed process
 
-;; (use-fixtures :once tu/with-telemere) ;; not working
+(use-fixtures :once tu/with-trace-logging) ;; not working
 
 (defprotocol ThreadActivity
   (with-thread [this id]))

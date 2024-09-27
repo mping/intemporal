@@ -1,9 +1,11 @@
 (ns intemporal.store-test
-  (:require [clojure.test :as t :refer [deftest is testing]]
+  (:require [clojure.test :as t :refer [deftest is testing use-fixtures]]
             [intemporal.test-utils :as tu]
             [intemporal.store :as s]
             [matcher-combinators.test :refer [match?]]
             [promesa.core :as p]))
+
+(use-fixtures :once tu/with-trace-logging)
 
 (defn- is-promise-ok [prom]
   (-> prom
