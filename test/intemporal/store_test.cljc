@@ -77,8 +77,13 @@
         (testing "task state updated"
           (let [db-task (s/find-task store (:id task))]
             (is (= (dissoc db-task :id)
-                   {:type :workflow, :ref 'some-ref, :root 'some-root,
-                    :sym 'identity, :fvar #'clojure.core/identity, :args [],
-                    :result nil, :state :pending
+                   {:type :workflow
+                    :ref "some-ref"
+                    :root "some-root"
+                    :sym  'identity
+                    :fvar #'clojure.core/identity
+                    :args []
+                    :result nil
+                    :state :pending
                     :order 1}))))))))
 

@@ -59,7 +59,7 @@
           (try
             (testing "workflow run"
               (is (= ::failed (w/with-env {:store store}
-                                          (run-workflow)))))
+                                (run-workflow)))))
 
             (testing "protocol calls"
               (let [{:keys [some-io some-failing-io finalize compensate]} (meta spied-impl)]

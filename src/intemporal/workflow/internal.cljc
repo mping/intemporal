@@ -1,10 +1,54 @@
 (ns ^:private intemporal.workflow.internal
   "Private namespace for workflow support."
   (:require [intemporal.store :as store]
+            [malli.core :as m]
             [promesa.core :as p]
             [taoensso.telemere :as t]))
 
 #?(:clj (set! *warn-on-reflection* true))
+#_:clj-kondo/ignore
+(when #?(:clj  (= "true" (System/getenv "DEV"))
+         :cljs false)
+  ((requiring-resolve 'malli.dev/start!)))
+
+;;;;
+;; validation
+(def registry
+  (merge
+    (m/class-schemas)
+    (m/comparator-schemas)
+    (m/base-schemas)
+    (m/type-schemas)
+    {:var (m/-simple-schema {:type :var, :pred #(or (fn? %) (var? %))})}))
+
+(def ^:private Task
+  [:map {:closed true}
+   [:id [:or :string :uuid]]
+   [:sym :symbol]
+   [:ref [:maybe :string]]
+   [:root [:maybe :string]]
+   [:proto {:optional true} :symbol]
+   [:fvar :var]
+   [:args {:optional true} [:maybe [:sequential :any]]]
+   [:result :any]
+   [:state [:enum :new :pending :failure :success]]
+   [:type [:enum :workflow :activity :proto-activity]]])
+
+(def validate-task (m/coercer Task nil {:registry registry}))
+(comment
+  (validate-task {:proto  'clojure.core/ICollection
+                  :type   :workflow
+                  :id     "123"
+                  :ref    'some-ref
+                  :root   'some-root
+                  :sym    'identity
+                  :fvar   #'identity
+                  :args   []
+                  :result nil
+                  :state  :new}))
+
+;;;;
+;; runtime
 
 (def ^:dynamic *env* nil)
 (def default-env {:compensations      (atom '())
@@ -31,7 +75,7 @@
   []
   (when-let [lock (:lock *env*)]
     #?(:clj (let [id (:root *env*)]
-              (t/log! {:level :trace :data {:env *env*}} ["Acquiring lock id %s" id])
+              (t/log! {:level :trace :data {:env *env*}} ["Acquiring lock id" id])
               (.acquire ^java.util.concurrent.Semaphore lock)
               id))))
 
@@ -78,19 +122,19 @@
   ([ref root sym fvar args id]
    (create-workflow-task ref root sym fvar args id nil :new))
   ([ref root sym fvar args id result state]
-   {:type :workflow :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state}))
+   (validate-task {:type :workflow :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state})))
 
 (defn create-activity-task
   ([ref root sym fvar args id]
    (create-activity-task ref root sym fvar args id nil :new))
   ([ref root sym fvar args id result state]
-   {:type :activity :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state}))
+   (validate-task {:type :activity :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state})))
 
 (defn create-proto-activity-task
   ([proto ref root sym fvar args id]
    (create-proto-activity-task proto ref root sym fvar args id nil :new))
   ([proto ref root sym fvar args id result state]
-   {:type :proto-activity :proto proto :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state}))
+   (validate-task {:type :proto-activity :proto proto :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state})))
 
 (defn event-matches? [{t :type s :sym} {t2 :type s2 :sym}]
   (and (= t t2) (= s s2)))

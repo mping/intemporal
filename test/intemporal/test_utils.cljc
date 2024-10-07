@@ -13,20 +13,21 @@
                      :or   {proto  nil
                             type   :workflow
                             id     (in/random-id)
-                            ref    'some-ref
-                            root   'some-root
+                            ref    "some-ref"
+                            root   "some-root"
                             sym    'identity
                             fvar   #'identity
                             args   []
                             result nil
                             state  :new}}]
-  (cond
-    (= type :workflow)
-    (in/create-workflow-task ref root sym fvar args id result state)
-    (= type :activity)
-    (in/create-activity-task ref root sym fvar args id result state)
-    (= type :proto-activity)
-    (in/create-proto-activity-task proto ref root sym fvar args id result state)))
+  (-> (cond
+        (= type :workflow)
+        (in/create-workflow-task ref root sym fvar args id result state)
+        (= type :activity)
+        (in/create-activity-task ref root sym fvar args id result state)
+        (= type :proto-activity)
+        (in/create-proto-activity-task proto ref root sym fvar args id result state))
+      (in/validate-task)))
 
 (defn make-workflow-task [& {:keys [] :as args}]
   (make-task (assoc args :type :workflow)))

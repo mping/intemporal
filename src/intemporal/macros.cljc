@@ -70,7 +70,7 @@
                (p/then resolve#)
                (p/catch reject#)
                (p/finally (fn [_# _#]
-                            (t/log! {:level :trace} ["Requesting vthread release for lock id %s" id#])
+                            (t/log! {:level :trace} ["Requesting vthread release for lock id" id#])
                             (i/try-release! id#)))))))))
 
 
