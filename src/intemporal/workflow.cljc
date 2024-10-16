@@ -61,20 +61,20 @@
   "Executes a given protocol, activity or workflow `task`"
   [store protocols {:keys [type id root] :as task}]
   ;; TODO: env: read env from task?
+  (println "XXX" (:runtime task))
   (let [root-counter (atom 0)
-        internal-env {:store  store
-                      :type   type
-                      :ref    id
-                      :id     id
-                      :root   (or root id)
-                      :protos protocols
-                      :next-id (fn [] (str (or root id) "-" (swap! root-counter inc)))}]
+        runtime      (:runtime task)
+        base-env     {:store   store
+                      :type    type
+                      :ref     id
+                      :id      id
+                      :root    (or root id)
+                      :protos  protocols
+                      :next-id (fn [] (str (or root id) "-" (swap! root-counter inc)))}
+        internal-env (merge runtime base-env)]
     ;; root task: we only enqueue workflows
-    ;; TODO: figure a way to propagate original env/runtime from the workflow task
-    ;; - lockid
-    ;; - task-per-activity?
     (with-env internal-env
-      (t/log! {:level :trace :_data {:task task :env internal-env}}  ["Resuming workflow task with id" (:id task)])
+      (t/log! {:level :trace :_data {:task task :env internal-env}} ["Resuming workflow task with id" (:id task)])
       (try
         (internal/resume-task internal-env store protocols task)
         (finally

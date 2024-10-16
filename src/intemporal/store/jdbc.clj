@@ -31,16 +31,17 @@
 (defn- db->kw [v]
   (when v (keyword v)))
 
-(defn- db->task [{:keys [id proto type ref root sym args result state lease_end] :as task}]
+(defn- db->task [{:keys [id proto type ref root sym args result state lease_end runtime] :as task}]
   (let [dargs   (deserialize args)
         dresult (deserialize result)
+        druntime (deserialize runtime)
         ssym    (symbol sym)
         sproto  (when proto (symbol proto))
         kstate  (db->kw state)]
     (cond-> (condp = type
-              "workflow" (i/create-workflow-task ref root ssym (resolve ssym) dargs id dresult kstate)
-              "activity" (i/create-activity-task ref root ssym (resolve ssym) dargs id dresult kstate)
-              "proto-activity" (i/create-proto-activity-task sproto ref root ssym (resolve ssym) dargs id dresult kstate))
+              "workflow" (i/create-workflow-task ref root ssym (resolve ssym) dargs id dresult kstate druntime)
+              "activity" (i/create-activity-task ref root ssym (resolve ssym) dargs id dresult kstate druntime)
+              "proto-activity" (i/create-proto-activity-task sproto ref root ssym (resolve ssym) dargs id dresult kstate druntime))
             lease_end (assoc :lease-end lease_end))))
 
 (defn- db->event [{:keys [id type ref root sym args result] :as event}]
@@ -188,19 +189,21 @@
                          tasks))]
           tasks?))
 
-      (enqueue-task [this {:keys [id proto type ref root sym args result state lease-end] :as task}]
+      (enqueue-task [this {:keys [id proto type ref root sym args result state lease-end runtime] :as task}]
         (assert (serializable? args) "Task args should be serializable")
         (assert (serializable? result) "Task result should be serializable")
+        (assert (serializable? runtime) "Task runtime should be serializable")
         (assert (or (nil? proto) (some? (:on proto)) "Task protocol not valid, missing :on attribute"))
 
-        (let [proto? (cond (symbol? proto) (str proto)
-                           (some? (:on proto)) (str (:on proto))
-                           (string? proto) proto)
-              args   (serialize args)
-              result (serialize result)]
+        (let [proto?  (cond (symbol? proto) (str proto)
+                            (some? (:on proto)) (str (:on proto))
+                            (string? proto) proto)
+              args    (serialize args)
+              result  (serialize result)
+              runtime (serialize runtime)]
           (jdbc/with-transaction [tx db-spec]
-            (jdbc/execute! tx ["INSERT INTO tasks(id,proto,type,ref,root,sym,args,result,state,lease_end) values (?,?,?,?,?,?,?,?,?,?) RETURNING id"
-                               id proto? (kw->db type) (kw->db ref) (kw->db root) (str sym) args result (kw->db state) lease-end])))
+            (jdbc/execute! tx ["INSERT INTO tasks(id,proto,type,ref,root,sym,args,result,state,lease_end,runtime) values (?,?,?,?,?,?,?,?,?,?,?) RETURNING id"
+                               id proto? (kw->db type) (kw->db ref) (kw->db root) (str sym) args result (kw->db state) lease-end runtime])))
         task)
 
       (dequeue-task [this]

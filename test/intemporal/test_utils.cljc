@@ -22,11 +22,11 @@
                             state  :new}}]
   (-> (cond
         (= type :workflow)
-        (in/create-workflow-task ref root sym fvar args id result state)
+        (in/create-workflow-task ref root sym fvar args id result state nil)
         (= type :activity)
-        (in/create-activity-task ref root sym fvar args id result state)
+        (in/create-activity-task ref root sym fvar args id result state nil)
         (= type :proto-activity)
-        (in/create-proto-activity-task proto ref root sym fvar args id result state))
+        (in/create-proto-activity-task proto ref root sym fvar args id result state nil))
       (in/validate-task)))
 
 (defn make-workflow-task [& {:keys [] :as args}]

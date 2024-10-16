@@ -21,6 +21,11 @@
     (m/type-schemas)
     {:var (m/-simple-schema {:type :var, :pred #(or (fn? %) (var? %))})}))
 
+(def ^:private RuntimeConfig
+  [:map {:closed false}
+   [:task-per-activity? {:optional true} :boolean]
+   [:timeout-ms {:optional true} :int]])
+
 (def ^:private Task
   [:map {:closed true}
    [:id [:or :string :uuid]]
@@ -32,20 +37,24 @@
    [:args {:optional true} [:maybe [:sequential :any]]]
    [:result :any]
    [:state [:enum :new :pending :failure :success]]
-   [:type [:enum :workflow :activity :proto-activity]]])
+   [:type [:enum :workflow :activity :proto-activity]]
+   [:runtime {:optional true} RuntimeConfig]])
 
 (def validate-task (m/coercer Task nil {:registry registry}))
 (comment
   (validate-task {:proto  'clojure.core/ICollection
                   :type   :workflow
                   :id     "123"
-                  :ref    'some-ref
-                  :root   'some-root
+                  :ref    "some-ref"
+                  :root   "some-root"
                   :sym    'identity
                   :fvar   #'identity
                   :args   []
                   :result nil
-                  :state  :new}))
+                  :state  :new
+                  :runtime {:timeout-ms         123123
+                            :task-per-activity? false}})
+  "")
 
 ;;;;
 ;; runtime
@@ -120,21 +129,27 @@
 ;;  state: state of task new|pending|failure|success
 (defn create-workflow-task
   ([ref root sym fvar args id]
-   (create-workflow-task ref root sym fvar args id nil :new))
-  ([ref root sym fvar args id result state]
-   (validate-task {:type :workflow :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state})))
+   (create-workflow-task ref root sym fvar args id nil :new nil))
+  ([ref root sym fvar args id result state runtime]
+   (let [env (or runtime (select-keys *env* [:timeout-ms :task-per-activity?]))]
+     (validate-task {:type :workflow :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state
+                     :runtime env}))))
 
 (defn create-activity-task
   ([ref root sym fvar args id]
-   (create-activity-task ref root sym fvar args id nil :new))
-  ([ref root sym fvar args id result state]
-   (validate-task {:type :activity :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state})))
+   (create-activity-task ref root sym fvar args id nil :new nil))
+  ([ref root sym fvar args id result state runtime]
+   (let [env (or runtime (select-keys *env* [:timeout-ms :task-per-activity?]))]
+     (validate-task {:type :activity :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state
+                     :runtime env}))))
 
 (defn create-proto-activity-task
   ([proto ref root sym fvar args id]
-   (create-proto-activity-task proto ref root sym fvar args id nil :new))
-  ([proto ref root sym fvar args id result state]
-   (validate-task {:type :proto-activity :proto proto :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state})))
+   (create-proto-activity-task proto ref root sym fvar args id nil :new nil))
+  ([proto ref root sym fvar args id result state runtime]
+   (let [env (or runtime (select-keys *env* [:timeout-ms :task-per-activity?]))]
+     (validate-task {:type :proto-activity :proto proto :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state
+                     :runtime env}))))
 
 (defn event-matches? [{t :type s :sym} {t2 :type s2 :sym}]
   (and (= t t2) (= s s2)))
@@ -245,7 +260,6 @@
   (assert (some? store) "store should exist")
   (assert (some? task) "task should exist")
 
-  ;; TODO: env: write env into task?
   (let [t    (or (store/find-task store (:id task))
                  (store/enqueue-task store task))
 

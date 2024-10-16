@@ -53,7 +53,8 @@
           (store/clear-events store)
           (store/clear-tasks store)
           (let [task (internal/create-workflow-task "self" "self" 'clojure.core/+ (var-get #'+) ["invoke" 333]
-                                                    "self" nil :new)]
+                                                    "self" nil :new
+                                                    nil)]
 
             (testing "enqueue task"
               (is (= task
