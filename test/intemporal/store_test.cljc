@@ -1,9 +1,11 @@
 (ns intemporal.store-test
-  (:require [clojure.test :as t :refer [deftest is testing]]
+  (:require [clojure.test :as t :refer [deftest is testing use-fixtures]]
             [intemporal.test-utils :as tu]
             [intemporal.store :as s]
             [matcher-combinators.test :refer [match?]]
             [promesa.core :as p]))
+
+(use-fixtures :once tu/with-trace-logging)
 
 (defn- is-promise-ok [prom]
   (-> prom
@@ -75,8 +77,14 @@
         (testing "task state updated"
           (let [db-task (s/find-task store (:id task))]
             (is (= (dissoc db-task :id)
-                   {:type :workflow, :ref 'some-ref, :root 'some-root,
-                    :sym 'identity, :fvar #'clojure.core/identity, :args [],
-                    :result nil, :state :pending
-                    :order 1}))))))))
+                   {:type :workflow
+                    :ref "some-ref"
+                    :root "some-root"
+                    :sym  'identity
+                    :fvar #'clojure.core/identity
+                    :args []
+                    :result nil
+                    :state :pending
+                    :order 1
+                    :runtime {}}))))))))
 

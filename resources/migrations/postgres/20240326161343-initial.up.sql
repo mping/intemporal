@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     result    bytea       NULL,
     state     varchar(20) NOT NULL,
     lease_end timestamp,
+    runtime   bytea,
     PRIMARY KEY (id),
     FOREIGN KEY (ref) REFERENCES tasks(id),
     FOREIGN KEY (root) REFERENCES tasks(id)

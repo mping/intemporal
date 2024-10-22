@@ -1,11 +1,14 @@
 (ns intemporal.stores-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [intemporal.store :as store]
             [intemporal.store.foundationdb :as fdb]
             [intemporal.store.jdbc :as jdbc]
+            [intemporal.test-utils :as tu]
             [intemporal.workflow.internal :as internal]
             [intemporal.matchers :refer [nilable?]]
             [matcher-combinators.test :refer [match?]]))
+
+(use-fixtures :once tu/with-trace-logging)
 
 (def stores  {:memory   (store/make-store)
               :fdb      (fdb/make-store)
@@ -50,7 +53,8 @@
           (store/clear-events store)
           (store/clear-tasks store)
           (let [task (internal/create-workflow-task "self" "self" 'clojure.core/+ (var-get #'+) ["invoke" 333]
-                                                    "self" nil :new)]
+                                                    "self" nil :new
+                                                    nil)]
 
             (testing "enqueue task"
               (is (= task

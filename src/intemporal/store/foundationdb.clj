@@ -22,9 +22,10 @@
 
 (defmacro with-tx [binding & body]
   (let [[tx-sym db-sym] binding]
+    ;; TODO type hint Closeable?
     `(with-open [db# ~db-sym]
        (ftr/run db#
-                (fn [~tx-sym] (do ~@body))))))
+         (fn [~tx-sym] (do ~@body))))))
 
 (defn make-store
   ([]

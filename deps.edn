@@ -1,11 +1,13 @@
 {:paths   ["src" "dev" "target"]
  :deps    {org.clojure/clojure      {:mvn/version "1.11.4"}
            thheller/shadow-cljs     {:mvn/version "2.28.11"}
-           com.taoensso/timbre      {:mvn/version "6.5.0"}
+           com.taoensso/telemere    {:mvn/version "1.0.0-beta25"}
            ;;stuff
            net.cgrand/macrovich     {:mvn/version "0.2.2"}
            funcool/promesa          {:mvn/version "11.0.678"}
+           metosin/malli            {:mvn/version "0.16.4"}
            thedavidmeister/cljc-md5 {:mvn/version "0.0.2"}}
+
  :aliases {:dev  {:extra-paths ["dev" "test"]
                   :jvm-opts    ["-Djdk.attach.allowAttachSelf"]
                   :extra-deps  {lambdaisland/kaocha                      {:mvn/version "1.91.1392"}

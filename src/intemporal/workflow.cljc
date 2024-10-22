@@ -2,7 +2,7 @@
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as internal]
             [promesa.core :as p]
-            [taoensso.timbre :as log])
+            [taoensso.telemere :as t])
   #?(:cljs (:require-macros
              #_:clj-kondo/ignore
              [intemporal.workflow.internal :refer [with-env-internal]]
@@ -14,7 +14,11 @@
 ;;;;
 ;; runtime
 
-(defmacro with-env [m & body]
+(defmacro with-env
+  "Creates a new environment for workflow execution. Options:
+  - :task-per-activity?
+  - :timeout-ms "
+  [m & body]
   `(internal/with-env-internal ~m ~@body))
 
 (defn current-env []
@@ -56,17 +60,25 @@
 (defn- worker-execute-fn
   "Executes a given protocol, activity or workflow `task`"
   [store protocols {:keys [type id root] :as task}]
+  ;; TODO: env: read env from task?
+  (println "XXX" (:runtime task))
   (let [root-counter (atom 0)
-        internal-env {:store  store
-                      :type   type
-                      :ref    id
-                      :root   (or root id)
-                      :protos protocols
-                      :next-id (fn [] (str (or root id) "-" (swap! root-counter inc)))}]
+        runtime      (:runtime task)
+        base-env     {:store   store
+                      :type    type
+                      :ref     id
+                      :id      id
+                      :root    (or root id)
+                      :protos  protocols
+                      :next-id (fn [] (str (or root id) "-" (swap! root-counter inc)))}
+        internal-env (merge runtime base-env)]
     ;; root task: we only enqueue workflows
     (with-env internal-env
-      (log/debugf "Resuming task: %s" task)
-      (internal/resume-task internal-env store protocols task))))
+      (t/log! {:level :trace :_data {:task task :env internal-env}} ["Resuming workflow task with id" (:id task)])
+      (try
+        (internal/resume-task internal-env store protocols task)
+        (finally
+          (t/log! {:level :trace} ["Workflow task resumed"]))))))
 
 (defn- worker-poll-fn
   "Continously polls for task while `task-executor` is active."
@@ -76,6 +88,7 @@
         (p/chain (fn [_]
                    (loop []
                      (when-let [task (store/dequeue-task store)]
+                       (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
                        (submit task-executor (fn [] (worker-execute-fn store protocols task)))
                        (recur)))
                    (when (running? task-executor)
@@ -105,14 +118,16 @@
          (-> (p/delay polling-ms)
              (p/chain (fn [_]
                         (when-let [task (store/dequeue-task store)]
-                            (p/vthread
-                              (worker-execute-fn store protocols task)))
+                          (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
+                          (p/vthread
+                            (worker-execute-fn store protocols task)))
                         (when @run?
                           (p/recur)))))))
      (fn [] (reset! run? false)))))
 
 (defn enqueue-and-wait
   [{:keys [store] :as opts} task]
+  (t/log! :debug ["Enqueuing task with id" (:id task)])
   (internal/enqueue-and-wait opts task))
 
 (defn add-compensation

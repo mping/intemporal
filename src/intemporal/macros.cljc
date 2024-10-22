@@ -3,7 +3,8 @@
             [intemporal.workflow :as w]
             [intemporal.workflow.internal :as i]
             [md5.core :as md5]
-            [promesa.core :as p])
+            [promesa.core :as p]
+            [taoensso.telemere :as t])
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
                             [intemporal.macros :refer [env-let defn-workflow stub-function stub-protocol]])))
@@ -59,15 +60,19 @@
          (p/vthread
            (-> (i/with-env-internal (merge env# {:lockid id#})
                  (try
+                   ;; the first line of the body should actually try to release the lock
+                   ;; but it must happen after the dequeue of the task
                    (do ~@body)
-                   (finally
+                   (finally)))
                      ;; TODO: I think releasing here causes a race, sometimes
                      ;; vthread recovery test fails, it seems theres a race condition somewhere
-                     #_
-                     (i/try-release! id#))))
+                     ;; (i/try-release! id# env#))))
                (p/then resolve#)
                (p/catch reject#)
-               (p/finally (fn [] (i/try-release! id#)))))))))
+               (p/finally (fn [_# _#]
+                            (t/log! {:level :trace} ["Requesting vthread release for lock id" id#])
+                            (i/try-release! id#)))))))))
+
 
 (defmacro defn-workflow
   "Defines a workflow. Workflows are functions that are resillient to crashes, as
@@ -87,8 +92,10 @@
                root#  (:root i/*env*)
                ;; id can be passed by env if we're dequeuing a task from store
                id#    (or (:id i/*env*) (i/random-id))
-               fvar#  #'~wname]
-           (w/enqueue-and-wait i/*env* (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv id#)))))))
+               fvar#  #'~wname
+               task#  (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv id#)]
+           (t/log! {:level :trace :data {:env i/*env* :task task#}}  ["Invoking task with id" (:id task#)])
+           (w/enqueue-and-wait i/*env* task#))))))
 
 (defmacro stub-function
   "Stubs `f`, wrapping it in an activity-aware function."
@@ -104,14 +111,15 @@
              protos# (:protos i/*env*)
              id#     ((:next-id i/*env*))
              ref#    nil ;; no enqueued task => no ref
-             task#   (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv# id#)
-             res#    (i/resume-task i/*env* store# protos# task#)]
+             task#   (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv# id#)]
          ;; an embedded workflow engine doesn't need to have a task per invocation
-         #_
-         (w/enqueue-and-wait i/*env* (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv#))
-         (macros/case
-           :cljs res#
-           :clj (deref res#))))))
+         (t/log! {:level :trace :data {:env i/*env* :task task#}}  ["Invoking task"])
+         (if (:task-per-activity? i/*env*)
+           (w/enqueue-and-wait i/*env* task#)
+           (let [res# (i/resume-task i/*env* store# protos# task#)]
+             (macros/case
+               :cljs res#
+               :clj (deref res#))))))))
 
 (defmacro stub-protocol
   "Stub a protocol definition. Opts are currently unused.
@@ -161,10 +169,10 @@
                                     [~@args]
                                     id#)]
 
-                      ;; resume-task returns a promise
-                      (i/resume-task i/*env* store# protos# task#))))))))
-                    ;; an embedded runner doesnt need a task per invocation
-                    ;; (w/enqueue-and-wait i/*env* task#)))))))
+                      (t/log! {:level :trace :data {:env i/*env* :task task#}}  ["Invoking task"])
+                      (if (:task-per-activity? i/*env*)
+                        (w/enqueue-and-wait i/*env* task#)
+                        (i/resume-task i/*env* store# protos# task#)))))))))
 
     :clj
     #_{:clj-kondo/ignore [:unresolved-symbol]}
@@ -204,10 +212,12 @@
                                   (var-get (requiring-resolve aid#))
                                   [~@args]
                                   id#)]
-                    ;; resume-task returns a promise
-                    @(i/resume-task i/*env* store# protos# task#)))))))))
-                  ;; an embedded runner doesn't need a task per invocation
-                  ;; (w/enqueue-and-wait i/*env* task#))))))))
+
+                    (t/log! {:level :trace :data {:env i/*env* :task task#}}  ["Invoking task"])
+                    (if (:task-per-activity? i/*env*)
+                      (w/enqueue-and-wait i/*env* task#)
+                      @(i/resume-task i/*env* store# protos# task#))))))))))
+
 
 (defmacro with-failure
   "Runs `fcall`, ensuring that if it fails, compensation will always run.

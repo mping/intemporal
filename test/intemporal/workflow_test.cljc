@@ -3,17 +3,21 @@
                      [cljs.pprint :as pprint]
                      [intemporal.store :as store]
                      [intemporal.workflow :as w]
+                     [intemporal.test-utils :as tu]
                      [matcher-combinators.test :refer [match?]]
                      [promesa.core :as p])
      :clj  (:require [clojure.test :as t :refer [deftest is testing]]
                      [clojure.pprint :as pprint]
                      [intemporal.store :as store]
                      [intemporal.workflow :as w]
+                     [intemporal.test-utils :as tu]
                      [matcher-combinators.test :refer [match?]]))
   #?(:cljs (:require-macros [intemporal.macros :refer [env-let stub-function stub-protocol defn-workflow]]
                             [intemporal.test-utils :refer [with-promise?]])
      :clj  (:require [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]
                      [intemporal.test-utils :refer [with-promise?]])))
+
+(t/use-fixtures :once tu/with-trace-logging)
 
 (defn nested-fn [a]
   [a :nested])
@@ -111,6 +115,3 @@
           (finally
             (stop-worker)))))))
 
-
-
-(workflow-happy-path-test)

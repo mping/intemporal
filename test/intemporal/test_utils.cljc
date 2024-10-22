@@ -1,6 +1,7 @@
 (ns intemporal.test-utils
   (:require [intemporal.workflow.internal :as in]
             [promesa.core :as p]
+            [taoensso.telemere :as telemere]
     #?(:cljs [cljs.test :as t])
     #?(:clj [net.cgrand.macrovich :as macros]))
   #?(:cljs (:require-macros [net.cgrand.macrovich :as macros])))
@@ -12,20 +13,21 @@
                      :or   {proto  nil
                             type   :workflow
                             id     (in/random-id)
-                            ref    'some-ref
-                            root   'some-root
+                            ref    "some-ref"
+                            root   "some-root"
                             sym    'identity
                             fvar   #'identity
                             args   []
                             result nil
                             state  :new}}]
-  (cond
-    (= type :workflow)
-    (in/create-workflow-task ref root sym fvar args id result state)
-    (= type :activity)
-    (in/create-activity-task ref root sym fvar args id result state)
-    (= type :proto-activity)
-    (in/create-proto-activity-task proto ref root sym fvar args id result state)))
+  (-> (cond
+        (= type :workflow)
+        (in/create-workflow-task ref root sym fvar args id result state nil)
+        (= type :activity)
+        (in/create-activity-task ref root sym fvar args id result state nil)
+        (= type :proto-activity)
+        (in/create-proto-activity-task proto ref root sym fvar args id result state nil))
+      (in/validate-task)))
 
 (defn make-workflow-task [& {:keys [] :as args}]
   (make-task (assoc args :type :workflow)))
@@ -38,6 +40,7 @@
 
 ;;;;
 ;; macros
+
 (defmacro with-promise?
   "Waits for `val` before running `body`. Mostly for cljs & promise-based values.
   Usage.
@@ -60,3 +63,11 @@
                     (let [~val res#]
                       (do ~@body))
                     (done#))))))
+
+#?(:cljs
+   (def with-trace-logging {:before (fn []
+                                      (telemere/set-min-level! :trace))})
+   :clj
+   (defn with-trace-logging [f]
+     (telemere/set-min-level! :trace)
+     (f)))

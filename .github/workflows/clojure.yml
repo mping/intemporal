@@ -77,8 +77,8 @@ jobs:
 
       - name: Install clj dependencies
         run: clojure -A:dev:doc:cljs:fdb:jdbc -Stree
-      - name: Compile cljs
-        run: npx shadow-cljs compile dev
+      #- name: Compile cljs
+      #  run: npx shadow-cljs compile dev
       - name: Compile docs
         run: npx shadow-cljs compile doc
 
