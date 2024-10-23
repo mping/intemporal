@@ -1,4 +1,4 @@
-{:paths   ["src" "dev" "target"]
+{:paths   ["src" "target"]
  :deps    {org.clojure/clojure      {:mvn/version "1.11.4"}
            thheller/shadow-cljs     {:mvn/version "2.28.11"}
            com.taoensso/telemere    {:mvn/version "1.0.0-beta25"}
@@ -30,5 +30,9 @@
            :cljs {:extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}
                                thheller/shadow-cljs      {:mvn/version "2.28.12"}
                                hiccups/hiccups           {:mvn/version "0.3.0"}}}
+
+           :build {:extra-paths ["build"]
+                   :deps {io.github.clojure/tools.build {:mvn/version "0.10.4"}}
+                   :ns-default build}
 
            :test {:main-opts ["-m" "kaocha.runner"]}}}

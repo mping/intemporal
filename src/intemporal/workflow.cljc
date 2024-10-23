@@ -60,8 +60,6 @@
 (defn- worker-execute-fn
   "Executes a given protocol, activity or workflow `task`"
   [store protocols {:keys [type id root] :as task}]
-  ;; TODO: env: read env from task?
-  (println "XXX" (:runtime task))
   (let [root-counter (atom 0)
         runtime      (:runtime task)
         base-env     {:store   store

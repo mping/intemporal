@@ -2,7 +2,6 @@
   ;; See https://github.com/exoscale/automata/pull/3
   "Finite state transducer library. Intended for data representations of
    state transitions, leaving actions to consumers of the library."
-  (:refer-clojure :exclude [next])
   (:require [clojure.spec.alpha :as s]))
 
 (defn ^:no-doc extract
@@ -118,7 +117,7 @@
 
 (def ^{:doc "Yields the next state for a transition"
        :arglists '([transition])}
-  next
+  nxt
   ::to)
 
 (def ^{:doc "Yields all actions for a transition"

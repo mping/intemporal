@@ -1,7 +1,5 @@
 (ns intemporal.demo-workflow
   (:require [intemporal.store :as store]
-            [intemporal.store.foundationdb :as fdb]
-            [intemporal.store.jdbc :as jdbc]
             [intemporal.workflow :as w]
             [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]))
 
