@@ -31,39 +31,11 @@ jobs:
       - name: Stop foundation
         run: sudo systemctl stop foundationdb.service
 
-      - name: Restore node dependencies
-        id: cache-node-deps
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            node_modules
-          key: nodedeps-${{ hashFiles('package-lock.json') }}
-
-      - name: Install node dependencies
-        if: steps.cache-node-deps.outputs.cache-hit != 'true'
-        run: npm install
-
-      - name: Save node dependencies
-        uses: actions/cache/save@v4
-        if: steps.cache-node-deps.outputs.cache-hit != 'true'
-        with:
-          path: |
-            node_modules
-          key: ${{ steps.cache-node-deps.outputs.cache-primary-key }}
-
       - name: Prepare java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
-
-      - name: Restore clojure dependencies
-        id: cache-clojure-deps
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.m2/repository
-          key: deps-${{ hashFiles('deps.edn') }}
 
       - name: Install clojure tools
         uses: DeLaGuardo/setup-clojure@12.5
@@ -75,20 +47,26 @@ jobs:
           clj-kondo: 2024.08.01        # Clj-kondo
           cljstyle: 0.16.626           # cljstyle
 
+      - name: Cache clojure/node dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.m2/repository
+            ~/node_modules
+          # List all files containing dependencies:
+          key: cljdeps-${{ hashFiles('deps.edn', 'package.json') }}
+          restore-keys: cljdeps-${{ hashFiles('deps.edn', 'package.json') }}
+
+      - name: Install node dependencies
+        if: steps.cache-node-deps.outputs.cache-hit != 'true'
+        run: npm install
+
       - name: Install clj dependencies
         run: clojure -A:dev:doc:cljs:fdb:jdbc -Stree
       #- name: Compile cljs
       #  run: npx shadow-cljs compile dev
       - name: Compile docs
         run: npx shadow-cljs compile doc
-
-      - name: Save clojure dependencies
-        uses: actions/cache/save@v4
-        if: steps.cache-clojure-deps.outputs.cache-hit != 'true'
-        with:
-          path: |
-            ~/.m2/repository
-          key: ${{ steps.cache-clojure-deps.outputs.cache-primary-key }}
 
       - name: Lint
         run: clj-kondo --parallel --lint {src,test}
