@@ -22,6 +22,11 @@ jobs:
         with:
           node-version: 19.3.0
 
+      - name: Install coverage tools
+        run: |
+          sudo apt install lcov -y
+          mkdir -p coverage
+
       # required for the native fdb lib
       - name: Install foundationdb
         uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
@@ -85,10 +90,19 @@ jobs:
           docker compose logs foundation
 
       - name: Test cljs
+        env:
+          CLOVERAGE_OUTPUT: target/coverage-cljs
         run: bin/kaocha unit-cljs
 
       - name: Test clj
+        env:
+          CLOVERAGE_OUTPUT: target/coverage-clj
         run: bin/kaocha unit
+
+      - name: Coverage report
+        run: |
+          lcov --add-tracefile target/coverage-clj/lcov.info  --add-tracefile target/coverage-cljs/lcov.info -o coverage/merged.info
+          genhtml coverage/merged.info -o coverage
 
       - name: Test Report
         uses: mikepenz/action-junit-report@v4

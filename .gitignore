@@ -26,3 +26,7 @@ dev/example.db
 *.iml
 .tool-versions
 docker/fdb.cluster
+
+# coverage
+merged.info
+coverage/
