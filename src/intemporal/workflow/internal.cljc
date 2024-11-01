@@ -64,6 +64,7 @@
                   :task-per-activity? false
                   :lock               #?(:clj  (java.util.concurrent.Semaphore. 1)
                                          :cljs nil)
+                  ;; TODO use value `0` to signal infinite timeout
                   :timeout-ms         #?(:clj  Long/MAX_VALUE
                                          :cljs 2147483647)})
 

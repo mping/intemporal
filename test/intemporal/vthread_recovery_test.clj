@@ -33,7 +33,7 @@
 
 (deftest vthread-recovery-test
   ;; make a backup of the db to allow replay
-  (io/copy (io/file "./dev/intemporal/vthread-recovery.edn")
+  (io/copy (io/file "./test/intemporal/vthread-recovery.edn")
            (io/file "/tmp/intemporal-vthread-recovery.edn"))
   (let [mstore  (store/make-store "/tmp/intemporal-vthread-recovery.edn" {})
         stop-fn (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
