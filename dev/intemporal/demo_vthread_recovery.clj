@@ -29,7 +29,7 @@
 
 ;; make a backup of the db to allow replay
 (io/copy (io/file "./dev/intemporal/vthread-recovery.edn") (io/file "/tmp/intemporal-vthread-recovery.edn"))
-(def mstore (store/make-store "/tmp/intemporal-vthread-recovery.edn" {}))
+(def mstore (store/make-store {:file "/tmp/intemporal-vthread-recovery.edn"}))
 (def worker (w/start-worker! mstore {:protocols {`intemporal.demo-vthread-recovery/ThreadActivity (->ThreadActivityImpl)}}))
 
 (defn pprint-table [table]

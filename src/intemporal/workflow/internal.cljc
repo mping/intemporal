@@ -107,7 +107,7 @@
   `(binding [*env* (merge default-env ~m)]
      (do ~@body)))
 
-(defn internal-error? [ex]
+(defn- internal-error? [ex]
   ;; TODO this should be a store predicate, or every store exception should be wrapped in this
   (= :internal (-> ex ex-data ::type)))
 

@@ -37,6 +37,7 @@
           (submit [executor f]
             (.submit ^ExecutorService executor ^Runnable f))
           (shutdown [executor grace-period-ms]
+            ;; todo: release tasks
             (.shutdown ^ExecutorService executor)
             (when-not (.awaitTermination ^ExecutorService executor grace-period-ms TimeUnit/MILLISECONDS)
               (.shutdownNow ^ExecutorService executor)))
@@ -92,13 +93,16 @@
                    (when (running? task-executor)
                      (p/recur)))))))
 
-(defn poll+submit!
+(defn start-poller!
   "Starts a poller that will submit tasks to the `task-executor`.
+  Protocol implementations are resolved via a map of `:protocols {my.ns Impl}`
+  Returns an `ITaskExecutor` that can be shutdown.
   For clj runtimes, task-executor should be `(Executors/newVirtualThreadPerTaskExecutor)`, as
   each execution will be blocked while they await for a given task dependencie's execution."
   ([store {:keys [protocols polling-ms] :or {protocols {} polling-ms 100} :as opts}]
-   (poll+submit! store (make-task-executor) opts))
+   (start-poller! store (make-task-executor) opts))
   ([store task-executor & {:keys [protocols polling-ms] :or {protocols {} polling-ms 100}}]
+   (assert (satisfies? ITaskExecutor task-executor) "Supplied task executor does not satisfy ITaskExecutor")
    (let [polling-fn (fn [] (worker-poll-fn store protocols task-executor polling-ms))]
      (submit task-executor polling-fn))
    task-executor))

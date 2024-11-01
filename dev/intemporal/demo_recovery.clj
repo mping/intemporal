@@ -21,7 +21,7 @@
 
 ;; make a backup of the db to allow replay
 (io/copy (io/file "./dev/intemporal/recovery.edn") (io/file "/tmp/intemporal-recovery.edn"))
-(def mstore (store/make-store "/tmp/intemporal-recovery.edn" {}))
+(def mstore (store/make-store {:file "/tmp/intemporal-recovery.edn"}))
 (def worker (w/start-worker! mstore))
 
 (defn pprint-table [table]

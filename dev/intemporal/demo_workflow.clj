@@ -32,7 +32,7 @@
 ;(def mstore (jdbc/make-store {:jdbcUrl "jdbc:postgresql://localhost:5432/root?user=root&password=root"
 ;                              :migration-dir "migrations/postgres"}))
 ;(def worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
-(def ex (w/poll+submit! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
+(def ex (w/start-poller! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
 
 (def res (w/with-env {:store mstore}
            (my-workflow 1)))

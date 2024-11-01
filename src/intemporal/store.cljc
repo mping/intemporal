@@ -85,8 +85,9 @@
 (defn make-store
   "Creates a new memory-based store"
   ([]
-   (make-store nil nil))
-  ([file readers]
+   (make-store nil))
+  ([{:keys [owner file readers]
+     :or {owner "intemporal"}}]
    ;; TODO use single atom?
    (let [tasks       (atom {})
          history     (atom {})

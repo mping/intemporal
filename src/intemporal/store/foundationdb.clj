@@ -30,7 +30,8 @@
 (defn make-store
   ([]
    (make-store nil))
-  ([cluster-file-path]
+  ([{:keys [owner cluster-file-path]
+     :or {owner "intemporal"}}]
    (let [^FDB fdb (cfdb/select-api-version fdb-api-version)
          open-db  #(if cluster-file-path
                      (cfdb/open fdb cluster-file-path)
@@ -190,7 +191,7 @@
 
 
 (comment
-  (def s (make-store "docker/fdb.cluster"))
+  (def s (make-store {:cluster-file-path "docker/fdb.cluster"}))
   (def t (i/create-workflow-task "ref#" "root#" 'clojure.core/+ (var-get #'+) [] 1))
 
   (store/save-event s 1 {:a 1})

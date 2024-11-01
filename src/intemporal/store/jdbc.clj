@@ -60,7 +60,8 @@
 
 (defn make-store
   "Creates a new Postgres-based store."
-  [{:keys [migration-dir migrate? watch-polling-ms] :or {migrate? true watch-polling-ms 100} :as opts}]
+  [{:keys [owner migration-dir migrate? watch-polling-ms]
+    :or {owner "intemporal" migrate? true watch-polling-ms 100} :as opts}]
   (let [db-spec      (dissoc opts :migration-dir :migrate? :watch-polling-ms)
         config       {:store         :database
                       :migration-dir migration-dir

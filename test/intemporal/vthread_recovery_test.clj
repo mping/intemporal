@@ -35,7 +35,7 @@
   ;; make a backup of the db to allow replay
   (io/copy (io/file "./test/intemporal/vthread-recovery.edn")
            (io/file "/tmp/intemporal-vthread-recovery.edn"))
-  (let [mstore  (store/make-store "/tmp/intemporal-vthread-recovery.edn" {})
+  (let [mstore  (store/make-store {:file "/tmp/intemporal-vthread-recovery.edn"})
         stop-fn (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
         print-tables (fn []
                        (let [tasks  (store/list-tasks mstore)
