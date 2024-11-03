@@ -41,7 +41,7 @@
     #?(:clj  @(p/all proms)
        :cljs (p/all proms))))
 
-(deftest workflow-happy-path-test
+(deftest workflow-with-vthread-test
   (testing "workflow with task-per-activity"
     (let [mstore      (store/make-store)
           stop-worker (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})

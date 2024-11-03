@@ -22,7 +22,7 @@
    When called with the three-arity version, transition rules, state,
    and event are provided separately. The output is then a transition.
 
-   Both arities throw when no possible transition was found"
+   Both arities throw when no possible transition was (found"
   ([{::keys [rules state] :as machine} event]
    (let [{::keys [actions to]} (transit rules state event)]
      (-> machine

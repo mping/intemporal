@@ -20,7 +20,7 @@
     (testing (format "store: %s" label)
       (let [evt {:ref  "some-ref" :root "some-root"
                  :type :intemporal.activity/invoke
-                 :sym  'my.ns/sim
+                 :sym  'clojure.core/+
                  :args [1 "a"]}]
 
         (testing "clear"

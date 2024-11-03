@@ -1,7 +1,7 @@
 (ns intemporal.store.foundationdb
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as i]
-            [intemporal.store.internal :refer [serialize deserialize serializable? next-id]]
+            [intemporal.store.internal :refer [serialize deserialize serializable? next-id validate-task validate-event]]
             [me.vedang.clj-fdb.FDB :as cfdb]
             [me.vedang.clj-fdb.core :as fc]
             [me.vedang.clj-fdb.transaction :as ftr]
@@ -17,13 +17,13 @@
 ;; values are (de)serialized via nippy
 
 (def fdb-api-version cfdb/clj-fdb-api-version)
-(def subspace-tasks (fsub/create ["tasks"]))
-(def subspace-history (fsub/create ["history"]))
+
 
 (defmacro with-tx [binding & body]
-  (let [[tx-sym db-sym] binding]
+  (let [[tx-sym db-sym] binding
+        database (with-meta db-sym {:tag 'com.apple.foundationdb.Database})]
     ;; TODO type hint Closeable?
-    `(with-open [db# ~db-sym]
+    `(with-open [db# ~database]
        (ftr/run db#
          (fn [~tx-sym] (do ~@body))))))
 
@@ -35,7 +35,9 @@
    (let [^FDB fdb (cfdb/select-api-version fdb-api-version)
          open-db  #(if cluster-file-path
                      (cfdb/open fdb cluster-file-path)
-                     (cfdb/open fdb))]
+                     (cfdb/open fdb))
+         subspace-tasks (fsub/create ["tasks"])
+         subspace-history (fsub/create ["history"])]
      (reify
        store/InternalVarStore
        (register [this sym var])
@@ -52,12 +54,15 @@
          (let [evt-id (next-id)
                evt+id (assoc event :id evt-id)]
            (assert (serializable? evt+id) "Event should be serializable")
+           (validate-event evt+id)
            (with-tx [tx (open-db)]
+             ;; TODO use owner
              (fc/set tx subspace-history [task-id evt-id] (serialize evt+id)))
            evt+id))
 
        (all-events [this task-id]
          (-> (with-tx [tx (open-db)]
+               ;; TODO use owner
                (fc/get-range tx subspace-history [task-id] {:valfn deserialize}))
              (vals)))
 
@@ -77,7 +82,21 @@
          ;; and they would expect the event to be present in the history
          (with-tx [tx (open-db)]
            (let [task         (fc/get tx subspace-tasks task-id {:valfn deserialize})
+                 ;; TODO FIXME: for workflows with task-per-activity? false
+                 ;; we wont find a db task, so we need to merge with the evt
                  evt          {:ref ref :root root :type type :sym sym :args args}
+                 derived-task (cond
+                                (contains? #{:intemporal.workflow/invoke :intemporal.workflow/success :intemporal.workflow/failure} type)
+                                (i/create-workflow-task ref root sym (requiring-resolve sym) args task-id)
+
+                                (contains? #{:intemporal.activity/invoke :intemporal.activity/success :intemporal.activity/failure} type)
+                                (i/create-workflow-task ref root sym (requiring-resolve sym) args task-id)
+
+                                (contains? #{:intemporal.protocol/invoke :intemporal.protocol/success :intemporal.protocol/failure} type)
+                                (i/create-workflow-task ref root sym (requiring-resolve sym) args task-id)
+
+                                :else (throw (ex-info (str "Unknown type: " type) {:intemporal.workflow/type :internal})))
+                 task         (or task derived-task)
                  updated-task (cond
                                 (some? args) (assoc task :state :pending)
                                 (some? error) (assoc task :state :failure :result error)
@@ -89,6 +108,7 @@
              (assert (serializable? task) "task is not serializable")
              (when-not id
                (store/save-event this task-id updated-evt))
+             (validate-task updated-task)
              (fc/set tx subspace-tasks task-id (serialize updated-task))
              updated-evt)))
 
@@ -114,6 +134,7 @@
          (store/await-task this id {:timeout-ms store/default-lease}))
 
        (await-task [this id {:keys [timeout-ms] :as opts}]
+         ;; TODO use owner
          (let [task        (with-tx [tx (open-db)]
                              (fc/get tx subspace-tasks [id]))
                deferred    (p/deferred)
@@ -154,9 +175,12 @@
              (ftr/get-range tx (fsub/range subspace-tasks)))))
 
        (enqueue-task [this task]
+         ;; TODO use owner
          (let [serializable (dissoc task :fvar)]
            (assert (serializable? serializable) "Task should be serializable")
            (assert (:id task) "Task should have an id")
+           (prn "XXX enqueue" (:id task))
+           (validate-task task)
            (with-tx [tx (open-db)]
              (fc/set tx subspace-tasks [(:id task)] (serialize serializable))))
          task)
@@ -165,6 +189,7 @@
          (store/dequeue-task this {:lease-ms nil}))
 
        (dequeue-task [this {:keys [lease-ms]}]
+         ;; TODO check owner
          (let [dequeuable? (fn [{:keys [state lease-end]}]
                              (or (= :new state)
                                  (some-> lease-end
