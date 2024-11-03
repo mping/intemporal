@@ -1,6 +1,6 @@
 (ns intemporal.store.internal
   (:require [malli.core :as m]
-            #?(:clj [taoensso.nippy :as nippy]
+            #?(:clj  [taoensso.nippy :as nippy]
                :cljs [clojure.edn :as edn])))
 
 (defn next-id []
@@ -10,29 +10,29 @@
 ;;;;
 ;; serialization
 
-(defn- resolve-fvar [{:keys [sym] :as task}]
+(defn resolve-fvar [{:keys [sym] :as task}]
   ;; TODO does it work in cljs?
   (assoc task :fvar #?(:clj (requiring-resolve sym) :cljs nil)))
 
 (defn serializable?
   "Indicates if an object is serializable"
   [x]
-  #?(:clj (nippy/freezable? x {:allow-java-serializable? true?})
+  #?(:clj  (nippy/freezable? x {:allow-java-serializable? true?})
      :cljs true))
 
 (defn serialize
   "Serializes an object"
   [x]
   (when x
-    #?(:clj (nippy/freeze x)
+    #?(:clj  (nippy/freeze x)
        :cljs (pr-str x))))
 
 (defn deserialize
   "Deserializes an object"
   [x]
   (when x
-    #?(:clj (resolve-fvar (nippy/thaw x))
-       :cljs (resolve-fvar (edn/read x)))))
+    #?(:clj  (nippy/thaw x)
+       :cljs (edn/read x))))
 
 
 ;;;;
@@ -55,7 +55,6 @@
 
 (def ^:private RuntimeConfig
   [:map {:closed false}
-   [:task-per-activity? {:optional true} :boolean]
    [:timeout-ms {:optional true} :int]])
 
 (def ^:private Task

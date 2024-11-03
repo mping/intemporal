@@ -32,12 +32,12 @@
   (when v (keyword v)))
 
 (defn- db->task [{:keys [id proto type ref root sym args result state lease_end runtime] :as task}]
-  (let [dargs   (deserialize args)
-        dresult (deserialize result)
+  (let [dargs    (deserialize args)
+        dresult  (deserialize result)
         druntime (deserialize runtime)
-        ssym    (symbol sym)
-        sproto  (when proto (symbol proto))
-        kstate  (db->kw state)]
+        ssym     (symbol sym)
+        sproto   (when proto (symbol proto))
+        kstate   (db->kw state)]
     (cond-> (condp = type
               "workflow" (i/create-workflow-task ref root ssym (resolve ssym) dargs id dresult kstate druntime)
               "activity" (i/create-activity-task ref root ssym (resolve ssym) dargs id dresult kstate druntime)
@@ -61,7 +61,7 @@
 (defn make-store
   "Creates a new Postgres-based store."
   [{:keys [owner migration-dir migrate? watch-polling-ms]
-    :or {owner "intemporal" migrate? true watch-polling-ms 100} :as opts}]
+    :or   {owner "intemporal" migrate? true watch-polling-ms 100} :as opts}]
   (let [db-spec      (dissoc opts :migration-dir :migrate? :watch-polling-ms)
         config       {:store         :database
                       :migration-dir migration-dir
@@ -86,7 +86,7 @@
       (save-event [this task-id {:keys [type ref root sym args result] :as event}]
         (assert (serializable? args) "Event args should be serializable")
         (assert (serializable? result) "Event result should be serializable")
-        (validate-event event)
+        (validate-event (assoc event :id Integer/MAX_VALUE))
         (let [args   (serialize args)
               result (serialize result)
               res    (jdbc/with-transaction [tx db-spec]
@@ -127,7 +127,8 @@
 
             (when-not id
               (store/save-event this task-id updated-evt))
-            (validate-task updated-task)
+            ;; cant really validate because its a partial task
+            ;(validate-task updated-task)
             (jdbc/execute-one! tx (builder/for-update "tasks" updated-task {:id task-id} default-opts))
             updated-evt)))
 

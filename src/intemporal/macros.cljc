@@ -114,12 +114,7 @@
              task#   (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv# id#)]
          ;; an embedded workflow engine doesn't need to have a task per invocation
          (t/log! {:level :trace :data {:env i/*env* :task task#}}  ["Invoking task"])
-         (if (:task-per-activity? i/*env*)
-           (w/enqueue-and-wait i/*env* task#)
-           (let [res# (i/resume-task i/*env* store# protos# task#)]
-             (macros/case
-               :cljs res#
-               :clj (deref res#))))))))
+         (w/enqueue-and-wait i/*env* task#)))))
 
 (defmacro stub-protocol
   "Stub a protocol definition. Opts are currently unused.
@@ -170,9 +165,7 @@
                                     id#)]
 
                       (t/log! {:level :trace :data {:env i/*env* :task task#}}  ["Invoking task"])
-                      (if (:task-per-activity? i/*env*)
-                        (w/enqueue-and-wait i/*env* task#)
-                        (i/resume-task i/*env* store# protos# task#)))))))))
+                      (w/enqueue-and-wait i/*env* task#))))))))
 
     :clj
     #_{:clj-kondo/ignore [:unresolved-symbol]}
@@ -214,10 +207,7 @@
                                   id#)]
 
                     (t/log! {:level :trace :data {:env i/*env* :task task#}}  ["Invoking task"])
-                    (if (:task-per-activity? i/*env*)
-                      (w/enqueue-and-wait i/*env* task#)
-                      @(i/resume-task i/*env* store# protos# task#))))))))))
-
+                    (w/enqueue-and-wait i/*env* task#)))))))))
 
 (defmacro with-failure
   "Runs `fcall`, ensuring that if it fails, compensation will always run.

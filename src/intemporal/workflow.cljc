@@ -16,7 +16,6 @@
 
 (defmacro with-env
   "Creates a new environment for workflow execution. Options:
-  - :task-per-activity?
   - :timeout-ms "
   [m & body]
   `(internal/with-env-internal ~m ~@body))
@@ -60,16 +59,16 @@
 
 (defn- worker-execute-fn
   "Executes a given protocol, activity or workflow `task`"
-  [store protocols {:keys [type id root] :as task}]
-  (let [root-counter (atom 0)
-        runtime      (:runtime task)
+  [store protocols {:keys [type id root] :as task} task-counter]
+  (let [runtime      (:runtime task)
         base-env     {:store   store
                       :type    type
                       :ref     id
                       :id      id
                       :root    (or root id)
                       :protos  protocols
-                      :next-id (fn [] (str (or root id) "-" (swap! root-counter inc)))}
+                      ;; TODO use uuid
+                      :next-id (fn [] (str (or root id) "-" (swap! task-counter inc)))}
         internal-env (merge runtime base-env)]
     ;; root task: we only enqueue workflows
     (with-env internal-env
@@ -82,16 +81,17 @@
 (defn- worker-poll-fn
   "Continously polls for task while `task-executor` is active."
   [store protocols task-executor polling-ms]
-  (p/loop []
-    (-> (p/delay polling-ms)
-        (p/chain (fn [_]
-                   (loop []
-                     (when-let [task (store/dequeue-task store)]
-                       (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
-                       (submit task-executor (fn [] (worker-execute-fn store protocols task)))
-                       (recur)))
-                   (when (running? task-executor)
-                     (p/recur)))))))
+  (let [task-counter (atom 0)]
+    (p/loop []
+      (-> (p/delay polling-ms)
+          (p/chain (fn [_]
+                     (loop []
+                       (when-let [task (store/dequeue-task store)]
+                         (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
+                         (submit task-executor (fn [] (worker-execute-fn store protocols task task-counter)))
+                         (recur)))
+                     (when (running? task-executor)
+                       (p/recur))))))))
 
 (defn start-poller!
   "Starts a poller that will submit tasks to the `task-executor`.
@@ -114,7 +114,8 @@
    (start-worker! store {}))
   ([store & {:keys [protocols polling-ms] :or {protocols {} polling-ms 100}}]
    ;; env is dynamically binded, we capture it early so we pass it into the callbacks
-   (let [run? (atom true)]
+   (let [run?         (atom true)
+         task-counter (atom 0)]
      (p/vthread
        (p/loop []
          (-> (p/delay polling-ms)
@@ -122,7 +123,7 @@
                         (when-let [task (store/dequeue-task store)]
                           (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
                           (p/vthread
-                            (worker-execute-fn store protocols task)))
+                            (worker-execute-fn store protocols task task-counter)))
                         (when @run?
                           (p/recur)))))))
      (fn [] (reset! run? false)))))

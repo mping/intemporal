@@ -11,7 +11,6 @@
 
 (def ^:dynamic *env* nil)
 (def default-env {:compensations      (atom '())
-                  :task-per-activity? false
                   :lock               #?(:clj  (java.util.concurrent.Semaphore. 1)
                                          :cljs nil)
                   ;; TODO use value `0` to signal infinite timeout
@@ -51,7 +50,7 @@
                           ["Releasing lock for lock id" lockid ", permits" (.availablePermits ^java.util.concurrent.Semaphore lock)])
                   (.release ^java.util.concurrent.Semaphore lock))
                 (t/log! {:level :trace}
-                        ["Tried to release lock id" lockid " , but still have permits" (.availablePermits ^java.util.concurrent.Semaphore lock)]))))))
+                        ["Tried to release lock id" lockid "but still have permits:" (.availablePermits ^java.util.concurrent.Semaphore lock)]))))))
 
 (defmacro with-env-internal [m & body]
   `(binding [*env* (merge default-env ~m)]
@@ -82,7 +81,7 @@
   ([ref root sym fvar args id]
    (create-workflow-task ref root sym fvar args id nil :new nil))
   ([ref root sym fvar args id result state runtime]
-   (let [env (or runtime (select-keys *env* [:timeout-ms :task-per-activity?]))]
+   (let [env (or runtime (select-keys *env* [:timeout-ms]))]
      {:type    :workflow :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state
       :runtime env})))
 
@@ -90,7 +89,7 @@
   ([ref root sym fvar args id]
    (create-activity-task ref root sym fvar args id nil :new nil))
   ([ref root sym fvar args id result state runtime]
-   (let [env (or runtime (select-keys *env* [:timeout-ms :task-per-activity?]))]
+   (let [env (or runtime (select-keys *env* [:timeout-ms]))]
      {:type    :activity :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state
       :runtime env})))
 
@@ -98,7 +97,7 @@
   ([proto ref root sym fvar args id]
    (create-proto-activity-task proto ref root sym fvar args id nil :new nil))
   ([proto ref root sym fvar args id result state runtime]
-   (let [env (or runtime (select-keys *env* [:timeout-ms :task-per-activity?]))]
+   (let [env (or runtime (select-keys *env* [:timeout-ms]))]
      {:type    :proto-activity :proto proto :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state
       :runtime env})))
 

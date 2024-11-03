@@ -42,13 +42,12 @@
        :cljs (p/all proms))))
 
 (deftest workflow-with-vthread-test
-  (testing "workflow with task-per-activity"
+  (testing "workflow"
     (let [mstore      (store/make-store)
           stop-worker (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
 
           start       (store/now)
-          v           (w/with-env {:store mstore
-                                   :task-per-activity? true}
+          v           (w/with-env {:store mstore}
                         (my-workflow))]
 
       ;; cljs runtimes return promises

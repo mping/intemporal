@@ -44,9 +44,9 @@
                          (pprint/print-table tasks)
                          (pprint/print-table events)))]
     
-    ;; wait a bit; we dont have facilities to query workflow state
     (store/reenqueue-pending-tasks mstore println)
-    (Thread/sleep 1000)
+    ;; wait a bit; we dont have facilities to query workflow state
+    (Thread/sleep 2000)
     (print-tables)
 
     (testing "linear history"

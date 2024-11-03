@@ -1,7 +1,7 @@
 (ns intemporal.store.foundationdb
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as i]
-            [intemporal.store.internal :refer [serialize deserialize serializable? next-id validate-task validate-event]]
+            [intemporal.store.internal :refer [resolve-fvar serialize deserialize serializable? next-id validate-task validate-event]]
             [me.vedang.clj-fdb.FDB :as cfdb]
             [me.vedang.clj-fdb.core :as fc]
             [me.vedang.clj-fdb.transaction :as ftr]
@@ -73,7 +73,7 @@
        store/TaskStore
        (list-tasks [this]
          (-> (with-tx [tx (open-db)]
-               (fc/get-range tx subspace-tasks {:valfn deserialize}))
+               (fc/get-range tx subspace-tasks {:valfn (comp resolve-fvar deserialize)}))
              (vals)))
 
        (task<-event [this task-id {:keys [id ref root type sym args result error] :as event-descr}]
@@ -81,22 +81,8 @@
          ;; note that we save the event first, because update-task can trigger some watchers
          ;; and they would expect the event to be present in the history
          (with-tx [tx (open-db)]
-           (let [task         (fc/get tx subspace-tasks task-id {:valfn deserialize})
-                 ;; TODO FIXME: for workflows with task-per-activity? false
-                 ;; we wont find a db task, so we need to merge with the evt
+           (let [task         (fc/get tx subspace-tasks task-id {:valfn (comp resolve-fvar deserialize)})
                  evt          {:ref ref :root root :type type :sym sym :args args}
-                 derived-task (cond
-                                (contains? #{:intemporal.workflow/invoke :intemporal.workflow/success :intemporal.workflow/failure} type)
-                                (i/create-workflow-task ref root sym (requiring-resolve sym) args task-id)
-
-                                (contains? #{:intemporal.activity/invoke :intemporal.activity/success :intemporal.activity/failure} type)
-                                (i/create-workflow-task ref root sym (requiring-resolve sym) args task-id)
-
-                                (contains? #{:intemporal.protocol/invoke :intemporal.protocol/success :intemporal.protocol/failure} type)
-                                (i/create-workflow-task ref root sym (requiring-resolve sym) args task-id)
-
-                                :else (throw (ex-info (str "Unknown type: " type) {:intemporal.workflow/type :internal})))
-                 task         (or task derived-task)
                  updated-task (cond
                                 (some? args) (assoc task :state :pending)
                                 (some? error) (assoc task :state :failure :result error)
@@ -115,7 +101,7 @@
        (find-task [this id]
          (with-tx [^FDBTransaction tx (open-db)]
            (when-let [task? (fc/get tx subspace-tasks id)]
-             (deserialize task?))))
+             (resolve-fvar (deserialize task?)))))
 
        (watch-task [this id f]
          (let [watch? (atom true)]
@@ -127,7 +113,7 @@
 
                (with-tx [^FDBTransaction tx (open-db)]
                  (when-let [task? (fc/get tx subspace-tasks id)]
-                   (when (f (deserialize task?))
+                   (when (f (resolve-fvar (deserialize task?)))
                      (reset! watch? false))))))))
 
        (await-task [this id]
@@ -166,7 +152,7 @@
          (with-tx [tx (open-db)]
            (reduce
              (fn [acc ^KeyValue kv]
-               (let [task (-> kv .getValue deserialize)]
+               (let [task (-> kv .getValue deserialize resolve-fvar)]
                  (when (= :pending (:state task))
                    (f task)
                    (fc/set tx subspace-tasks [(:id task)] (serialize (assoc task :state :new))))
@@ -179,7 +165,6 @@
          (let [serializable (dissoc task :fvar)]
            (assert (serializable? serializable) "Task should be serializable")
            (assert (:id task) "Task should have an id")
-           (prn "XXX enqueue" (:id task))
            (validate-task task)
            (with-tx [tx (open-db)]
              (fc/set tx subspace-tasks [(:id task)] (serialize serializable))))
@@ -197,7 +182,7 @@
                found?      (with-tx [tx (open-db)]
                              (reduce
                                (fn [_ ^KeyValue kv]
-                                 (let [task (-> kv .getValue deserialize)]
+                                 (let [task (-> kv .getValue deserialize resolve-fvar)]
                                    (when (dequeuable? task)
                                      (let [updated-task (assoc task
                                                           :state :pending
