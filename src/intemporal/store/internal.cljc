@@ -1,7 +1,8 @@
 (ns intemporal.store.internal
-  (:require [malli.core :as m]
-            #?(:clj  [taoensso.nippy :as nippy]
-               :cljs [clojure.edn :as edn])))
+  #?(:clj  (:require [taoensso.nippy :as nippy]
+                     [malli.core :as m])
+     :cljs (:require [clojure.edn :as edn]
+                     [malli.core :as m])))
 
 (defn next-id []
   #?(:clj  (System/currentTimeMillis)
@@ -33,7 +34,6 @@
   (when x
     #?(:clj  (nippy/thaw x)
        :cljs (edn/read x))))
-
 
 ;;;;
 ;; validation
