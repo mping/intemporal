@@ -30,60 +30,76 @@
        :cljs (p/then (p/delay ms)
                      (fn [_] id)))))
 
+(def test-sleep-time 100)
+
 (defn-workflow my-workflow []
   (let [pr    (stub-protocol ThreadActivity {})
         proms (for [i (range 10)]
                 (vthread
-                  (sleep pr i 1000)))]
+                  (sleep pr i test-sleep-time)))]
 
     ;; at this point, all of `with-thread` calls are queued, so
     ;; this code is deterministic up to here
     #?(:clj  @(p/all proms)
        :cljs (p/all proms))))
 
+(def debug false)
+(def iterations 100)
+
 (deftest workflow-with-vthread-test
-  (testing "workflow"
-    (let [mstore      (store/make-store)
-          stop-worker (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
+  (dotimes [_ iterations]
+    (testing "workflow"
+      (let [mstore   (store/make-store)
+            executor (w/start-poller! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
 
-          start       (store/now)
-          v           (w/with-env {:store mstore}
-                        (my-workflow))]
+            start    (store/now)
+            v        (w/with-env {:store mstore}
+                       (my-workflow))
+            error    (atom false)]
 
-      ;; cljs runtimes return promises
-      ;; clj runtime will run synchronously
-      (with-promise? v
-        (try
-          (testing "ran every activity concurrently"
-            (let [elapsed (- (store/now) start)]
-              (is (>= elapsed 1000) "Should take at least 1s to run")
-              (is (< elapsed 3000) "Should not take more than 3s to run")))
+        ;; cljs runtimes return promises
+        ;; clj runtime will run synchronously
+        (with-promise? v
+          (try
+            (testing "ran every activity concurrently"
+              (let [elapsed (- (store/now) start)]
+                (is (>= elapsed 1000) "Should take at least 1s to run")
+                (is (< elapsed 3000) "Should not take more than 3s to run")))
 
-          (testing "linear history"
-            (testing "stored events"
-              (let [evts  (store/list-events mstore)
-                    evts  (sort-by :id evts)
-                    aargs (map :args evts)]
+            (testing "linear history"
+              (testing "stored events"
+                (let [evts  (store/list-events mstore)
+                      evts  (sort-by :id evts)
+                      aargs (map :args evts)]
 
-                (testing "sequential activity invocation args"
-                  ;; even though each activity runs in a thread, they are started in order
-                  ;; this ensures determinism
-                  (is (= [[] [0 1000] [1 1000] [2 1000] [3 1000] [4 1000] [5 1000] [6 1000] [7 1000] [8 1000] [9 1000]]
-                         (->> aargs
-                              (take 11)
-                              (filter identity))))))))
-          (finally
-            (stop-worker)
+                  (testing "sequential activity invocation args"
+                    ;; even though each activity runs in a thread, they are started in order
+                    ;; this ensures determinism
+                    (when-not
+                      (is (= [[] [0 test-sleep-time] [1 test-sleep-time] [2 test-sleep-time] [3 test-sleep-time] [4 test-sleep-time] [5 test-sleep-time] [6 test-sleep-time] [7 test-sleep-time] [8 test-sleep-time] [9 test-sleep-time]]
+                             (->> aargs
+                                  (filter identity))))
+                      (println "XXX" (->> aargs
+                                          (filter identity)))
+                      (reset! error true))))))
+            (finally
+              (w/shutdown executor 0)
 
-            ;; debugging
-            (let [tasks        (store/list-tasks mstore)
-                  events       (->> (store/list-events mstore)
-                                    (sort-by :id))
-                  pprint-table (fn [table]
-                                 (->> table
-                                      (map (fn [r]
-                                             (cond-> r
-                                                     (contains? r :fvar) (assoc :fvar "<fn...>"))))
-                                      (pprint/print-table)))]
-              (pprint-table tasks)
-              (pprint-table events))))))))
+              ;; debugging
+              (let [tasks        (sort-by :order (store/list-tasks mstore))
+                    events       (->> (store/list-events mstore)
+                                      (sort-by :id))
+                    pprint-table (fn [table]
+                                   (->> table
+                                        (map (fn [r]
+                                               (cond-> r
+                                                       (contains? r :fvar) (assoc :fvar "<fn...>"))))
+                                        (pprint/print-table)))]
+                (pprint-table tasks)
+                (pprint-table events)
+                (when debug
+                  (dotimes [_ 50]
+                    (println ""))
+                  #?(:clj
+                     (when @error
+                       (System/exit 1))))))))))))

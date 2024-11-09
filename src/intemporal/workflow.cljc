@@ -69,7 +69,7 @@
                       :protos  protocols
                       ;; TODO use uuid
                       :next-id (fn [] (str (or root id) "-" (swap! task-counter inc)))}
-        internal-env (merge runtime base-env)]
+        internal-env (merge base-env runtime)]
     ;; root task: we only enqueue workflows
     (with-env internal-env
       (t/log! {:level :trace :_data {:task task :env internal-env}} ["Resuming workflow task with id" (:id task)])

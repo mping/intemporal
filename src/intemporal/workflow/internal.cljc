@@ -11,11 +11,12 @@
 
 (def ^:dynamic *env* nil)
 (def default-env {:compensations      (atom '())
-                  :lock               #?(:clj  (java.util.concurrent.Semaphore. 1)
-                                         :cljs nil)
                   ;; TODO use value `0` to signal infinite timeout
                   :timeout-ms         #?(:clj  Long/MAX_VALUE
                                          :cljs 2147483647)})
+
+(defn env->runtime []
+  (select-keys *env* [:timeout-ms :vthread?]))
 
 (defn random-id []
   ;; debugging purposes only
@@ -27,30 +28,6 @@
           right ["agnesi" "albattani" "allen" "almeida" "antonelli" "archimedes" "ardinghelli" "aryabhata" "austin" "babbage" "banach" "banzai" "bardeen" "bartik" "bassi" "beaver" "bell" "benz" "bhabha" "bhaskara" "black" "blackburn" "blackwell" "bohr" "booth" "borg" "bose" "bouman" "boyd" "brahmagupta" "brattain" "brown" "buck" "burnell" "cannon" "carson" "cartwright" "carver" "cerf" "chandrasekhar" "chaplygin" "chatelet" "chatterjee" "chaum" "chebyshev" "clarke" "cohen" "colden" "cori" "cray" "curie" "curran" "darwin" "davinci" "dewdney" "dhawan" "diffie" "dijkstra" "dirac" "driscoll" "dubinsky" "easley" "edison" "einstein" "elbakyan" "elgamal" "elion" "ellis" "engelbart" "euclid" "euler" "faraday" "feistel" "fermat" "fermi" "feynman" "franklin" "gagarin" "galileo" "galois" "ganguly" "gates" "gauss" "germain" "goldberg" "goldstine" "goldwasser" "golick" "goodall" "gould" "greider" "grothendieck" "haibt" "hamilton" "haslett" "hawking" "heisenberg" "hellman" "hermann" "herschel" "hertz" "heyrovsky" "hodgkin" "hofstadter" "hoover" "hopper" "hugle" "hypatia" "ishizaka" "jackson" "jang" "jemison" "jennings" "jepsen" "johnson" "joliot" "jones" "kalam" "kapitsa" "kare" "keldysh" "keller" "kepler" "khayyam" "khorana" "kilby" "kirch" "knuth" "kowalevski" "lalande" "lamarr" "lamport" "leakey" "leavitt" "lederberg" "lehmann" "lewin" "lichterman" "liskov" "lovelace" "lumiere" "mahavira" "margulis" "matsumoto" "maxwell" "mayer" "mccarthy" "mcclintock" "mclaren" "mclean" "mcnulty" "meitner" "mendel" "mendeleev" "meninsky" "merkle" "mestorf" "mirzakhani" "montalcini" "moore" "morse" "moser" "murdock" "napier" "nash" "neumann" "newton" "nightingale" "nobel" "noether" "northcutt" "noyce" "panini" "pare" "pascal" "pasteur" "payne" "perlman" "pike" "poincare" "poitras" "proskuriakova" "ptolemy" "raman" "ramanujan" "rhodes" "ride" "ritchie" "robinson" "roentgen" "rosalind" "rubin" "saha" "sammet" "sanderson" "satoshi" "shamir" "shannon" "shaw" "shirley" "shockley" "shtern" "sinoussi" "snyder" "solomon" "spence" "stonebraker" "sutherland" "swanson" "swartz" "swirles" "taussig" "tesla" "tharp" "thompson" "torvalds" "tu" "turing" "varahamihira" "vaughan" "villani" "visvesvaraya" "volhard" "wescoff" "wilbur" "wiles" "williams" "williamson" "wilson" "wing" "wozniak" "wright" "wu" "yalow" "yonath" "zhukovsky"]]
       (str (rand-nth left) "-" (rand-nth right)))
     (str (random-uuid))))
-
-(defn try-lock!
-  "CLJ: uses a lock to ensure serial access to a given section, typically to serialize activity
-  event history, so it becomes deterministic (in case of eg: multithreads)."
-  []
-  (when-let [lock (:lock *env*)]
-    #?(:clj (let [id (:root *env*)]
-              (t/log! {:level :trace :data {:env *env*}} ["Acquiring lock id" id])
-              (.acquire ^java.util.concurrent.Semaphore lock)
-              id))))
-
-(defn try-release!
-  "Releases the lock only if `lockid` matches current env lock id.
-  Mostly for threaded situations."
-  [lockid]
-  (when lockid
-    (when-let [lock (:lock *env*)]
-      #?(:clj (if (zero? (.availablePermits ^java.util.concurrent.Semaphore lock))
-                (do
-                  (t/log! {:level :trace}
-                          ["Releasing lock for lock id" lockid ", permits" (.availablePermits ^java.util.concurrent.Semaphore lock)])
-                  (.release ^java.util.concurrent.Semaphore lock))
-                (t/log! {:level :trace}
-                        ["Tried to release lock id" lockid "but still have permits:" (.availablePermits ^java.util.concurrent.Semaphore lock)]))))))
 
 (defmacro with-env-internal [m & body]
   `(binding [*env* (merge default-env ~m)]
@@ -81,25 +58,25 @@
   ([ref root sym fvar args id]
    (create-workflow-task ref root sym fvar args id nil :new nil))
   ([ref root sym fvar args id result state runtime]
-   (let [env (or runtime (select-keys *env* [:timeout-ms]))]
+   (let [runtime (or runtime (env->runtime))]
      {:type    :workflow :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state
-      :runtime env})))
+      :runtime runtime})))
 
 (defn create-activity-task
   ([ref root sym fvar args id]
    (create-activity-task ref root sym fvar args id nil :new nil))
   ([ref root sym fvar args id result state runtime]
-   (let [env (or runtime (select-keys *env* [:timeout-ms]))]
+   (let [runtime (or runtime (env->runtime))]
      {:type    :activity :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state
-      :runtime env})))
+      :runtime runtime})))
 
 (defn create-proto-activity-task
   ([proto ref root sym fvar args id]
    (create-proto-activity-task proto ref root sym fvar args id nil :new nil))
   ([proto ref root sym fvar args id result state runtime]
-   (let [env (or runtime (select-keys *env* [:timeout-ms]))]
+   (let [runtime (or runtime (env->runtime))]
      {:type    :proto-activity :proto proto :id id :ref ref :root root :sym sym :fvar fvar :args args :result result :state state
-      :runtime env})))
+      :runtime runtime})))
 
 (defn event-matches? [{t :type s :sym} {t2 :type s2 :sym}]
   (and (= t t2) (= s s2)))
@@ -133,10 +110,10 @@
             (not (event-matches? inv? next-event))
             (throw (internal-exception "Transition unexpected" {:type     (:type inv?)
                                                                 :expected invoke})))
-          (finally
+          (finally)))
             ;; release the lock
-            (t/log! {:level :trace} ["Requesting resume-task release for lock id" root])
-            (try-release! root))))
+            ;(t/log! {:level :trace} ["Requesting resume-task release for lock id" (:counter env)])
+            ;(try-release!))))
 
       ;; mark success/failure or replay
       (let [next-event   {:ref id :root (or root id) :type success :sym sym}
@@ -161,8 +138,14 @@
                                                (cons impl? args)
                                                args)
                                        r     (binding [*env* (merge default-env env)]
-                                               (t/log! {:level :debug :data {:fvar fvar :args args'}} ["Calling actual function for task" id])
-                                               (apply fvar args'))]
+                                               (let [{:keys [vthread?]} *env*]
+                                                 (t/log! {:level :debug :data {:vthread? vthread? :fvar fvar :args args'}} ["Calling actual function for task" id])
+                                                 (if vthread?
+                                                   ;; TODO should actually queue execution so that
+                                                   ;; all vthreads have a chance to run
+                                                   (p/vthread
+                                                     (apply fvar args'))
+                                                   (apply fvar args'))))]
                                  r)
                                (p/then
                                  (fn [r]

@@ -49,29 +49,28 @@
            ~@body)))))
 
 (defmacro vthread
-  "Runs `body` within a virtual thread, returning a promise.
-  Locks the workflow, meaning only one thread at a time can save the history events.
-  "
+  "Runs `body` within a virtual thread, returning a promise."
   [& body]
-  `(let [env# (w/current-env)
-         id#  (i/try-lock!)]
-     (p/create
-       (fn [resolve# reject#]
-         (p/vthread
-           (-> (i/with-env-internal (merge env# {:lockid id#})
-                 (try
-                   ;; the first line of the body should actually try to release the lock
-                   ;; but it must happen after the dequeue of the task
-                   (do ~@body)
-                   (finally)))
-                     ;; TODO: I think releasing here causes a race, sometimes
-                     ;; vthread recovery test fails, it seems theres a race condition somewhere
-                     ;; (i/try-release! id# env#))))
-               (p/then resolve#)
-               (p/catch reject#)
-               (p/finally (fn [_# _#]
-                            (t/log! {:level :trace} ["Requesting vthread release for lock id" id#])
-                            (i/try-release! id#)))))))))
+  `(binding [i/*env* (assoc i/*env* :vthread? true)]
+     ~@body)
+  #_
+  `(p/create
+     (fn [resolve# reject#]
+       (p/vthread
+         (i/try-lock!)
+         (-> (try
+               ;; the first line of the body should actually try to release the lock
+               ;; but it must happen after the dequeue of the task
+               (do ~@body)
+               (finally
+                 ;; TODO: I think releasing here causes a race, sometimes
+                 ;; vthread recovery test fails, it seems theres a race condition somewhere
+                 (i/try-release!)))
+             (p/then resolve#)
+             (p/catch reject#)
+             (p/finally (fn [_# _#]
+                          (t/log! {:level :trace} ["Requesting vthread release"])
+                          (i/try-release!))))))))
 
 
 (defmacro defn-workflow

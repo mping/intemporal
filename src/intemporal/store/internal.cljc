@@ -55,7 +55,8 @@
 
 (def ^:private RuntimeConfig
   [:map {:closed false}
-   [:timeout-ms {:optional true} :int]])
+   [:timeout-ms {:optional true} :int]
+   [:vthread? {:optional true} :boolean]])
 
 (def ^:private Task
   [:map {:closed true}
