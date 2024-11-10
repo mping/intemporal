@@ -75,6 +75,9 @@
                   (testing "sequential activity invocation args"
                     ;; even though each activity runs in a thread, they are started in order
                     ;; this ensures determinism
+                    (is (= [[] [0 test-sleep-time] [1 test-sleep-time] [2 test-sleep-time] [3 test-sleep-time] [4 test-sleep-time] [5 test-sleep-time] [6 test-sleep-time] [7 test-sleep-time] [8 test-sleep-time] [9 test-sleep-time]]
+                           (->> aargs
+                                (filter identity))))
                     (when-not
                       (is (= [[] [0 test-sleep-time] [1 test-sleep-time] [2 test-sleep-time] [3 test-sleep-time] [4 test-sleep-time] [5 test-sleep-time] [6 test-sleep-time] [7 test-sleep-time] [8 test-sleep-time] [9 test-sleep-time]]
                              (->> aargs
