@@ -39,9 +39,8 @@
 ;; validation
 
 #_:clj-kondo/ignore
-(when #?(:clj  (= "true" (System/getenv "DEV"))
-         :cljs false)
-  ((requiring-resolve 'malli.dev/start!)))
+#?(:clj (when (= "true" (System/getenv "DEV"))
+          ((requiring-resolve 'malli.dev/start!))))
 
 ;;;;
 ;; validation
