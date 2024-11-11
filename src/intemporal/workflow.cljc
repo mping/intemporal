@@ -72,11 +72,11 @@
         internal-env (merge base-env runtime)]
     ;; root task: we only enqueue workflows
     (with-env internal-env
-      (t/log! {:level :trace :_data {:task task :env internal-env}} ["Resuming workflow task with id" (:id task)])
+      (t/log! {:level :trace :_data {:task task :env internal-env}} ["Resuming task with id" (:id task)])
       (try
         (internal/resume-task internal-env store protocols task)
         (finally
-          (t/log! {:level :trace} ["Workflow task resumed"]))))))
+          (t/log! {:level :trace} ["Task resumed"]))))))
 
 (defn- worker-poll-fn
   "Continously polls for task while `task-executor` is active."
@@ -113,7 +113,6 @@
   ([store]
    (start-worker! store {}))
   ([store & {:keys [protocols polling-ms] :or {protocols {} polling-ms 100}}]
-   ;; env is dynamically binded, we capture it early so we pass it into the callbacks
    (let [run?         (atom true)
          task-counter (atom 0)]
      (p/vthread

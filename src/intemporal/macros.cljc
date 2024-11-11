@@ -52,26 +52,9 @@
   "Runs `body` within a virtual thread, returning a promise."
   [& body]
   `(binding [i/*env* (assoc i/*env* :vthread? true)]
-     ~@body)
-  #_
-  `(p/create
-     (fn [resolve# reject#]
-       (p/vthread
-         (i/try-lock!)
-         (-> (try
-               ;; the first line of the body should actually try to release the lock
-               ;; but it must happen after the dequeue of the task
-               (do ~@body)
-               (finally
-                 ;; TODO: I think releasing here causes a race, sometimes
-                 ;; vthread recovery test fails, it seems theres a race condition somewhere
-                 (i/try-release!)))
-             (p/then resolve#)
-             (p/catch reject#)
-             (p/finally (fn [_# _#]
-                          (t/log! {:level :trace} ["Requesting vthread release"])
-                          (i/try-release!))))))))
+     ~@body))
 
+(defmacro vwait [xs])
 
 (defmacro defn-workflow
   "Defines a workflow. Workflows are functions that are resillient to crashes, as
@@ -113,7 +96,11 @@
              task#   (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv# id#)]
          ;; an embedded workflow engine doesn't need to have a task per invocation
          (t/log! {:level :trace :data {:env i/*env* :task task#}}  ["Invoking task"])
-         (w/enqueue-and-wait i/*env* task#)))))
+         (let [res# (i/resume-task i/*env* store# protos# task#)]
+           (macros/case
+             :cljs res#
+             :clj (deref res#)))))))
+         ;(w/enqueue-and-wait i/*env* task#)))))
 
 (defmacro stub-protocol
   "Stub a protocol definition. Opts are currently unused.
@@ -164,7 +151,8 @@
                                     id#)]
 
                       (t/log! {:level :trace :data {:env i/*env* :task task#}}  ["Invoking task"])
-                      (w/enqueue-and-wait i/*env* task#))))))))
+                      (i/resume-task i/*env* store# protos# task#))))))))
+                      ;(w/enqueue-and-wait i/*env* task#))))))))
 
     :clj
     #_{:clj-kondo/ignore [:unresolved-symbol]}
@@ -206,7 +194,8 @@
                                   id#)]
 
                     (t/log! {:level :trace :data {:env i/*env* :task task#}}  ["Invoking task"])
-                    (w/enqueue-and-wait i/*env* task#)))))))))
+                    @(i/resume-task i/*env* store# protos# task#)))))))))
+                    ;(w/enqueue-and-wait i/*env* task#)))))))))
 
 (defmacro with-failure
   "Runs `fcall`, ensuring that if it fails, compensation will always run.

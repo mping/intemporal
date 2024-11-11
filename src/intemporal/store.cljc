@@ -278,6 +278,7 @@
                                       (sort-by :order)
                                       (first)))
                found?    (atom nil)]
+
            (swap-vals! tasks
                        (fn [v] (let [found (first-new v)]
                                  (if found

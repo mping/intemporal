@@ -94,8 +94,10 @@
              (assert (serializable? task) "task is not serializable")
              (when-not id
                (store/save-event this task-id updated-evt))
-             (validate-task updated-task)
-             (fc/set tx subspace-tasks task-id (serialize updated-task))
+             ;; not every invocation will come from a persisted task
+             (when task
+               (validate-task updated-task)
+               (fc/set tx subspace-tasks task-id (serialize updated-task)))
              updated-evt)))
 
        (find-task [this id]

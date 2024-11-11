@@ -16,7 +16,7 @@
                                          :cljs 2147483647)})
 
 (defn env->runtime []
-  (select-keys *env* [:timeout-ms :vthread?]))
+  (select-keys *env* [:timeout-ms]))
 
 (defn random-id []
   ;; debugging purposes only
@@ -86,7 +86,7 @@
 
 (defn resume-fn-task
   "Resumes a generic fn call task"
-  [{:keys [lock lockid] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
+  [{:keys [vthread?] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
   ;; TODO check if proto exists in protos
   ;; do we have invocation and result events for this task?
   (t/log! :debug ["Resuming task with id" id])
@@ -111,14 +111,20 @@
             (throw (internal-exception "Transition unexpected" {:type     (:type inv?)
                                                                 :expected invoke})))
           (finally)))
-            ;; release the lock
-            ;(t/log! {:level :trace} ["Requesting resume-task release for lock id" (:counter env)])
-            ;(try-release!))))
 
       ;; mark success/failure or replay
       (let [next-event   {:ref id :root (or root id) :type success :sym sym}
             next-failure (assoc next-event :type failure)
-
+            handle-ok    (fn [r]
+                           ;; TODO assert r is serializable!
+                           (t/log! {:level :debug :data {:fvar fvar :result r}} ["Got actual function result for task" id])
+                           (store/task<-event store id (assoc next-event :result r))
+                           r)
+            handle-fail   (fn [e]
+                            (t/log! {:level :debug :data {:fvar fvar :exception e}} ["Exception caught during actual function invocation for task" id])
+                            (when-not (internal-error? e)
+                              (store/task<-event store id (assoc next-failure :error e)))
+                            (p/rejected e))
             retval       (cond
                            (some? res?)
                            (let [success? (some? (:result res?))
@@ -131,27 +137,37 @@
 
                            (not res?)
                            ;; the p/let is mostly to deal with the (apply...) call for js runtimes
-                           (-> (p/let [impl? (if (= :proto-activity type)
-                                               (get protos proto)
-                                               nil)
-                                       args' (if (= :proto-activity type)
-                                               (cons impl? args)
-                                               args)
-                                       r     (binding [*env* (merge default-env env)]
-                                               (let [{:keys [vthread?]} *env*]
-                                                 (t/log! {:level :debug :data {:vthread? vthread? :fvar fvar :args args'}} ["Calling actual function for task" id])
-                                                 (if vthread?
-                                                   ;; TODO should actually queue execution so that
-                                                   ;; all vthreads have a chance to run
-                                                   (p/vthread
-                                                     (apply fvar args'))
-                                                   (apply fvar args'))))]
+                           (-> (let [impl? (if (= :proto-activity type)
+                                             (get protos proto)
+                                             nil)
+                                     args' (if (= :proto-activity type)
+                                             (cons impl? args)
+                                             args)
+                                     r     (binding [*env* (merge default-env env)]
+                                             (t/log! {:level :debug :data {:fvar fvar :args args'}} ["Calling actual function for task" id])
+                                             (if vthread?
+                                               ;; cljs we dont need delay bc its single threaded
+                                               (#?(:cljs do :clj delay)
+                                                 (-> (p/vthread
+                                                       (binding [*env* (dissoc env :vthread?)]
+                                                         (apply fvar args')))
+                                                     (p/then handle-ok)
+                                                     (p/catch handle-fail)))
+                                               (-> nil
+                                                   (p/then (fn [_] (binding [*env* env]
+                                                                     (apply fvar args'))))
+                                                   (p/then' handle-ok)
+                                                   (p/catch handle-fail))))]
+                                 ;; r can be a value or a promise
                                  r)
+                               #_
                                (p/then
                                  (fn [r]
+                                   ;; TODO assert r is serializable!
                                    (t/log! {:level :debug :data {:fvar fvar :result r}} ["Got actual function result for task" id])
                                    (store/task<-event store id (assoc next-event :result r))
                                    r))
+                               #_
                                (p/catch
                                  (fn [e]
                                    (t/log! {:level :debug :data {:fvar fvar :exception e}} ["Exception caught during actual function invocation for task" id])
@@ -205,7 +221,5 @@
 
         prom (store/await-task store (:id t) opts)]
 
-    ;; await for task to be completed
-    ;; in cljs there are no blocking ops, so we return the result promise
     #?(:clj  (deref prom)
        :cljs prom)))
