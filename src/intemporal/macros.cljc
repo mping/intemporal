@@ -200,7 +200,7 @@
 (defmacro with-failure
   "Runs `fcall`, ensuring that if it fails, compensation will always run.
   - if `fcall` fails, `binding` will have the value `intemporal.activity/failure`.
-  - if `fcall` succeeds, but later compensation is invoked, `binding` will have its return value
+  - if `fcall` succeeds, but compensation is invoked later (eg other activity failure), `binding` will have its return value
 
   (with-failure [v (book-hotel stub \"hotel\")]
     (cancel-hotel stub v n))
