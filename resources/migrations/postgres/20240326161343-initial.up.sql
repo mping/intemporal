@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     args      bytea       NULL,
     result    bytea       NULL,
     state     varchar(20) NOT NULL,
+    owner     varchar(50),
     lease_end timestamp,
     runtime   bytea,
     PRIMARY KEY (id),

@@ -75,7 +75,7 @@
                   ;; cljs is promise based, so stubs dont run in lexical order
                   ;; due to p/let
                   #?(:clj  [w1 a1 n1 n2 a2 p1 p2 w2]
-                     :cljs [w1 a1 p1 n1 p2 n2 a2 w2]) evts]
+                     :cljs [w1 a1 p1 p2 n1 n2 a2 w2]) evts]
 
               (pprint/print-table evts)
 
@@ -99,8 +99,8 @@
             (let [tasks (store/list-tasks mstore)
                   ;; due to promises,
                   ;; the order of execution is not exactly the same between clj/cljs
-                  #?(:clj  [w1 #_#_#_a1 n1 p1]
-                     :cljs [w1 #_#_#_a1 p1 n1]) tasks]
+                  #?(:clj  [w1 a1 n1 p1]
+                     :cljs [w1 a1 p1 n1]) tasks]
               (pprint/print-table tasks)
 
               (testing "workflow task"
@@ -115,3 +115,6 @@
           (finally
             (stop-worker)))))))
 
+#_ :clj-kondo/ignore
+(comment
+  (cljs.test/run-tests *ns*))

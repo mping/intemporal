@@ -1,7 +1,8 @@
 {:paths   ["src" "target"]
  :deps    {org.clojure/clojure      {:mvn/version "1.11.4"}
            thheller/shadow-cljs     {:mvn/version "2.28.11"}
-           com.taoensso/telemere    {:mvn/version "1.0.0-beta25"}
+           com.taoensso/telemere    {:mvn/version "1.0.0-RC1"}
+           com.taoensso/nippy        {:mvn/version "3.4.2"}
            ;;stuff
            net.cgrand/macrovich     {:mvn/version "0.2.2"}
            funcool/promesa          {:mvn/version "11.0.678"}
@@ -15,12 +16,11 @@
                                 lambdaisland/kaocha-junit-xml            {:mvn/version "1.17.101"}
                                 ;lambdaisland/kaocha-cljs2     {:mvn/version "0.1.58"}
                                 com.lambdaisland/kaocha-cljs             {:mvn/version "1.5.154"}
-                                ch.qos.logback/logback-classic           {:mvn/version "1.5.7"}
+                                ch.qos.logback/logback-classic           {:mvn/version "1.5.12"}
                                 tortue/spy                               {:mvn/version "2.15.0"}
                                 nubank/matcher-combinators               {:mvn/version "3.9.1"}
-                                com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.2.2"}}}
+                                com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.4.0"}}}
            :fdb  {:extra-deps {org.foundationdb/fdb-java {:mvn/version "7.1.31"}
-                               com.taoensso/nippy        {:mvn/version "3.4.2"}
                                me.vedang/clj-fdb         {:mvn/version "0.3.0"}}}
 
            :jdbc {:extra-deps {com.github.seancorfield/next.jdbc {:mvn/version "1.3.939"}

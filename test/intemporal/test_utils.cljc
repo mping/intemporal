@@ -20,14 +20,14 @@
                             args   []
                             result nil
                             state  :new}}]
-  (-> (cond
-        (= type :workflow)
-        (in/create-workflow-task ref root sym fvar args id result state nil)
-        (= type :activity)
-        (in/create-activity-task ref root sym fvar args id result state nil)
-        (= type :proto-activity)
-        (in/create-proto-activity-task proto ref root sym fvar args id result state nil))
-      (in/validate-task)))
+  (cond
+    (= type :workflow)
+    (in/create-workflow-task ref root sym fvar args id result state nil)
+    (= type :activity)
+    (in/create-activity-task ref root sym fvar args id result state nil)
+    (= type :proto-activity)
+    (in/create-proto-activity-task proto ref root sym fvar args id result state nil)
+    :else (throw (ex-info (str "Unknown task type:" type) {:type type}))))
 
 (defn make-workflow-task [& {:keys [] :as args}]
   (make-task (assoc args :type :workflow)))

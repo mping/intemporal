@@ -3,7 +3,6 @@
            :kaocha.plugin/filter
            :kaocha.plugin/capture-output
            :kaocha.plugin/junit-xml
-           #_
            :kaocha.plugin/cloverage]
  :reporter [kaocha.report/documentation]
  :color? true
@@ -14,23 +13,23 @@
                   :lcov? true,
                   :high-watermark 80,
                   :fail-threshold 0,
-                  :output "target/coverage",
-                  :low-watermark 50,
-                  :ns-regex [],
-                  :summary? true,
-                  :coveralls? false,
-                  :emma-xml? false,
-                  :html? true,
-                  :nop? false,
-                  :codecov? true}
- :tests [{:id   :unit
-          :ns-patterns   ["-test$"]
-          :source-paths  ["src"]
-          :test-paths    ["test"]}
+                  :output #or [#env CLOVERAGE_OUTPUT "target/coverage"],
+                  :low-watermark    50,
+                  :ns-regex         [],
+                  :summary?         true,
+                  :coveralls?       false,
+                  :emma-xml?        false,
+                  :html?            true,
+                  :nop?             false,
+                  :codecov?         true}
+ :tests [{:id           :unit
+          :ns-patterns  ["-test$"]
+          :source-paths ["src"]
+          :test-paths   ["test"]}
 
-         {:id :unit-cljs
+         {:id   :unit-cljs
           :type :kaocha.type/cljs}]}
-          ;; :test-paths ["test"]
-          ;; :cljs/timeout 10000                        ; 10 seconds, the default
-          ;; :cljs/repl-env cljs.repl.node/repl-env     ; node is the default
-          ;; :cljs/repl-env cljs.repl.browser/repl-env
+;; :test-paths ["test"]
+;; :cljs/timeout 10000                        ; 10 seconds, the default
+;; :cljs/repl-env cljs.repl.node/repl-env     ; node is the default
+;; :cljs/repl-env cljs.repl.browser/repl-env

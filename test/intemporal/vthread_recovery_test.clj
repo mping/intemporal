@@ -33,9 +33,9 @@
 
 (deftest vthread-recovery-test
   ;; make a backup of the db to allow replay
-  (io/copy (io/file "./dev/intemporal/vthread-recovery.edn")
+  (io/copy (io/file "./test/intemporal/vthread-recovery.edn")
            (io/file "/tmp/intemporal-vthread-recovery.edn"))
-  (let [mstore  (store/make-store "/tmp/intemporal-vthread-recovery.edn" {})
+  (let [mstore  (store/make-store {:file "/tmp/intemporal-vthread-recovery.edn"})
         stop-fn (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
         print-tables (fn []
                        (let [tasks  (store/list-tasks mstore)
@@ -44,9 +44,9 @@
                          (pprint/print-table tasks)
                          (pprint/print-table events)))]
     
-    ;; wait a bit; we dont have facilities to query workflow state
     (store/reenqueue-pending-tasks mstore println)
-    (Thread/sleep 1000)
+    ;; wait a bit; we dont have facilities to query workflow state
+    (Thread/sleep 2000)
     (print-tables)
 
     (testing "linear history"

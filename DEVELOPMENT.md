@@ -2,7 +2,6 @@
 
 ```shell
 npx shadow-cljs watch dev
-
 ```
 
 Observe browser window open with a message like:
@@ -13,7 +12,6 @@ The, connect and select the appropriate shadow repl.
 ```clojure
 (require '[shadow.cljs.devtools.api :as shadow])
 (shadow/browser-repl)
-```
 
 # doc
 

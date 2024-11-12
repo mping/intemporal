@@ -1,5 +1,6 @@
 (ns intemporal.store
   (:require [clojure.tools.reader.edn :as edn]
+            [intemporal.store.internal :refer [validate-task validate-event]]
             [promesa.core :as p]
             [taoensso.telemere :as t]
             #?(:clj [clojure.java.io :as io]))
@@ -85,8 +86,9 @@
 (defn make-store
   "Creates a new memory-based store"
   ([]
-   (make-store nil nil))
-  ([file readers]
+   (make-store nil))
+  ([{:keys [owner file readers]
+     :or {owner "intemporal"}}]
    ;; TODO use single atom?
    (let [tasks       (atom {})
          history     (atom {})
@@ -114,7 +116,9 @@
 
          update-task (fn [this id & kvs]
                        (when-let [w (find-task this id)]
-                         (swap! tasks assoc id (apply assoc w kvs))))]
+                         (->> (apply assoc w kvs)
+                              (validate-task)
+                              (swap! tasks assoc id))))]
 
      ;; deser the db
      (when file
@@ -147,6 +151,7 @@
          (apply concat (vals @history)))
        (save-event [this task-id event]
          (let [evt+id (assoc event :id (swap! counter inc))]
+           (validate-event evt+id)
            (swap! history (fn [v]
                             (assoc v task-id (-> (or (get v task-id) [])
                                                  (conj evt+id)))))
@@ -211,6 +216,7 @@
          (await-task this id {:timeout-ms default-lease}))
 
        (await-task [this id {:keys [timeout-ms] :as opts}]
+         ;; TODO handle internal errors? use a separate state?
          (let [task        (find-task this id)
                deferred    (p/deferred)
                completed?  (fn [{:keys [state]}]
@@ -220,7 +226,6 @@
                              (cond
                                (= :success state) (p/resolved result)
                                (= :failure state) (p/rejected result)
-                               ;; TODO throw internal error
                                :else (p/rejected (ex-info "Unknown state" {:task task}))))]
 
            (if (completed? task)
@@ -254,6 +259,8 @@
                               (assoc task :state :new)))))))
 
        (enqueue-task [this task]
+         ;; TODO use owner
+         (validate-task task)
          (swap! tasks assoc
                 (:id task) (assoc task :order (swap! tcounter inc)))
          #?(:cljs (register this (:sym task) (:fvar task)))
@@ -263,6 +270,7 @@
          (dequeue-task this {:lease-ms nil}))
 
        (dequeue-task [this {:keys [lease-ms]}]
+         ;; TODO check owner
          (let [first-new (fn [v] (->> (vals v)
                                       (filter #(or (= :new (:state %))
                                                    (some-> (:lease-end %)
@@ -270,6 +278,7 @@
                                       (sort-by :order)
                                       (first)))
                found?    (atom nil)]
+
            (swap-vals! tasks
                        (fn [v] (let [found (first-new v)]
                                  (if found

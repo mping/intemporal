@@ -75,14 +75,3 @@
 
             (finally
               (cancel-worker))))))))
-
-
-(comment
-  (require '[clj-async-profiler.core :as prof])
-  (prof/serve-ui 8080)
-  (let [s (store/make-store)]
-    (w/start-worker! s {:protocols {`ProtocolActivity example-impl}})
-    (prof/profile
-      (w/with-env {:store s}
-                  (run-workflow))))
-  "")

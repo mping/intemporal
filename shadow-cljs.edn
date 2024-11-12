@@ -1,5 +1,5 @@
 ;; shadow-cljs configuration
-{:deps {:aliases [:cljs :dev :doc]}
+{:deps {:aliases [:cljs :dev :doc :fdb]}
  :nrepl {:init-ns intemporal.dev}
  :dev-http {8000 "public"}
  :builds {:doc {:target :browser

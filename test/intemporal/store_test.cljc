@@ -63,7 +63,7 @@
   (testing "watch task"
     (let [store   (s/make-store)
           task    (tu/make-workflow-task)
-          evt     {:ref 'ref :root 'root :type :invoke :args []}
+          evt     {:ref "some-ref" :root "some-root" :type :intemporal.workflow/invoke :sym 'identity :args []}
           called? (p/deferred)]
 
       (is-promise-ok (p/timeout called? 1000))
