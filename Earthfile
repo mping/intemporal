@@ -1,0 +1,54 @@
+VERSION 0.8
+FROM clojure:temurin-21-jammy
+
+RUN apt update
+RUN apt install -y rlwrap curl unzip wget
+
+### nodejs
+RUN curl -sL https://deb.nodesource.com/setup_20.x  | bash - && apt-get install -y nodejs
+
+WORKDIR /build
+COPY --dir .clj-kondo build bin dev src doc test  /build
+
+### clj-kondo
+RUN curl -sLO https://raw.githubusercontent.com/clj-kondo/clj-kondo/master/script/install-clj-kondo
+RUN chmod +x install-clj-kondo
+RUN ./install-clj-kondo
+
+deps:
+  # copy all relevant files
+  COPY deps.edn tests.edn shadow-cljs.edn package.json /build
+  CACHE ./node_modules
+  CACHE ~/.m2
+  RUN clj -Stree
+  RUN npm install
+  RUN wget https://github.com/apple/foundationdb/releases/download/7.1.31/foundationdb-clients_7.1.31-1_amd64.deb
+  RUN dpkg -i foundationdb-clients_7.1.31-1_amd64.deb
+  RUN echo "docker:docker@127.0.0.1:4500" > /etc/foundationdb/fdb.cluster
+
+build:
+  FROM +deps
+  RUN clj -T:build compile-main
+  RUN clj -T:build compile-dev
+  RUN clj -T:build jar
+  RUN npx shadow-cljs compile doc
+  RUN clj-kondo --parallel --lint src
+  RUN clj-kondo --parallel --lint test
+
+test:
+  FROM +build
+  DO github.com/earthly/lib+INSTALL_DIND
+  COPY docker ./docker
+  COPY docker-compose.yml ./
+  WITH DOCKER --compose docker-compose.yml
+    RUN bin/run_coverage
+  END
+
+# dev targets
+dev-up:
+    LOCALLY
+    RUN docker-compose up
+
+dev-down:
+    LOCALLY
+    RUN docker-compose down
