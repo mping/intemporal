@@ -99,17 +99,18 @@
          vars        (atom {})
 
          ;;persistence
-         persist!    (fn [_ _ _ _] (when file
-                                     (try
-                                       (t/log! :debug ["Persisting store to file" file])
-                                       (write-edn file {:tasks    @tasks
-                                                        :history  @history
-                                                        :counter  @counter
-                                                        :pcounter @pcounter
-                                                        :ecounter @ecounter})
-                                       (catch #?(:clj Exception :cljs js/Error) e
-                                         #?(:clj  (.printStackTrace e)
-                                            :cljs (js/console.error e))))))
+         persist!    (fn [k ref old new]
+                       (when (and file (not= old new))
+                         (try
+                           (t/log! :debug ["Persisting store to file" file])
+                           (write-edn file {:tasks    @tasks
+                                            :history  @history
+                                            :counter  @counter
+                                            :pcounter @pcounter
+                                            :ecounter @ecounter})
+                           (catch #?(:clj Exception :cljs js/Error) e
+                             #?(:clj  (.printStackTrace e)
+                                :cljs (js/console.error e))))))
 
          find-task   (fn [this id]
                        (get @tasks id))

@@ -1,14 +1,13 @@
 VERSION 0.8
-FROM clojure:temurin-21-jammy
+FROM clojure:temurin-23-noble
 
 RUN apt update
-RUN apt install -y rlwrap curl unzip wget
+RUN apt install -y rlwrap curl unzip wget lcov
 
 ### nodejs
 RUN curl -sL https://deb.nodesource.com/setup_20.x  | bash - && apt-get install -y nodejs
 
 WORKDIR /build
-COPY --dir .clj-kondo build bin dev src doc test  /build
 
 ### clj-kondo
 RUN curl -sLO https://raw.githubusercontent.com/clj-kondo/clj-kondo/master/script/install-clj-kondo
@@ -28,6 +27,10 @@ deps:
 
 build:
   FROM +deps
+
+  # copy src here cause we want to maximize chance to cache deps
+  COPY --dir .clj-kondo build bin dev src doc test resources /build
+  
   RUN clj -T:build compile-main
   RUN clj -T:build compile-dev
   RUN clj -T:build jar
@@ -41,8 +44,9 @@ test:
   COPY docker ./docker
   COPY docker-compose.yml ./
   WITH DOCKER --compose docker-compose.yml
-    RUN bin/run_coverage
+    RUN bin/run-coverage
   END
+  SAVE ARTIFACT coverage AS LOCAL coverage
 
 # dev targets
 dev-up:

@@ -20,6 +20,7 @@
   },
   "homepage": "https://github.com/mping/intemporal#readme",
   "devDependencies": {
+    "@chrisoakman/standard-clojure-style": "^0.14.0",
     "shadow-cljs": "^2.20.7"
   },
   "engines": {

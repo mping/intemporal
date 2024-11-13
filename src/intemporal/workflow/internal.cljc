@@ -15,10 +15,14 @@
                   :timeout-ms         #?(:clj  Long/MAX_VALUE
                                          :cljs 2147483647)})
 
-(defn env->runtime []
+(defn- env->runtime
+  "Derives the `runtime` attrs from the current env."
+  []
   (select-keys *env* [:timeout-ms]))
 
-(defn random-id []
+(defn random-id
+  "Generates a random id. if env var `DEV` is defined, generates a two-word human-readable id."
+  []
   ;; debugging purposes only
   ;; https://github.com/moby/moby/blob/master/pkg/namesgenerator/names-generator.go
   ;; TODO use https://github.com/adzerk-oss/env ?
@@ -29,7 +33,9 @@
       (str (rand-nth left) "-" (rand-nth right)))
     (str (random-uuid))))
 
-(defmacro with-env-internal [m & body]
+(defmacro with-env-internal
+  "Merges `m` on top of the current internal environment, then runs `body` with the new environment."
+  [m & body]
   `(binding [*env* (merge default-env ~m)]
      (do ~@body)))
 
@@ -46,14 +52,6 @@
 ;;;;
 ;; Tasks
 
-;;   type: workflow|activity|proto-activity
-;;     id: unique identifier
-;;    ref: what task triggered execution
-;;   root: parent trigger
-;;    sym: the fn being executed
-;;   fvar: the function var, to call (apply fvar
-;; result: either a value, or error
-;;  state: state of task new|pending|failure|success
 (defn create-workflow-task
   ([ref root sym fvar args id]
    (create-workflow-task ref root sym fvar args id nil :new nil))

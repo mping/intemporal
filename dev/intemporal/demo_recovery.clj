@@ -2,7 +2,6 @@
   (:require [clojure.java.io :as io]
             [intemporal.store :as store]
             [intemporal.workflow :as w]
-            [intemporal.workflow.internal :as i]
             [intemporal.macros :refer [stub-function defn-workflow]]))
 
 ;;;;

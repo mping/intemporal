@@ -66,8 +66,10 @@
 
 #?(:cljs
    (def with-trace-logging {:before (fn []
+                                      #_:clj-kondo/ignore
                                       (telemere/set-min-level! :trace))})
    :clj
    (defn with-trace-logging [f]
+     #_:clj-kondo/ignore
      (telemere/set-min-level! :trace)
      (f)))
