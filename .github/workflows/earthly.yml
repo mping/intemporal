@@ -1,0 +1,32 @@
+name: Earthly CI
+
+on: [push]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  checks: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: earthly/actions-setup@v1
+        with:
+          version: v0.8.0
+      - uses: actions/checkout@v4
+      - name: Run build
+        run: earthly -P --ci +test
+      - name: Test Report
+        uses: mikepenz/action-junit-report@v4
+        if: success() || failure()
+        with:
+          include_passed: true
+          report_paths: '**/target/test-reports/report.xml'
+
+

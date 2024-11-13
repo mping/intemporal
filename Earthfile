@@ -47,6 +47,7 @@ test:
     RUN bin/run-coverage
   END
   SAVE ARTIFACT coverage AS LOCAL coverage
+  SAVE ARTIFACT target AS LOCAL target
 
 # dev targets
 dev-up:

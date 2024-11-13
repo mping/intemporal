@@ -54,6 +54,8 @@
 ;;;;
 ;; helpers
 
+;; TODO dont rely on js/window, nodejs doesnt have window
+
 #_:clj-kondo/ignore
 (defn now []
   #?(:clj  (System/currentTimeMillis)
@@ -66,19 +68,19 @@
   #?(:clj  (or fvar (requiring-resolve sym))
      :cljs (or fvar (lookup store sym))))
 
-(defn- read-edn [file readers]
+(defn- edn-exists? [file]
+  #?(:clj  (.exists (File. ^String file))
+     :cljs (seq (.getItem (.-localStorage js/window) file))))
+
+(defn read-edn [file readers]
   #?(:clj  (with-open [f (io/reader file)]
              (edn/read-string {:readers readers} (slurp f)))
      :cljs (let [f (.getItem (.-localStorage js/window) file)]
              (edn/read-string {:readers readers} f))))
 
-(defn- write-edn [file val]
+(defn write-edn [file val]
   #?(:clj  (spit file val)
      :cljs (.setItem (.-localStorage js/window) file (pr-str val))))
-
-(defn- edn-exists? [file]
-  #?(:clj  (.exists (File. ^String file))
-     :cljs (seq (.getItem (.-localStorage js/window) file))))
 
 ;;;;
 ;; main impl
@@ -101,16 +103,12 @@
          ;;persistence
          persist!    (fn [k ref old new]
                        (when (and file (not= old new))
-                         (try
-                           (t/log! :debug ["Persisting store to file" file])
-                           (write-edn file {:tasks    @tasks
-                                            :history  @history
-                                            :counter  @counter
-                                            :pcounter @pcounter
-                                            :ecounter @ecounter})
-                           (catch #?(:clj Exception :cljs js/Error) e
-                             #?(:clj  (.printStackTrace e)
-                                :cljs (js/console.error e))))))
+                         (t/log! :debug ["Persisting store to file" file])
+                         (write-edn file {:tasks    @tasks
+                                          :history  @history
+                                          :counter  @counter
+                                          :pcounter @pcounter
+                                          :ecounter @ecounter})))
 
          find-task   (fn [this id]
                        (get @tasks id))

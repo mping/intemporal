@@ -13,9 +13,9 @@
                      [intemporal.test-utils :as tu]
                      [matcher-combinators.test :refer [match?]]))
   #?(:cljs (:require-macros [intemporal.macros :refer [env-let stub-function stub-protocol defn-workflow]]
-                            [intemporal.test-utils :refer [with-promise?]])
+                            [intemporal.test-utils :refer [with-result]])
      :clj  (:require [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]
-                     [intemporal.test-utils :refer [with-promise?]])))
+                     [intemporal.test-utils :refer [with-result]])))
 
 (t/use-fixtures :once tu/with-trace-logging)
 
@@ -56,15 +56,11 @@
 (deftest workflow-happy-path-test
   (testing "workflow"
     (let [mstore       (store/make-store)
-          stop-worker  (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})
+          stop-worker  (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
 
-          v            (w/with-env {:store mstore}
-                         (my-workflow 1))]
-
-      ;; cljs runtimes return promises
-      ;; clj runtime will run synchronously
-      (with-promise? v
-        (try
+      (try
+        (with-result [v (w/with-env {:store mstore}
+                          (my-workflow 1))]
           (testing "workflow result"
             (is (= [:root [:sub :nested] [:proto :pr]]
                    v)))
@@ -104,16 +100,16 @@
               (pprint/print-table tasks)
 
               (testing "workflow task"
-                (is (match? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1)))))
+                (is (match? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1))))))
 
-              ;(testing "activity task"
-              ;  (is (match? {:type :activity :sym 'intemporal.workflow-test/activity-fn :state :success :result [:sub :nested]} a1)))
-              ;(testing "nested activty task"
-              ;  (is (match? {:type :activity :sym 'intemporal.workflow-test/nested-fn :state :success :result [:sub :nested]} n1)))
-              ;(testing "protocol activity task"
-              ;  (is (match? {:type :proto-activity :sym 'intemporal.workflow-test/some-stuff :state :success :result [:proto :pr]} p1)))))
-          (finally
-            (stop-worker)))))))
+          ;(testing "activity task"
+          ;  (is (match? {:type :activity :sym 'intemporal.workflow-test/activity-fn :state :success :result [:sub :nested]} a1)))
+          ;(testing "nested activty task"
+          ;  (is (match? {:type :activity :sym 'intemporal.workflow-test/nested-fn :state :success :result [:sub :nested]} n1)))
+          ;(testing "protocol activity task"
+          ;  (is (match? {:type :proto-activity :sym 'intemporal.workflow-test/some-stuff :state :success :result [:proto :pr]} p1)))))
+        (finally
+          (stop-worker))))))
 
 #_ :clj-kondo/ignore
 (comment
