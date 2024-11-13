@@ -17,18 +17,18 @@
     (conj a :activity v)))
 
 (defprotocol MyActivities
-  (some-stuff [this a]))
+  (foo [this a]))
 
 (defrecord MyActivitiesImpl []
   MyActivities
-  (some-stuff [this a] (println "record was called:") [a :child]))
+  (foo [this a] (println "record was called:") [a :child]))
 
 (defn-workflow my-workflow [i]
   (let [sf   (stub-function activity-fn)
         pr   (stub-protocol MyActivities {})
 
         sres (sf [1])
-        pres (some-stuff pr :X)]
+        pres (foo pr :X)]
     (p/let [v1 sres
             v2 pres]
       (conj [:root]

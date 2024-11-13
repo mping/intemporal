@@ -2,6 +2,7 @@
   (:require [intemporal.workflow.internal :as in]
             [promesa.core :as p]
             [taoensso.telemere :as telemere]
+            #?(:cljs [cljs.test :as t])
             #?(:clj [net.cgrand.macrovich :as macros]))
   #?(:cljs (:require-macros [net.cgrand.macrovich :as macros])))
 
@@ -60,11 +61,18 @@
          ~@body)
       :cljs
       `(t/async done#
-         (p/finally (do ~resbody)
-                    (fn [res# err#]
-                      (let [~res (or res# err#)]
-                        (do ~@body))
-                      (done#)))))))
+         (js/setTimeout
+           (fn []
+             ;; force wrap resbody in a deferred
+             (p/finally (-> nil
+                            (p/then (fn [_#] (do ~resbody)))
+                            (p/timeout 1000))
+                        (fn [res# err#]
+                          (let [~res (or res# err#)]
+                            ;; TODO maybe wrap or throw if err is present
+                            (do ~@body))
+                          (done#)))
+             0))))))
 
 #?(:cljs
    (def with-trace-logging {:before (fn []
