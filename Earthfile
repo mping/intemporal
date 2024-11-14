@@ -62,8 +62,8 @@ test:
   WITH DOCKER --compose docker-compose.yml
     RUN bin/run-coverage
   END
-  SAVE ARTIFACT coverage AS LOCAL coverage
-  SAVE ARTIFACT target AS LOCAL target
+  SAVE ARTIFACT ./coverage AS LOCAL ./coverage
+  SAVE ARTIFACT ./target AS LOCAL ./target
 
 # dev targets
 dev-up:
