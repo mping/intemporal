@@ -8,7 +8,7 @@ services:
     volumes:
       - ./docker/fdb-init.bash:/fdb-init.bash
       - ./docker/fdb.bash:/var/fdb/scripts/fdb.bash
-      - ./docker:/var/fdb/run:rw      
+      - ./docker:/var/fdb/run:rw
     ports:
       - 4500:4500/tcp
 

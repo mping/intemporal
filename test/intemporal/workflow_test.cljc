@@ -13,9 +13,9 @@
                      [intemporal.test-utils :as tu]
                      [matcher-combinators.test :refer [match?]]))
   #?(:cljs (:require-macros [intemporal.macros :refer [env-let stub-function stub-protocol defn-workflow]]
-                            [intemporal.test-utils :refer [with-promise?]])
+                            [intemporal.test-utils :refer [with-result]])
      :clj  (:require [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]
-                     [intemporal.test-utils :refer [with-promise?]])))
+                     [intemporal.test-utils :refer [with-result]])))
 
 (t/use-fixtures :once tu/with-trace-logging)
 
@@ -32,17 +32,17 @@
        (f :sub))))
 
 (defprotocol MyActivities
-  (some-stuff [this a]))
+  (foo [this a]))
 
 (defrecord MyActivitiesImpl []
   MyActivities
-  (some-stuff [this a] [:proto a]))
+  (foo [this a] [:proto a]))
 
 (defn-workflow my-workflow [i]
   (let [sf  (stub-function activity-fn)
         pr  (stub-protocol MyActivities {})
         sfr (sf 1)
-        prr (some-stuff pr :pr)]
+        prr (foo pr :pr)]
 
     ;; chain values: ensure tests work under cljs too
     #_:clj-kondo/ignore
@@ -56,15 +56,11 @@
 (deftest workflow-happy-path-test
   (testing "workflow"
     (let [mstore       (store/make-store)
-          stop-worker  (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})
+          stop-worker  (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
 
-          v            (w/with-env {:store mstore}
-                         (my-workflow 1))]
-
-      ;; cljs runtimes return promises
-      ;; clj runtime will run synchronously
-      (with-promise? v
-        (try
+      (try
+        (with-result [v (w/with-env {:store mstore}
+                          (my-workflow 1))]
           (testing "workflow result"
             (is (= [:root [:sub :nested] [:proto :pr]]
                    v)))
@@ -92,8 +88,8 @@
                 (is (match? {:type :intemporal.activity/success :sym 'intemporal.workflow-test/nested-fn} n2)))
 
               (testing "protocol activity events"
-                (is (match? {:type :intemporal.protocol/invoke :sym 'intemporal.workflow-test/some-stuff :args [:pr]} p1))
-                (is (match? {:type :intemporal.protocol/success :sym 'intemporal.workflow-test/some-stuff} p2)))))
+                (is (match? {:type :intemporal.protocol/invoke :sym 'intemporal.workflow-test/foo :args [:pr]} p1))
+                (is (match? {:type :intemporal.protocol/success :sym 'intemporal.workflow-test/foo} p2)))))
 
           (testing "stored tasks"
             (let [tasks (store/list-tasks mstore)
@@ -104,16 +100,16 @@
               (pprint/print-table tasks)
 
               (testing "workflow task"
-                (is (match? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1)))))
+                (is (match? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1))))))
 
-              ;(testing "activity task"
-              ;  (is (match? {:type :activity :sym 'intemporal.workflow-test/activity-fn :state :success :result [:sub :nested]} a1)))
-              ;(testing "nested activty task"
-              ;  (is (match? {:type :activity :sym 'intemporal.workflow-test/nested-fn :state :success :result [:sub :nested]} n1)))
-              ;(testing "protocol activity task"
-              ;  (is (match? {:type :proto-activity :sym 'intemporal.workflow-test/some-stuff :state :success :result [:proto :pr]} p1)))))
-          (finally
-            (stop-worker)))))))
+          ;(testing "activity task"
+          ;  (is (match? {:type :activity :sym 'intemporal.workflow-test/activity-fn :state :success :result [:sub :nested]} a1)))
+          ;(testing "nested activty task"
+          ;  (is (match? {:type :activity :sym 'intemporal.workflow-test/nested-fn :state :success :result [:sub :nested]} n1)))
+          ;(testing "protocol activity task"
+          ;  (is (match? {:type :proto-activity :sym 'intemporal.workflow-test/foo :state :success :result [:proto :pr]} p1)))))
+        (finally
+          (stop-worker))))))
 
 #_ :clj-kondo/ignore
 (comment

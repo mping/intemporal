@@ -42,18 +42,18 @@ Examples:
     (conj a :activity (f :sub))))
 
 (defprotocol MyActivities
-  (some-stuff [this a]))
+  (foo [this a]))
 
 (defrecord MyActivitiesImpl []
   MyActivities
-  (some-stuff [this a] (println "record was called:" ) [a :child]))
+  (foo [this a] (println "record was called:" ) [a :child]))
 
 (defn-workflow my-workflow [i]
   (let [sf (stub-function activity-fn)
         pr (stub-protocol MyActivities {})]
     (conj [:root]
           (sf [1])
-          (some-stuff pr :X))))
+          (foo pr :X))))
 
 (def mstore (store/make-memstore))
 (def worker (w/start-worker! mstore {`MyActivities (->MyActivitiesImpl)}))

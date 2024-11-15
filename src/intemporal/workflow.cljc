@@ -82,6 +82,7 @@
   "Continously polls for task while `task-executor` is active."
   [store protocols task-executor polling-ms]
   (let [task-counter (atom 0)]
+    #_{:clj-kondo/ignore [:loop-without-recur :invalid-arity]}
     (p/loop []
       (-> (p/delay polling-ms)
           (p/chain (fn [_]
@@ -116,6 +117,7 @@
    (let [run?         (atom true)
          task-counter (atom 0)]
      (p/vthread
+       #_{:clj-kondo/ignore [:loop-without-recur :invalid-arity]}
        (p/loop []
          (-> (p/delay polling-ms)
              (p/chain (fn [_]

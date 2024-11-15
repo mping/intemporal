@@ -2,8 +2,8 @@
   (:require [intemporal.workflow.internal :as in]
             [promesa.core :as p]
             [taoensso.telemere :as telemere]
-    #?(:cljs [cljs.test :as t])
-    #?(:clj [net.cgrand.macrovich :as macros]))
+            #?(:cljs [cljs.test :as t])
+            #?(:clj [net.cgrand.macrovich :as macros]))
   #?(:cljs (:require-macros [net.cgrand.macrovich :as macros])))
 
 ;;;;
@@ -41,33 +41,45 @@
 ;;;;
 ;; macros
 
-(defmacro with-promise?
-  "Waits for `val` before running `body`. Mostly for cljs & promise-based values.
-  Usage.
+(defmacro with-result
+  "Promise-aware macro: the result can either be a value or a thrown exception.
+  Doesn't really work for exceptions returned as values
   ```
-  (with-result some-promise
-    (try (is (= :resolved some-promise))
-      (finally (cleanup)))
+  (with-result [r (my-worfklow 1)]
+    (is (instance? Exception r))
+    (is (= 1 2)))
   ```
   "
-  [val & body]
-  (assert (symbol? val) "first argument should be a symbol")
-  (macros/case
-    :clj
-    `(do ~@body)
-    :cljs
-    `(t/async done#
-       (p/finally ~val
-                  (fn [res# c#]
-                    (t/is (nil? c#))
-                    (let [~val res#]
-                      (do ~@body))
-                    (done#))))))
+  [bindings & body]
+  (assert (vector? bindings) "first argument should be a binding of [res resbody]")
+  (let [[res resbody] bindings]
+    (macros/case
+      :clj
+      `(let [~res (try (do ~resbody)
+                       (catch Exception e#
+                         e#))]
+         ~@body)
+      :cljs
+      `(t/async done#
+         (js/setTimeout
+           (fn []
+             ;; force wrap resbody in a deferred
+             (p/finally (-> nil
+                            (p/then (fn [_#] (do ~resbody)))
+                            (p/timeout 1000))
+                        (fn [res# err#]
+                          (let [~res (or res# err#)]
+                            ;; TODO maybe wrap or throw if err is present
+                            (do ~@body))
+                          (done#)))
+             0))))))
 
 #?(:cljs
    (def with-trace-logging {:before (fn []
+                                      #_:clj-kondo/ignore
                                       (telemere/set-min-level! :trace))})
    :clj
    (defn with-trace-logging [f]
+     #_:clj-kondo/ignore
      (telemere/set-min-level! :trace)
      (f)))

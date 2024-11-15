@@ -3,8 +3,12 @@
            intemporal.macros/env-let clojure.core/let
            intemporal.macros/with-failure clojure.core/let
            intemporal.store.foundationdb/with-tx clojure.core/with-open
-           promesa.core/let clojure.core/let}
- :linters {:unresolved-symbol {:exclude [(clojure.test/is [thrown-ex-info-type?])]}
+           intemporal.test-utils/with-result clojure.core/let
+           promesa.core/let clojure.core/let
+           promesa.core/loop clojure.core/loop
+           promesa.core/recur clojure.core/recur}
+ :linters {:unresolved-symbol {:exclude [(clojure.test/is [fails-with-msg?])
+                                         (cljs.test/is [fails-with-msg?])]}
            :unused-binding    {:level :off
                                :exclude-unused-as true
                                :exclude-destructured-as true
