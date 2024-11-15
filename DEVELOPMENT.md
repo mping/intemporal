@@ -37,4 +37,15 @@ clj -A:dev:doc:cljs
 ```shell
 bin/kaocha unit
 bin/kaocha unit-cljs
+
+;; or run everything
+bin/run-coverage
+```
+
+# CI runs
+
+Install earthly: https://earthly.dev
+
+```
+earthly -P -i +test
 ```
