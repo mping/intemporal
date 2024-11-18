@@ -43,6 +43,7 @@
 
 (defmacro with-result
   "Promise-aware macro: the result can either be a value or a thrown exception.
+  Waits for result for 10 secs, then times out
   Doesn't really work for exceptions returned as values
   ```
   (with-result [r (my-worfklow 1)]
@@ -66,7 +67,7 @@
              ;; force wrap resbody in a deferred
              (p/finally (-> nil
                             (p/then (fn [_#] (do ~resbody)))
-                            (p/timeout 1000))
+                            (p/timeout 10000))
                         (fn [res# err#]
                           (let [~res (or res# err#)]
                             ;; TODO maybe wrap or throw if err is present

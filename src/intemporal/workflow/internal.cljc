@@ -144,13 +144,17 @@
                                      r     (binding [*env* (merge default-env env)]
                                              (t/log! {:level :debug :data {:fvar fvar :args args'}} ["Calling actual function for task" id])
                                              (if vthread?
-                                               ;; cljs we dont need delay bc its single threaded
-                                               (#?(:cljs do :clj delay)
-                                                 (-> (p/vthread
-                                                       (binding [*env* (dissoc env :vthread?)]
-                                                         (apply fvar args')))
-                                                     (p/then handle-ok)
-                                                     (p/catch handle-fail)))
+                                               ;; in cljs we dont need delay bc its single threaded
+                                               (let [inner (p/create (fn [res rej]
+                                                                       (-> (p/vthread
+                                                                             (binding [*env* (dissoc env :vthread?)]
+                                                                               (apply fvar args')))
+                                                                           (p/then res)
+                                                                           (p/catch rej))))]
+                                                 (#?(:cljs do :clj delay)
+                                                   (-> inner
+                                                       (p/then handle-ok)
+                                                       (p/catch handle-fail))))
                                                (-> nil
                                                    (p/then (fn [_] (binding [*env* env]
                                                                      (apply fvar args'))))
