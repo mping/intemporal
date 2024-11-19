@@ -1,7 +1,6 @@
 (ns intemporal.vthread-recovery-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
-            [clojure.pprint :as pprint]
             [intemporal.store :as store]
             [intemporal.workflow :as w]
             [intemporal.macros :refer [stub-protocol vthread defn-workflow]]
@@ -36,18 +35,13 @@
   (io/copy (io/file "./test/intemporal/vthread-recovery.edn")
            (io/file "/tmp/intemporal-vthread-recovery.edn"))
   (let [mstore  (store/make-store {:file "/tmp/intemporal-vthread-recovery.edn"})
-        stop-fn (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
-        print-tables (fn []
-                       (let [tasks  (store/list-tasks mstore)
-                             events (->> (store/list-events mstore)
-                                         (sort-by :id))]
-                         (pprint/print-table tasks)
-                         (pprint/print-table events)))]
-    
+        stop-fn (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})]
+
     (store/reenqueue-pending-tasks mstore println)
-    ;; wait a bit; we dont have facilities to query workflow state
-    (Thread/sleep 2000)
-    (print-tables)
+
+    (let [[task] (store/list-tasks mstore)]
+      (tu/wait-for-task mstore (:id task))
+      (tu/print-tables mstore))
 
     (testing "linear history"
       (testing "stored events"

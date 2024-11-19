@@ -1,13 +1,24 @@
 (ns intemporal.test-utils
-  (:require [intemporal.workflow.internal :as in]
-            [promesa.core :as p]
-            [taoensso.telemere :as telemere]
-            #?(:cljs [cljs.test :as t])
-            #?(:clj [net.cgrand.macrovich :as macros]))
+  #?(:cljs (:require [intemporal.store :as store]
+                     [intemporal.workflow.internal :as in]
+                     [promesa.core :as p]
+                     [taoensso.telemere :as telemere]
+                     [cljs.test :as t]
+                     [cljs.pprint :as pprint]))
+  #?(:clj (:require [intemporal.store :as store]
+                    [intemporal.workflow.internal :as in]
+                    [promesa.core :as p]
+                    [taoensso.telemere :as telemere]
+                    [net.cgrand.macrovich :as macros]
+                    [clojure.pprint :as pprint]))
   #?(:cljs (:require-macros [net.cgrand.macrovich :as macros])))
 
 ;;;;
 ;; helpers
+
+(defn now []
+  #?(:clj  (System/currentTimeMillis)
+     :cljs (.getTime (js/Date.))))
 
 (defn- make-task [& {:keys [proto type id ref root sym fvar args result state]
                      :or   {proto  nil
@@ -37,6 +48,34 @@
 
 (defn make-protocol-task [& {:keys [] :as args}]
   (make-task (assoc args :type :proto-activity)))
+
+;;;;
+;; misc
+
+(defn print-tables
+  "Prints the task and events tables to sysout via pprint"
+  [store]
+  (let [tasks  (store/list-tasks store)
+        events (->> (store/list-events store)
+                    (sort-by :id))]
+    (pprint/print-table tasks)
+    (pprint/print-table events)))
+
+(defn wait-for-task
+  "Waits for the task with given id to reach terminal state"
+  ;; only works in clj, should probably take a body and be a macro
+  ([store id]
+   (wait-for-task store id {:timeout 5000 :sleep-ms 100}))
+  ([store id {:keys [timeout sleep-ms]}]
+   (let [start (now)]
+     #_:clj-kondo/ignore
+     @(p/loop [task (store/find-task store id)]
+        (when (not (#{:failure :success} (:state task)))
+          (let [elapsed (- (now) start)]
+            (when (> elapsed timeout)
+              (throw (ex-info (format "More than %s ms (%s ms) elapsed while waiting for task %s to finish" timeout elapsed id) {:task task})))
+            (p/then (p/delay sleep-ms id)
+                    (fn [_] (p/recur (store/find-task store id))))))))))
 
 ;;;;
 ;; macros

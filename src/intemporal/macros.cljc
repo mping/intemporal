@@ -54,8 +54,6 @@
   `(binding [i/*env* (assoc i/*env* :vthread? true)]
      ~@body))
 
-(defmacro vwait [xs])
-
 (defmacro defn-workflow
   "Defines a workflow. Workflows are functions that are resillient to crashes, as
   long as side-effects are run via activities."

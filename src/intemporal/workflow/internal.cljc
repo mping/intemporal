@@ -11,9 +11,7 @@
 
 (def ^:dynamic *env* nil)
 (def default-env {:compensations      (atom '())
-                  ;; TODO use value `0` to signal infinite timeout
-                  :timeout-ms         #?(:clj  Long/MAX_VALUE
-                                         :cljs 2147483647)})
+                  :timeout-ms         (* 15 60 1000)})
 
 (defn- env->runtime
   "Derives the `runtime` attrs from the current env."
@@ -98,17 +96,16 @@
           (t/log! {:level :debug :_data {:task task}} ["Found replay event for task with id" (:id task)]))
         (when res?
           (t/log! {:level :debug :_data {:task task}} ["Found result event for task with id" (:id task)]))
-        (try
-          (cond
-            ;; do we have an invocation event? if not, save this one
-            (not inv?)
-            (store/task<-event store id next-event)
 
-            ;; we do have an invocation event, is it a match of the above?
-            (not (event-matches? inv? next-event))
-            (throw (internal-exception "Transition unexpected" {:type     (:type inv?)
-                                                                :expected invoke})))
-          (finally)))
+        (cond
+          ;; do we have an invocation event? if not, save this one
+          (not inv?)
+          (store/task<-event store id next-event)
+
+          ;; we do have an invocation event, is it a match of the above?
+          (not (event-matches? inv? next-event))
+          (throw (internal-exception "Transition unexpected" {:got      (:type inv?)
+                                                              :expected invoke}))))
 
       ;; mark success/failure or replay
       (let [next-event   {:ref id :root (or root id) :type success :sym sym}
@@ -120,7 +117,8 @@
                            r)
             handle-fail   (fn [e]
                             (t/log! {:level :debug :data {:fvar fvar :exception e}} ["Exception caught during actual function invocation for task" id])
-                            (when-not (internal-error? e)
+                            (if (internal-error? e) ;; let internal errors bubble but with internal failure
+                              (store/task<-event store id (assoc next-failure :error e :type ::failure))
                               (store/task<-event store id (assoc next-failure :error e)))
                             (p/rejected e))
             retval       (cond
@@ -161,32 +159,19 @@
                                                    (p/then' handle-ok)
                                                    (p/catch handle-fail))))]
                                  ;; r can be a value or a promise
-                                 r)
-                               #_
-                               (p/then
-                                 (fn [r]
-                                   ;; TODO assert r is serializable!
-                                   (t/log! {:level :debug :data {:fvar fvar :result r}} ["Got actual function result for task" id])
-                                   (store/task<-event store id (assoc next-event :result r))
-                                   r))
-                               #_
-                               (p/catch
-                                 (fn [e]
-                                   (t/log! {:level :debug :data {:fvar fvar :exception e}} ["Exception caught during actual function invocation for task" id])
-                                   (when-not (internal-error? e)
-                                     (store/task<-event store id (assoc next-failure :error e)))
-                                   (p/rejected e))))
+                                 r))
 
                            (not (or (event-matches? res? next-event) ;; replay success
                                     (event-matches? res? next-failure))) ;; replay failure
-                           (throw (internal-exception "Transition unexpected" {:type     (:type res?)
-                                                                               :expected #{success failure}})))]
+                           (throw (internal-exception "Transition unexpected" {:got     (:type res?)
+                                                                               :expected [success failure]})))]
         (t/log! {:level :debug :data {:retval retval}} ["Finished internal execution for task" id])
         retval))
     ;; ensure we terminate the fn call, even if the next event wouldnt be the expected type
     (catch #?(:clj Exception :cljs js/Error) e
       (let [wrapped (ex-info "Internal error while resuming execution" {::type :internal} e)]
-        (store/task<-event store id {:ref id :root (or root id) :type failure :sym sym :args args :error wrapped}))
+        ;; TODO force workflow failure
+        (store/task<-event store id {:ref id :root (or root id) :type ::failure :sym sym :error wrapped}))
       (throw e))))
 
 #?(:clj (ns-unmap *ns* 'resume-task))

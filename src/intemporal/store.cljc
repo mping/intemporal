@@ -131,11 +131,11 @@
        (when (edn-exists? file)
          (t/log! :info ["Reading store file" file])
          (let [data (read-edn file readers)]
-           (reset! tasks (:tasks data))
-           (reset! history (:history data))
-           (reset! counter (:counter data))
-           (reset! pcounter (:pcounter data))
-           (reset! ecounter (:ecounter data)))))
+           (reset! tasks (or (:tasks data) {}))
+           (reset! history (or (:history data) {}))
+           (reset! counter (or (:counter data) 0))
+           (reset! pcounter (or (:pcounter data) 0))
+           (reset! ecounter (or (:ecounter data) 0)))))
 
      (reify
        InternalVarStore

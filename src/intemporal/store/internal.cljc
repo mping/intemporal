@@ -80,7 +80,8 @@
    [:type [:enum
            :intemporal.workflow/invoke :intemporal.workflow/success :intemporal.workflow/failure
            :intemporal.activity/invoke :intemporal.activity/success :intemporal.activity/failure
-           :intemporal.protocol/invoke :intemporal.protocol/success :intemporal.protocol/failure]]
+           :intemporal.protocol/invoke :intemporal.protocol/success :intemporal.protocol/failure
+           :intemporal.workflow.internal/failure]]
    [:sym :symbol]
    [:args {:optional true} [:maybe [:sequential :any]]]
    [:result {:optional true} :any]

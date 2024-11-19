@@ -1,13 +1,11 @@
 (ns intemporal.workflow-test
   #?(:cljs (:require [cljs.test :as t :refer-macros [deftest is testing]]
-                     [cljs.pprint :as pprint]
                      [intemporal.store :as store]
                      [intemporal.workflow :as w]
                      [intemporal.test-utils :as tu]
                      [matcher-combinators.test :refer [match?]]
                      [promesa.core :as p])
      :clj  (:require [clojure.test :as t :refer [deftest is testing]]
-                     [clojure.pprint :as pprint]
                      [intemporal.store :as store]
                      [intemporal.workflow :as w]
                      [intemporal.test-utils :as tu]
@@ -73,7 +71,7 @@
                   #?(:clj  [w1 a1 n1 n2 a2 p1 p2 w2]
                      :cljs [w1 a1 p1 p2 n1 n2 a2 w2]) evts]
 
-              (pprint/print-table evts)
+              (tu/print-tables mstore)
 
               (testing "workflow events"
                 (is (match? {:type :intemporal.workflow/invoke :sym 'intemporal.workflow-test/my-workflow- :args [1]} w1))
@@ -97,7 +95,7 @@
                   ;; the order of execution is not exactly the same between clj/cljs
                   #?(:clj  [w1 a1 n1 p1]
                      :cljs [w1 a1 p1 n1]) tasks]
-              (pprint/print-table tasks)
+              (tu/print-tables mstore)
 
               (testing "workflow task"
                 (is (match? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1))))))
