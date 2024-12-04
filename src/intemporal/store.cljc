@@ -89,8 +89,9 @@
   "Creates a new memory-based store"
   ([]
    (make-store nil))
-  ([{:keys [owner file readers]
-     :or {owner "intemporal"}}]
+  ([{:keys [owner file readers validation-fail-rate]
+     :or   {owner        "intemporal"
+            validation-fail-rate 0}}]
    ;; TODO use single atom?
    (let [tasks       (atom {})
          history     (atom {})
@@ -99,6 +100,10 @@
          ecounter    (atom 0)
          tcounter    (atom 0)
          vars        (atom {})
+         maybe-fail!  (fn []
+                        (when (< (rand-int 100)
+                                 (* 100 validation-fail-rate))
+                          (throw (ex-info "Forced error via failure rate" {:intemporal.workflow.internal/type :internal}))))
 
          ;;persistence
          persist!    (fn [k ref old new]
@@ -115,6 +120,7 @@
 
          update-task (fn [this id & kvs]
                        (when-let [w (find-task this id)]
+                         (maybe-fail!)
                          (->> (apply assoc w kvs)
                               (validate-task)
                               (swap! tasks assoc id))))]
@@ -216,6 +222,7 @@
 
        (await-task [this id {:keys [timeout-ms] :as opts}]
          ;; TODO handle internal errors? use a separate state?
+         (maybe-fail!)
          (let [task        (find-task this id)
                deferred    (p/deferred)
                completed?  (fn [{:keys [state]}]
@@ -259,6 +266,7 @@
 
        (enqueue-task [this task]
          ;; TODO use owner
+         (maybe-fail!)
          (validate-task task)
          (swap! tasks assoc
                 (:id task) (assoc task :order (swap! tcounter inc)))

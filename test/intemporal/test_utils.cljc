@@ -73,7 +73,7 @@
         (when (not (#{:failure :success} (:state task)))
           (let [elapsed (- (now) start)]
             (when (> elapsed timeout)
-              (throw (ex-info (format "More than %s ms (%s ms) elapsed while waiting for task %s to finish" timeout elapsed id) {:task task})))
+              (throw (ex-info (str "More than " timeout " ms (" elapsed " ms) elapsed while waiting for task " id " to finish") {:task task})))
             (p/then (p/delay sleep-ms id)
                     (fn [_] (p/recur (store/find-task store id))))))))))
 

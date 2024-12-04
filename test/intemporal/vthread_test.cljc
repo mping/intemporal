@@ -46,8 +46,7 @@
       (let [mstore   (store/make-store)
             executor (w/start-poller! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
 
-            start    (store/now)
-            error    (atom false)]
+            start    (store/now)]
 
         ;; cljs runtimes return promises
         ;; clj runtime will run synchronously

@@ -117,9 +117,9 @@
                            r)
             handle-fail   (fn [e]
                             (t/log! {:level :debug :data {:fvar fvar :exception e}} ["Exception caught during actual function invocation for task" id])
-                            (if (internal-error? e) ;; let internal errors bubble but with internal failure
-                              (store/task<-event store id (assoc next-failure :error e :type ::failure))
-                              (store/task<-event store id (assoc next-failure :error e)))
+                            ;; let internal errors bubble but with internal failure type
+                            (store/task<-event store id (cond-> (assoc next-failure :error e)
+                                                                (internal-error? e) (assoc :type ::failure)))
                             (p/rejected e))
             retval       (cond
                            (some? res?)
@@ -153,6 +153,8 @@
                                                    (-> inner
                                                        (p/then handle-ok)
                                                        (p/catch handle-fail))))
+                                               ;; ensure handle-fail always has a chance to catch any fvar
+                                               ;; exceptions
                                                (-> nil
                                                    (p/then (fn [_] (binding [*env* env]
                                                                      (apply fvar args'))))

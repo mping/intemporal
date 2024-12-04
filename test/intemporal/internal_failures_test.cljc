@@ -1,4 +1,4 @@
-(ns intemporal.failures-test
+(ns intemporal.internal-failures-test
   #?(:cljs (:require [cljs.test :as t :refer-macros [deftest is testing]]
                      [intemporal.store :as store]
                      [intemporal.workflow :as w]
@@ -16,19 +16,15 @@
 (t/use-fixtures :once tu/with-trace-logging)
 
 (defprotocol MyActivities
-  (foo [this a])
-  (forced-failure [this]))
+  (foo [this a]))
 
 (defrecord MyActivitiesImpl []
   MyActivities
-  (foo [this a] [:proto a])
-  (forced-failure [this] (throw (ex-info "Forced" {:a 1}))))
+  (foo [this a] [:proto a]))
 
 (defn-workflow my-workflow [k]
   (let [stub (stub-protocol MyActivities {})
-        prr  (if (= :ok k)
-               (foo stub :pr)
-               (forced-failure stub))]
+        prr  (foo stub :pr)]
 
     ;; chain values: ensure tests work under cljs too
     #_:clj-kondo/ignore
@@ -37,11 +33,15 @@
 
 ;;;; test proper
 
-(deftest activity-failure-test
-  (testing "failure: activity throws"
-    (let [mstore      (store/make-store)
+(deftest store-failure-test
+  (testing "failure: task validation fails"
+    (let [mstore      (store/make-store {:validation-fail-rate 1.0})
           stop-worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
+
       (with-result [res (w/with-env {:store mstore}
-                          (my-workflow :nok))]
+                          (my-workflow :ok))]
         (is (instance? #?(:clj Exception :cljs js/Error) res))
+        (is (= {:intemporal.workflow.internal/type :internal} (ex-data res)))
         (stop-worker)))))
+
+;(cljs.test/run-tests *ns*)

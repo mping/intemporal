@@ -1,4 +1,6 @@
-{:paths   ["src" "target"]
+{:paths      ["src" "target"]
+ :test-paths ["test"]
+
  :deps    {org.clojure/clojure      {:mvn/version "1.11.4"}
            thheller/shadow-cljs     {:mvn/version "2.28.11"}
            com.taoensso/telemere    {:mvn/version "1.0.0-RC1"}
@@ -14,7 +16,6 @@
                   :extra-deps  {lambdaisland/kaocha                      {:mvn/version "1.91.1392"}
                                 lambdaisland/kaocha-cloverage            {:mvn/version "1.1.89"}
                                 lambdaisland/kaocha-junit-xml            {:mvn/version "1.17.101"}
-                                ;lambdaisland/kaocha-cljs2     {:mvn/version "0.1.58"}
                                 com.lambdaisland/kaocha-cljs             {:mvn/version "1.5.154"}
                                 ch.qos.logback/logback-classic           {:mvn/version "1.5.12"}
                                 tortue/spy                               {:mvn/version "2.15.0"}
