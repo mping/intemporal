@@ -11,7 +11,8 @@
                     [taoensso.telemere :as telemere]
                     [net.cgrand.macrovich :as macros]
                     [clojure.pprint :as pprint]))
-  #?(:cljs (:require-macros [net.cgrand.macrovich :as macros])))
+  #?(:cljs (:require-macros [net.cgrand.macrovich :as macros]))
+  #?(:clj (:import [java.util.concurrent TimeoutException])))
 
 ;;;;
 ;; helpers
@@ -80,6 +81,8 @@
 ;;;;
 ;; macros
 
+(def with-result-default-timeout 10000)
+
 (defmacro with-result
   "Promise-aware macro: the result can either be a value or a thrown exception.
   Waits for result for 10 secs, then times out
@@ -95,9 +98,11 @@
   (let [[res resbody] bindings]
     (macros/case
       :clj
-      `(let [~res (try (do ~resbody)
+      `(let [~res (let [future# (future (do ~resbody))]
+                    (try
+                      (deref future# with-result-default-timeout (TimeoutException. "Operation timed out.")
                        (catch Exception e#
-                         e#))]
+                        e#))))]
          ~@body)
       :cljs
       `(t/async done#
@@ -106,20 +111,26 @@
              ;; force wrap resbody in a deferred
              (p/finally (-> nil
                             (p/then (fn [_#] (do ~resbody)))
-                            (p/timeout 10000))
+                            (p/timeout with-result-default-timeout))
                         (fn [res# err#]
-                          (let [~res (or res# err#)]
-                            ;; TODO maybe wrap or throw if err is present
-                            (do ~@body))
-                          (done#)))
+                          (try
+                            (let [~res (or res# err#)]
+                              (do ~@body))
+                            (finally
+                              (done#)))))
              0))))))
 
-#?(:cljs
-   (def with-trace-logging {:before (fn []
-                                      #_:clj-kondo/ignore
-                                      (telemere/set-min-level! :trace))})
-   :clj
-   (defn with-trace-logging [f]
-     #_:clj-kondo/ignore
-     (telemere/set-min-level! :trace)
-     (f)))
+(defn setup-telemere []
+  #_:clj-kondo/ignore
+  (telemere/set-min-level! :trace)
+  #_#_
+  (telemere/remove-handler! ::custom)
+  (telemere/add-handler! ::custom
+                  (telemere/handler:console
+                    {:output-fn
+                     (tutils/format-signal-fn
+                       {:content-fn (tutils/signal-content-fn {:incl-keys #{:thread}})})})))
+
+(def with-trace-logging
+  #?(:cljs {:before setup-telemere}
+     :clj (fn with-trace-logging [f] (setup-telemere) (f))))

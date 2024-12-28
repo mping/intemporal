@@ -59,7 +59,7 @@
 
 (defn- worker-execute-fn
   "Executes a given protocol, activity or workflow `task`"
-  [store protocols {:keys [type id root] :as task} task-counter]
+  [store protocols {:keys [type id root] :as task} task-counter shutting-down?]
   (let [runtime      (:runtime task)
         base-env     {:store   store
                       :type    type
@@ -68,7 +68,8 @@
                       :root    (or root id)
                       :protos  protocols
                       ;; TODO use uuid
-                      :next-id (fn [] (str (or root id) "-" (swap! task-counter inc)))}
+                      :next-id   (fn [] (str (or root id) "-" (swap! task-counter inc)))
+                      :shutdown? shutting-down?}
         internal-env (merge internal/default-env base-env runtime)]
     ;; root task: we only enqueue workflows
     (with-env internal-env
@@ -89,7 +90,7 @@
                      (loop []
                        (when-let [task (store/dequeue-task store)]
                          (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
-                         (submit task-executor (fn [] (worker-execute-fn store protocols task task-counter)))
+                         (submit task-executor (fn [] (worker-execute-fn store protocols task task-counter (fn [] (not (running? task-executor))))))
                          (recur)))
                      (when (running? task-executor)
                        (p/recur))))))))
@@ -124,7 +125,7 @@
                         (when-let [task (store/dequeue-task store)]
                           (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
                           (p/vthread
-                            (worker-execute-fn store protocols task task-counter)))
+                            (worker-execute-fn store protocols task task-counter (fn [] @run?))))
                         (when @run?
                           (p/recur)))))))
      (fn [] (reset! run? false)))))

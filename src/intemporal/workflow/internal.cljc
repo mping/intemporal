@@ -38,10 +38,9 @@
      (do ~@body)))
 
 (defn- internal-error? [ex]
-  ;; TODO this should be a store predicate, or every store exception should be wrapped in this
   (= :internal (-> ex ex-data ::type)))
 
-(defn internal-exception [msg data]
+(defn internal-error [msg data]
   (ex-info msg (merge data {::type :internal})))
 
 ;;;;
@@ -82,13 +81,14 @@
 
 (defn resume-fn-task
   "Resumes a generic fn call task"
-  [{:keys [vthread?] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
+  [{:keys [vthread? shutdown?] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
   ;; TODO check if proto exists in protos
   ;; do we have invocation and result events for this task?
   (t/log! :debug ["Resuming task with id" id])
 
   (try
-    (let [[inv? res?] (store/all-events store id)]
+    (let [shutting-down? (fn [] (and (ifn? shutdown?) (shutdown?))) ;; TODO fix this hack
+          [inv? res?] (store/all-events store id)]
 
       ;; mark invoke/replay
       (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
@@ -104,22 +104,30 @@
 
           ;; we do have an invocation event, is it a match of the above?
           (not (event-matches? inv? next-event))
-          (throw (internal-exception "Transition unexpected" {:got      (:type inv?)
-                                                              :expected invoke}))))
+          (throw (internal-error "Transition unexpected" {:got      (:type inv?)
+                                                          :expected invoke}))))
 
       ;; mark success/failure or replay
       (let [next-event   {:ref id :root (or root id) :type success :sym sym}
             next-failure (assoc next-event :type failure)
             handle-ok    (fn [r]
                            ;; TODO assert r is serializable!
-                           (t/log! {:level :debug :data {:fvar fvar :result r}} ["Got actual function result for task" id])
-                           (store/task<-event store id (assoc next-event :result r))
-                           r)
+                           ;; we check for shutdown because in js runtime, there is no thread interruption
+                           (if (shutting-down?)
+                             (do
+                               (t/log! {:level :debug :_data {:fvar fvar :result r}} ["Shutting down, interrupting result" id])
+                               (p/rejected (internal-error "Shutting down" {:fvar fvar :ignored-result r})))
+                             (do
+                               (t/log! {:level :debug :_data {:fvar fvar :result r}} ["Got actual function result for task" id])
+                               (store/task<-event store id (assoc next-event :result r))
+                               r)))
             handle-fail   (fn [e]
-                            (t/log! {:level :debug :data {:fvar fvar :exception e}} ["Exception caught during actual function invocation for task" id])
+                            (t/log! {:level :debug :_data {:fvar fvar :exception e}} ["Exception caught during actual function invocation for task" id])
                             ;; let internal errors bubble but with internal failure type
-                            (store/task<-event store id (cond-> (assoc next-failure :error e)
-                                                                (internal-error? e) (assoc :type ::failure)))
+                            (if (shutting-down?)
+                              (t/log! {:level :warn :_data {:exception e}} ["Exception caught during shutdown, skipping event save"])
+                              (store/task<-event store id (cond-> (assoc next-failure :error e)
+                                                                  (internal-error? e) (assoc :type ::failure))))
                             (p/rejected e))
             retval       (cond
                            (some? res?)
@@ -140,7 +148,7 @@
                                              (cons impl? args)
                                              args)
                                      r     (binding [*env* (merge default-env env)]
-                                             (t/log! {:level :debug :data {:fvar fvar :args args'}} ["Calling actual function for task" id])
+                                             (t/log! {:level :debug :_data {:fvar fvar :args args'}} ["Calling actual function for task" id])
                                              (if vthread?
                                                ;; in cljs we dont need delay bc its single threaded
                                                (let [inner (p/create (fn [res rej]
@@ -165,9 +173,9 @@
 
                            (not (or (event-matches? res? next-event) ;; replay success
                                     (event-matches? res? next-failure))) ;; replay failure
-                           (throw (internal-exception "Transition unexpected" {:got     (:type res?)
-                                                                               :expected [success failure]})))]
-        (t/log! {:level :debug :data {:retval retval}} ["Finished internal execution for task" id])
+                           (throw (internal-error "Transition unexpected" {:got     (:type res?)
+                                                                           :expected [success failure]})))]
+        (t/log! {:level :debug :_data {:retval retval}} ["Finished internal execution for task" id])
         retval))
     ;; ensure we terminate the fn call, even if the next event wouldnt be the expected type
     (catch #?(:clj Exception :cljs js/Error) e
