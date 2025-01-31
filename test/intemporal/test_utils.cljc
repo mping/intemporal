@@ -11,7 +11,8 @@
                     [taoensso.telemere :as telemere]
                     [net.cgrand.macrovich :as macros]
                     [clojure.pprint :as pprint]))
-  #?(:cljs (:require-macros [net.cgrand.macrovich :as macros])))
+  #?(:cljs (:require-macros [net.cgrand.macrovich :as macros]))
+  #?(:clj (:import [java.util.concurrent TimeoutException])))
 
 ;;;;
 ;; helpers
@@ -80,6 +81,8 @@
 ;;;;
 ;; macros
 
+(def with-result-default-timeout 10000)
+
 (defmacro with-result
   "Promise-aware macro: the result can either be a value or a thrown exception.
   Waits for result for 10 secs, then times out
@@ -95,9 +98,11 @@
   (let [[res resbody] bindings]
     (macros/case
       :clj
-      `(let [~res (try (do ~resbody)
+      `(let [~res (let [future# (future (do ~resbody))]
+                    (try
+                      (deref future# with-result-default-timeout (TimeoutException. "Operation timed out.")
                        (catch Exception e#
-                         e#))]
+                        e#))))]
          ~@body)
       :cljs
       `(t/async done#
@@ -106,7 +111,7 @@
              ;; force wrap resbody in a deferred
              (p/finally (-> nil
                             (p/then (fn [_#] (do ~resbody)))
-                            (p/timeout 10000))
+                            (p/timeout with-result-default-timeout))
                         (fn [res# err#]
                           (let [~res (or res# err#)]
                             ;; TODO maybe wrap or throw if err is present
