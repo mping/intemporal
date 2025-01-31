@@ -113,10 +113,11 @@
                             (p/then (fn [_#] (do ~resbody)))
                             (p/timeout with-result-default-timeout))
                         (fn [res# err#]
-                          (let [~res (or res# err#)]
-                            ;; TODO maybe wrap or throw if err is present
-                            (do ~@body))
-                          (done#)))
+                          (try
+                            (let [~res (or res# err#)]
+                              (do ~@body))
+                            (finally
+                              (done#)))))
              0))))))
 
 #?(:cljs

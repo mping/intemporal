@@ -116,7 +116,7 @@
                            (if (shutting-down?)
                              (do
                                (t/log! {:level :debug :data {:fvar fvar :result r}} ["Shutting down, interrupting result" id])
-                               (p/rejected (internal-error "Shutting down" {:fvar fvar})))
+                               (p/rejected (internal-error "Shutting down" {:fvar fvar :ignored-result r})))
                              (do
                                (t/log! {:level :debug :data {:fvar fvar :result r}} ["Got actual function result for task" id])
                                (store/task<-event store id (assoc next-event :result r))
