@@ -11,7 +11,8 @@
                     [taoensso.telemere :as telemere]
                     [net.cgrand.macrovich :as macros]
                     [clojure.pprint :as pprint]))
-  #?(:cljs (:require-macros [net.cgrand.macrovich :as macros]))
+  #?(:cljs (:require-macros [net.cgrand.macrovich :as macros]
+                            [intemporal.test-utils :refer [with-result]]))
   #?(:clj (:import [java.util.concurrent TimeoutException])))
 
 ;;;;
@@ -100,9 +101,8 @@
       :clj
       `(let [~res (let [future# (future (do ~resbody))]
                     (try
-                      (deref future# with-result-default-timeout (TimeoutException. "Operation timed out.")
-                       (catch Exception e#
-                        e#))))]
+                      (deref future# with-result-default-timeout (TimeoutException. "Operation timed out."))
+                      (catch Exception e# e#)))]
          ~@body)
       :cljs
       `(t/async done#
@@ -110,7 +110,8 @@
            (fn []
              ;; force wrap resbody in a deferred
              (p/finally (-> nil
-                            (p/then (fn [_#] (do ~resbody)))
+                            (p/then (fn [_#]
+                                      (do ~resbody)))
                             (p/timeout with-result-default-timeout))
                         (fn [res# err#]
                           (try
