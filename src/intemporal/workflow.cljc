@@ -52,7 +52,8 @@
          (submit [_ f]
            (when @run?
              (p/vthread (f))))
-         (shutdown [_ grace-period-ms] (reset! run? false))
+         (shutdown [_ grace-period-ms]
+           (reset! run? false))
          (running? [_] @run?))
        :clj
        (Executors/newVirtualThreadPerTaskExecutor))))
@@ -125,7 +126,7 @@
                         (when-let [task (store/dequeue-task store)]
                           (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
                           (p/vthread
-                            (worker-execute-fn store protocols task task-counter (fn [] @run?))))
+                            (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))
                         (when @run?
                           (p/recur)))))))
      (fn [] (reset! run? false)))))
