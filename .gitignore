@@ -30,3 +30,4 @@ docker/fdb.cluster
 # coverage
 merged.info
 coverage/
+.store/

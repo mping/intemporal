@@ -1,6 +1,6 @@
 (ns intemporal.store
   (:require [clojure.tools.reader.edn :as edn]
-            [intemporal.store.internal :refer [validate-task validate-event]]
+            [intemporal.store.internal :as si]
             [promesa.core :as p]
             [taoensso.telemere :as t]
             #?(:clj [clojure.java.io :as io]))
@@ -13,6 +13,8 @@
 
 (defprotocol TaskStore
   (list-tasks [this] "Lists all tasks")
+  (task<-panic [this task-id error]
+    "Terminates the task via panic; events should not be stored")
   (task<-event [this task-id event-descr]
     "Transitions the task. The task should be dequeued beforehand. Returns the event.
     `event-descr` is one of:
@@ -122,7 +124,7 @@
                        (when-let [w (find-task this id)]
                          (maybe-fail!)
                          (->> (apply assoc w kvs)
-                              (validate-task)
+                              (si/validate-task)
                               (swap! tasks assoc id))))]
 
      ;; deser the db
@@ -156,7 +158,7 @@
          (apply concat (vals @history)))
        (save-event [this task-id event]
          (let [evt+id (assoc event :id (swap! counter inc))]
-           (validate-event evt+id)
+           (si/validate-event evt+id)
            (swap! history (fn [v]
                             (assoc v task-id (-> (or (get v task-id) [])
                                                  (conj evt+id)))))
@@ -170,6 +172,9 @@
        TaskStore
        (list-tasks [this]
          (vals @tasks))
+
+       (task<-panic [this task-id error]
+         (update-task this task-id :result error))
 
        (task<-event [this task-id {:keys [id ref root type sym args result error] :as event-descr}]
          ;; some redundancy between :result in task and event
@@ -221,25 +226,22 @@
          (await-task this id {:timeout-ms default-lease}))
 
        (await-task [this id {:keys [timeout-ms] :as opts}]
-         ;; TODO handle internal errors? use a separate state?
          (maybe-fail!)
+         ;; TODO use owner
          (let [task        (find-task this id)
                deferred    (p/deferred)
-               completed?  (fn [{:keys [state]}]
-                             (or (= :success state)
-                                 (= :failure state)))
-               wrap-result (fn [{:keys [state result] :as task}]
+               wrap-result (fn [{:keys [result] :as task}]
                              (cond
-                               (= :success state) (p/resolved result)
-                               (= :failure state) (p/rejected result)
+                               (si/success? task) (p/resolved result)
+                               (si/failure? task) (p/rejected result)
                                :else (p/rejected (ex-info "Unknown state" {:task task}))))]
 
-           (if (completed? task)
+           (if (si/terminal? task)
              (wrap-result task)
              ;;else
              (do
-               (watch-task this id (fn [{:keys [state] :as task}]
-                                     (when (#{:success :failure} state)
+               (watch-task this id (fn [task]
+                                     (when (si/terminal? task)
                                        (p/resolve! deferred task))))
                ;; wait for resolution
                ;; remember: js doesnt have blocking op so we need to chain
@@ -267,7 +269,7 @@
        (enqueue-task [this task]
          ;; TODO use owner
          (maybe-fail!)
-         (validate-task task)
+         (si/validate-task task)
          (swap! tasks assoc
                 (:id task) (assoc task :order (swap! tcounter inc)))
          #?(:cljs (register this (:sym task) (:fvar task)))

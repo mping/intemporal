@@ -1,7 +1,9 @@
 (ns intemporal.store.internal
-  #?(:clj  (:require [taoensso.nippy :as nippy]
+  #?(:clj  (:require [intemporal.error :as error]
+                     [taoensso.nippy :as nippy]
                      [malli.core :as m])
      :cljs (:require [clojure.edn :as edn]
+                     [intemporal.error :as error]
                      [malli.core :as m])))
 
 (defn next-id []
@@ -89,3 +91,16 @@
 
 (def validate-task (m/coercer Task nil {:registry registry}))
 (def validate-event (m/coercer Event nil {:registry registry}))
+
+
+(defn success? [{:keys [state] :as task}]
+  (= :success state))
+
+(defn failure? [{:keys [state result] :as task}]
+  (or (= :failure state)
+      (and (= :pending state)
+           (error/panic? result))))
+
+(defn terminal? [task]
+  (or (success? task)
+      (failure? task)))

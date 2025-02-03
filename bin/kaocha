@@ -2,11 +2,11 @@
 
 [ -d "node_modules/ws" ] || npm install ws
 
+#JAVA_OPTS="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 -Dio.netty.tryUnsafe=false"
 JAVA_OPTS="-Dio.netty.tryUnsafe=false"
 if [[ "$OSTYPE" == "darwin"* ]]; then
   JAVA_OPTS="-Dio.netty.tryUnsafe=false -DFDB_LIBRARY_PATH_FDB_C=/usr/local/lib/libfdb_c.dylib -DFDB_LIBRARY_PATH_FDB_JAVA=/usr/local/lib/libfdb_java.jnilib"
 fi
-
 
 # bin/kaocha unit-cljs --reporter documentation --focus  cljs:intemporal.internal-failures-test --no-capture-output
 JAVA_OPTS="$JAVA_OPTS" clojure -A:dev:test:jdbc:fdb -M:test "$@"

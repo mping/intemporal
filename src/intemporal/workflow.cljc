@@ -52,7 +52,8 @@
          (submit [_ f]
            (when @run?
              (p/vthread (f))))
-         (shutdown [_ grace-period-ms] (reset! run? false))
+         (shutdown [_ grace-period-ms]
+           (reset! run? false))
          (running? [_] @run?))
        :clj
        (Executors/newVirtualThreadPerTaskExecutor))))
@@ -73,11 +74,8 @@
         internal-env (merge internal/default-env base-env runtime)]
     ;; root task: we only enqueue workflows
     (with-env internal-env
-      (t/log! {:level :trace :_data {:task task :env internal-env}} ["Resuming task with id" (:id task)])
-      (try
-        (internal/resume-task internal-env store protocols task)
-        (finally
-          (t/log! {:level :trace} ["Task resumed"]))))))
+      (t/log! {:level :debug :data {:sym (:sym task) :env internal-env}} ["Resuming task with id" (:id task)])
+      (internal/resume-task internal-env store protocols task))))
 
 (defn- worker-poll-fn
   "Continously polls for task while `task-executor` is active."
@@ -123,16 +121,16 @@
          (-> (p/delay polling-ms)
              (p/chain (fn [_]
                         (when-let [task (store/dequeue-task store)]
-                          (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
+                          (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
                           (p/vthread
-                            (worker-execute-fn store protocols task task-counter (fn [] @run?))))
+                            (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))
                         (when @run?
                           (p/recur)))))))
      (fn [] (reset! run? false)))))
 
 (defn enqueue-and-wait
   [{:keys [store] :as opts} task]
-  (t/log! :debug ["Enqueuing task with id" (:id task)])
+  (t/log! {:level :debug :data {:sym (:sym task)}} ["Enqueuing task with id" (:id task)])
   (internal/enqueue-and-wait opts task))
 
 (defn add-compensation

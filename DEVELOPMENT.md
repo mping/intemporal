@@ -36,8 +36,8 @@ clj -A:dev:doc:cljs
 # Tests
 
 ```shell
-bin/kaocha unit
-bin/kaocha unit-cljs
+bin/kaocha test
+bin/kaocha test-cljs
 
 ;; or run everything
 bin/run-coverage
