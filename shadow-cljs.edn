@@ -13,6 +13,11 @@
                           :automata {:init-fn intemporal.automata/init
                                      :depends-on #{:shared}}}}
 
+          :test-node {:target    :node-test
+                      :output-to "target/tests.js"
+                      :ns-regexp "-test$"
+                      :compiler-options {:source-map "true"}}
+
           :dev {:target :browser
                 :asset-path "."
                 :output-dir "target"
