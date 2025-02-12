@@ -36,7 +36,7 @@
 
 ;;;; test proper
 
-(deftest workflow-happy-path-test
+(deftest recovery-failure-test
   ;; make a backup of the db to allow replay
   (io/copy (io/file "./test/intemporal/recovery_failure.edn")
            (io/file "/tmp/recovery_failure.edn"))
@@ -56,7 +56,7 @@
 
             (is (= :failure (:state task)))
             (is (= :intemporal.workflow.internal/failure (:type crash-ev)))
-            (is (= :intemporal.workflow.internal/failure (:type last-ev)))))
+            (is (= :intemporal.workflow/failure (:type last-ev)))))
         (finally
           (tu/print-tables mstore)
           (stop-worker))))))

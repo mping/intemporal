@@ -1,7 +1,7 @@
 (ns intemporal.store.jdbc
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as i]
-            [intemporal.store.internal :refer [serialize deserialize serializable? validate-task validate-event]]
+            [intemporal.store.internal :as si :refer [serialize deserialize serializable? validate-task validate-event]]
             [migratus.core :as migratus]
             [next.jdbc :as jdbc]
             [next.jdbc.sql.builder :as builder]
@@ -110,6 +110,11 @@
                (jdbc/execute! tx ["select * from tasks"] default-opts))
              (map db->task)))
 
+      (task<-panic [this task-id error]
+        (jdbc/with-transaction [tx db-spec]
+          (let [updated-task {:result (serialize error)}]
+            (jdbc/execute-one! tx (builder/for-update "tasks" updated-task {:id task-id} default-opts)))))
+
       (task<-event [this task-id {:keys [id ref root type sym args result error] :as event-descr}]
         ;; some redundancy between :result in task and event
         ;; note that we save the event first, because update-task can trigger some watchers
@@ -159,22 +164,18 @@
       (await-task [this id {:keys [timeout-ms] :as opts}]
         (let [task        (store/find-task this id)
               deferred    (p/deferred)
-              completed?  (fn [{:keys [state]}]
-                            (or (= :success state)
-                                (= :failure state)))
               wrap-result (fn [{:keys [state result] :as task}]
                             (cond
-                              (= :success state) (p/resolved result)
-                              (= :failure state) (p/rejected result)
-                              ;; TODO throw internal error
+                              (si/success? task) (p/resolved result)
+                              (si/failure? task) (p/rejected result)
                               :else (p/rejected (ex-info "Unknown state" {:task task}))))]
 
-          (if (completed? task)
+          (if (si/terminal? task)
             (wrap-result task)
             ;;else
             (do
-              (store/watch-task this id (fn [{:keys [state] :as task}]
-                                          (when (#{:success :failure} state)
+              (store/watch-task this id (fn [task]
+                                          (when (si/terminal? task)
                                             (p/resolve! deferred task))))
               ;; wait for resolution
               (-> (p/timeout deferred timeout-ms ::timeout)

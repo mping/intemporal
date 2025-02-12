@@ -1,7 +1,7 @@
 (ns intemporal.store.foundationdb
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as i]
-            [intemporal.store.internal :refer [resolve-fvar serialize deserialize serializable? next-id validate-task validate-event]]
+            [intemporal.store.internal :as si :refer [resolve-fvar serialize deserialize serializable? next-id validate-task validate-event]]
             [me.vedang.clj-fdb.FDB :as cfdb]
             [me.vedang.clj-fdb.core :as fc]
             [me.vedang.clj-fdb.transaction :as ftr]
@@ -76,6 +76,14 @@
                (fc/get-range tx subspace-tasks {:valfn (comp resolve-fvar deserialize)}))
              (vals)))
 
+       (task<-panic [this task-id error]
+         (with-tx [tx (open-db)]
+           (let [task         (fc/get tx subspace-tasks task-id {:valfn (comp resolve-fvar deserialize)})
+                 updated-task (assoc task :result error)]
+             (when task
+               (validate-task updated-task)
+               (fc/set tx subspace-tasks task-id (serialize updated-task))))))
+
        (task<-event [this task-id {:keys [id ref root type sym args result error] :as event-descr}]
          ;; some redundancy between :result in task and event
          ;; note that we save the event first, because update-task can trigger some watchers
@@ -126,22 +134,18 @@
          (let [task        (with-tx [tx (open-db)]
                              (fc/get tx subspace-tasks [id]))
                deferred    (p/deferred)
-               completed?  (fn [{:keys [state]}]
-                             (or (= :success state)
-                                 (= :failure state)))
                wrap-result (fn [{:keys [state result] :as task}]
                              (cond
-                               (= :success state) (p/resolved result)
-                               (= :failure state) (p/rejected result)
-                               ;; TODO throw internal error
+                               (si/success? task) (p/resolved result)
+                               (si/failure? task) (p/rejected result)
                                :else (p/rejected (ex-info "Unknown state" {:task task}))))]
 
-           (if (completed? task)
+           (if (si/terminal? task)
              (wrap-result task)
              ;;else
              (do
                (store/watch-task this id (fn [{:keys [state] :as task}]
-                                           (when (#{:success :failure} state)
+                                           (when (si/terminal? task)
                                              (p/resolve! deferred task))))
                ;; wait for resolution
                (-> (p/timeout deferred timeout-ms ::timeout)
