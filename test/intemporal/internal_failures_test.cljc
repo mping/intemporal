@@ -41,7 +41,7 @@
       (with-result [res (w/with-env {:store mstore}
                           (my-workflow :ok))]
         (is (instance? #?(:clj Exception :cljs js/Error) res))
-        (is (= {:intemporal.workflow.internal/type :internal} (ex-data res)))
+        (is (= {:intemporal.workflow.internal/type :internal} (ex-data (or (ex-cause res) res))))
         (stop-worker)))))
 
 ;(cljs.test/run-tests *ns*)

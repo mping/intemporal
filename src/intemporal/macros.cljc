@@ -74,7 +74,7 @@
                id#    (or (:id i/*env*) (i/random-id))
                fvar#  #'~wname
                task#  (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv id#)]
-           (t/log! {:level :trace :_data {:env i/*env* :task task#}}  ["Invoking task with id" (:id task#)])
+           (t/log! {:level :debug :_data {:env i/*env* :task task#}}  ["Invoking task with id" (:id task#)])
            (w/enqueue-and-wait i/*env* task#))))))
 
 (defmacro stub-function
@@ -93,7 +93,7 @@
              ref#    nil ;; no enqueued task => no ref
              task#   (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv# id#)]
          ;; an embedded workflow engine doesn't need to have a task per invocation
-         (t/log! {:level :trace :_data {:env i/*env* :task task#}}  ["Invoking task"])
+         (t/log! {:level :debug :_data {:env i/*env* :task task#}}  ["Invoking task with id " id#])
          (let [res# (i/resume-task i/*env* store# protos# task#)]
            (macros/case
              :cljs res#
@@ -148,7 +148,7 @@
                                     [~@args]
                                     id#)]
 
-                      (t/log! {:level :trace :_data {:env i/*env* :task task#}}  ["Invoking task"])
+                      (t/log! {:level :debug :_data {:env i/*env* :task task#}}  ["Invoking task with id" id#])
                       (i/resume-task i/*env* store# protos# task#))))))))
                       ;(w/enqueue-and-wait i/*env* task#))))))))
 
@@ -191,7 +191,7 @@
                                   [~@args]
                                   id#)]
 
-                    (t/log! {:level :trace :_data {:env i/*env* :task task#}}  ["Invoking task"])
+                    (t/log! {:level :debug :_data {:env i/*env* :task task#}}  ["Invoking task with id" id#])
                     @(i/resume-task i/*env* store# protos# task#)))))))))
                     ;(w/enqueue-and-wait i/*env* task#)))))))))
 

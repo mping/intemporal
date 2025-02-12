@@ -56,58 +56,50 @@
     (let [mstore       (store/make-store)
           stop-worker  (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
 
-      (try
-        (with-result [v (w/with-env {:store mstore}
-                          (my-workflow 1))]
-          (testing "workflow result"
-            (is (= [:root [:sub :nested] [:proto :pr]]
-                   v)))
+      (with-result [v (w/with-env {:store mstore}
+                        (my-workflow 1))]
+        (testing "workflow result"
+          (is (= [:root [:sub :nested] [:proto :pr]]
+                 v)))
 
-          (testing "stored events"
-            (let [evts (store/list-events mstore)
-                  evts (sort-by :id evts)
-                  ;; cljs is promise based, so stubs dont run in lexical order
-                  ;; due to p/let
-                  #?(:clj  [w1 a1 n1 n2 a2 p1 p2 w2]
-                     :cljs [w1 a1 p1 p2 n1 n2 a2 w2]) evts]
+        (testing "stored events"
+          (let [evts (store/list-events mstore)
+                evts (sort-by :id evts)
+                ;; cljs is promise based, so stubs dont run in lexical order
+                ;; due to p/let
+                #?(:clj  [w1 a1 n1 n2 a2 p1 p2 w2]
+                   :cljs [w1 a1 p1 p2 n1 n2 a2 w2]) evts]
 
-              (tu/print-tables mstore)
+            (tu/print-tables mstore)
 
-              (testing "workflow events"
-                (is (match? {:type :intemporal.workflow/invoke :sym 'intemporal.workflow-test/my-workflow- :args [1]} w1))
-                (is (match? {:type :intemporal.workflow/success :sym 'intemporal.workflow-test/my-workflow-} w2)))
+            (testing "workflow events"
+              (is (match? {:type :intemporal.workflow/invoke :sym 'intemporal.workflow-test/my-workflow- :args [1]} w1))
+              (is (match? {:type :intemporal.workflow/success :sym 'intemporal.workflow-test/my-workflow-} w2)))
 
-              (testing "activity events"
-                (is (match? {:type :intemporal.activity/invoke :sym 'intemporal.workflow-test/activity-fn :args [1]} a1))
-                (is (match? {:type :intemporal.activity/success :sym 'intemporal.workflow-test/activity-fn} a2)))
+            (testing "activity events"
+              (is (match? {:type :intemporal.activity/invoke :sym 'intemporal.workflow-test/activity-fn :args [1]} a1))
+              (is (match? {:type :intemporal.activity/success :sym 'intemporal.workflow-test/activity-fn} a2)))
 
-              (testing "nested activity events"
-                (is (match? {:type :intemporal.activity/invoke :sym 'intemporal.workflow-test/nested-fn :args '(:sub)} n1))
-                (is (match? {:type :intemporal.activity/success :sym 'intemporal.workflow-test/nested-fn} n2)))
+            (testing "nested activity events"
+              (is (match? {:type :intemporal.activity/invoke :sym 'intemporal.workflow-test/nested-fn :args '(:sub)} n1))
+              (is (match? {:type :intemporal.activity/success :sym 'intemporal.workflow-test/nested-fn} n2)))
 
-              (testing "protocol activity events"
-                (is (match? {:type :intemporal.protocol/invoke :sym 'intemporal.workflow-test/foo :args [:pr]} p1))
-                (is (match? {:type :intemporal.protocol/success :sym 'intemporal.workflow-test/foo} p2)))))
+            (testing "protocol activity events"
+              (is (match? {:type :intemporal.protocol/invoke :sym 'intemporal.workflow-test/foo :args [:pr]} p1))
+              (is (match? {:type :intemporal.protocol/success :sym 'intemporal.workflow-test/foo} p2)))))
 
-          (testing "stored tasks"
-            (let [tasks (store/list-tasks mstore)
-                  ;; due to promises,
-                  ;; the order of execution is not exactly the same between clj/cljs
-                  #?(:clj  [w1 a1 n1 p1]
-                     :cljs [w1 a1 p1 n1]) tasks]
-              (tu/print-tables mstore)
+        (testing "stored tasks"
+          (let [tasks (store/list-tasks mstore)
+                ;; due to promises,
+                ;; the order of execution is not exactly the same between clj/cljs
+                #?(:clj  [w1 a1 n1 p1]
+                   :cljs [w1 a1 p1 n1]) tasks]
+            (tu/print-tables mstore)
 
-              (testing "workflow task"
-                (is (match? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1))))))
+            (testing "workflow task"
+              (is (match? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1)))))
 
-          ;(testing "activity task"
-          ;  (is (match? {:type :activity :sym 'intemporal.workflow-test/activity-fn :state :success :result [:sub :nested]} a1)))
-          ;(testing "nested activty task"
-          ;  (is (match? {:type :activity :sym 'intemporal.workflow-test/nested-fn :state :success :result [:sub :nested]} n1)))
-          ;(testing "protocol activity task"
-          ;  (is (match? {:type :proto-activity :sym 'intemporal.workflow-test/foo :state :success :result [:proto :pr]} p1)))))
-        (finally
-          (stop-worker))))))
+        (stop-worker)))))
 
 #_ :clj-kondo/ignore
 (comment

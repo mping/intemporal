@@ -72,7 +72,7 @@
    (let [start (now)]
      #_:clj-kondo/ignore
      @(p/loop [task (store/find-task store id)]
-        (when (not (#{:failure :success} (:state task)))
+        (when (not (#{:failure :success } (:state task)))
           (let [elapsed (- (now) start)]
             (when (> elapsed timeout)
               (throw (ex-info (str "More than " timeout " ms (" elapsed " ms) elapsed while waiting for task " id " to finish") {:task task})))
@@ -129,8 +129,8 @@
   (telemere/add-handler! ::custom
                   (telemere/handler:console
                     {:output-fn
-                     (tutils/format-signal-fn
-                       {:content-fn (tutils/signal-content-fn {:incl-keys #{:thread}})})})))
+                     (taoensso.telemere.utils/format-signal-fn
+                       {:content-fn (taoensso.telemere.utils/signal-content-fn {:incl-keys #{:thread}})})})))
 
 (def with-trace-logging
   #?(:cljs {:before setup-telemere}
