@@ -23,7 +23,8 @@
     `{:sym 'ns/f :error <some error>}`
     ")
   (watch-task [this id callback]
-    "Observes state changes, calling `callback` for any task that matches `predicate`.")
+    "Observes state changes, calling `callback` for any task that matches `predicate`.
+    When the task reaches a terminal state, the watcher is deregistered")
   (await-task [this id] [this id opts]
     "Waits for workflow to finish. Returns a deref'able value. Can throw.
     Opts include
@@ -102,6 +103,7 @@
          ecounter    (atom 0)
          tcounter    (atom 0)
          vars        (atom {})
+         watchers    (atom [])
          maybe-fail!  (fn []
                         (when (< (rand-int 100)
                                  (* 100 validation-fail-rate))
@@ -216,10 +218,10 @@
                                            (filter #(not= (get old (:id %)) %))
                                            (take 1))
                                changeset (transduce xf conj (vals new))]
-
                            (when (and (first changeset)
                                       (f (first changeset)))
                              (remove-watch tasks k))))]
+           (swap! watchers conj k)
            (add-watch tasks k watchfn)))
 
        (await-task [this id]
@@ -242,7 +244,8 @@
              (do
                (watch-task this id (fn [task]
                                      (when (si/terminal? task)
-                                       (p/resolve! deferred task))))
+                                       (p/resolve! deferred task)
+                                       true)))
                ;; wait for resolution
                ;; remember: js doesnt have blocking op so we need to chain
                (-> (p/timeout deferred timeout-ms ::timeout)
@@ -264,7 +267,7 @@
                               (when-not (contains? @task->run? task)
                                 (f task)
                                 (swap! task->run? conj task))
-                              (assoc task :state :new)))))))
+                              (assoc task :state :new :result nil)))))))
 
        (enqueue-task [this task]
          ;; TODO use owner

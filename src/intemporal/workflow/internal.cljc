@@ -11,8 +11,8 @@
 ;; runtime
 
 (def ^:dynamic *env* nil)
-(def default-env {:compensations      (atom '())
-                  :timeout-ms         (* 15 60 1000)})
+(def default-env {:compensations (atom '())
+                  :timeout-ms    (* 15 60 1000)})
 
 (defn- env->runtime
   "Derives the `runtime` attrs from the current env."
@@ -79,18 +79,18 @@
   [{:keys [vthread? shutdown?] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
   ;; TODO check if proto exists in protos
   ;; do we have invocation and result events for this task?
-  (t/log! {:level :debug :sym sym} ["Resuming task with id" id])
+  (t/log! {:level :debug :sym sym} ["Resuming task" sym "with id" id])
 
   (try
-    (let [shutting-down? (fn [] (and (ifn? shutdown?) (shutdown?))) ;; TODO fix this hack
+    (let [shutting-down? (fn [] (and (ifn? shutdown?) (shutdown?)))
           [inv? res?] (store/all-events store id)]
 
       ;; mark invoke/replay
       (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
         (when inv?
-          (t/log! {:level :debug :data {:task task}} ["Found replay event for task with id" (:id task)]))
+          (t/log! {:level :debug :data {:task task}} ["Found replay event for task" sym "with id" (:id task)]))
         (when res?
-          (t/log! {:level :debug :data {:task task}} ["Found result event for task with id" (:id task)]))
+          (t/log! {:level :debug :data {:task task}} ["Found result event for task" sym "with id" (:id task)]))
 
         (cond
           ;; do we have an invocation event? if not, save this one
@@ -110,22 +110,22 @@
                            ;; we check for shutdown because in js runtime, there is no thread interruption
                            (if (shutting-down?)
                              (do
-                               (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupting result" id])
+                               (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupting result for task" sym "with id" id])
                                (store/task<-panic store id (error/panic "Worker shutting down during invocation result handling")))
                              (do
-                               (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id])
+                               (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" sym "with id" id])
                                (store/task<-event store id (assoc next-event :result r))
                                r)))
-            handle-fail   (fn [e]
-                            (if (shutting-down?)
-                              (do
-                                (t/log! {:level :warn :data {:exception e}} ["Exception caught during shutdown, panicking task"])
-                                (store/task<-panic store id (error/panic "Worker shutting down during invocation failure handling")))
-                              (do
-                                (t/log! {:level :debug :data {:sym sym :exception e}} ["Exception caught during actual function invocation for task" id])
-                                (store/task<-event store id (cond-> (assoc next-failure :error e)
-                                                                    (error/internal-error? e) (assoc :type ::failure)))))
-                            (p/rejected e))
+            handle-fail  (fn [e]
+                           (if (shutting-down?)
+                             (do
+                               (t/log! {:level :warn :data {:exception e}} ["Exception caughtor task for task" sym "with id" id "during shutdown, panicking task"])
+                               (store/task<-panic store id (error/panic "Worker shutting down during invocation failure handling")))
+                             (do
+                               (t/log! {:level :debug :data {:sym sym :exception e}} ["Exception caught during actual function invocation for task" sym "with id" id])
+                               (store/task<-event store id (cond-> (assoc next-failure :error e)
+                                                                   (error/internal-error? e) (assoc :type ::failure)))))
+                           (p/rejected e))
             retval       (cond
                            (some? res?)
                            (let [success? (some? (:result res?))
@@ -145,7 +145,7 @@
                                              (cons impl? args)
                                              args)
                                      r     (binding [*env* (merge default-env env)]
-                                             (t/log! {:level :debug :data {:sym sym :args args'}} ["Calling actual function for task" id])
+                                             (t/log! {:level :debug :data {:sym sym :args args'}} ["Calling actual function for task" sym "with id" id])
                                              (if vthread?
                                                ;; in cljs we dont need delay bc its single threaded
                                                (let [inner (p/create (fn [res rej]
@@ -170,9 +170,9 @@
 
                            (not (or (event-matches? res? next-event) ;; replay success
                                     (event-matches? res? next-failure))) ;; replay failure
-                           (throw (error/internal-error "Transition unexpected" {:got     (:type res?)
+                           (throw (error/internal-error "Transition unexpected" {:got      (:type res?)
                                                                                  :expected [success failure]})))]
-        (t/log! {:level :debug :data {:sym sym :retval retval}} ["Finished internal execution for task" id])
+        (t/log! {:level :debug :data {:sym sym :retval retval}} ["Finished internal execution for task" sym "with id" id])
         retval))
     ;; ensure we terminate the fn call, even if the next event wouldnt be the expected type
     (catch #?(:clj Exception :cljs js/Error) e

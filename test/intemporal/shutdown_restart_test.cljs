@@ -12,13 +12,16 @@
 (t/use-fixtures :once tu/with-trace-logging)
 
 (declare stop-worker)
+(def stop? (atom true))
+
 (defprotocol MyActivities
   (foo [this a]))
 
 (defrecord MyActivitiesImpl []
   MyActivities
   (foo [this a]
-    (stop-worker)
+    (when @stop?
+      (stop-worker))
     :foo))
 
 (defn-workflow my-workflow [k]
@@ -57,14 +60,14 @@
             (is (match? {:type :intemporal.protocol/invoke :sym 'intemporal.shutdown-restart-test/foo} e2))
             (is (nil? e3))))))))
 
-#_
 (deftest executor-shutdown-resume-test
   (testing "workflow resumes"
-    (let [stop-worker (w/start-worker mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
-                                              :polling-ms 10})]
-      (store/reenqueue-pending-tasks mstore (constantly nil))
-      (with-result [_ (p/delay 2000)]
+    (reset! stop? false)
+    (store/reenqueue-pending-tasks mstore (constantly nil))
+    (let [stop-worker (w/start-worker! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
+                                               :polling-ms 10})]
 
+      (with-result [_ (p/delay 2000)]
         (tu/print-tables mstore)
 
         (testing "workflow succeeded"

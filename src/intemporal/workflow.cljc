@@ -60,7 +60,7 @@
 
 (defn- worker-execute-fn
   "Executes a given protocol, activity or workflow `task`"
-  [store protocols {:keys [type id root] :as task} task-counter shutting-down?]
+  [store protocols {:keys [type id root sym] :as task} task-counter shutting-down?]
   (let [runtime      (:runtime task)
         base-env     {:store   store
                       :type    type
@@ -74,7 +74,7 @@
         internal-env (merge internal/default-env base-env runtime)]
     ;; root task: we only enqueue workflows
     (with-env internal-env
-      (t/log! {:level :debug :data {:sym (:sym task) :env internal-env}} ["Resuming task with id" (:id task)])
+      (t/log! {:level :debug :data {:sym sym :env internal-env}} ["Resuming task" sym "with id" (:id task)])
       (internal/resume-task internal-env store protocols task))))
 
 (defn- worker-poll-fn
@@ -86,8 +86,8 @@
       (-> (p/delay polling-ms)
           (p/chain (fn [_]
                      (loop []
-                       (when-let [task (store/dequeue-task store)]
-                         (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
+                       (when-let [{:keys [sym id] :as task} (store/dequeue-task store)]
+                         (t/log! {:level :debug :_data {:task task}} ["Dequeued task" sym "with id" id])
                          (submit task-executor (fn [] (worker-execute-fn store protocols task task-counter (fn [] (not (running? task-executor))))))
                          (recur)))
                      (when (running? task-executor)
@@ -118,15 +118,16 @@
      (p/vthread
        #_{:clj-kondo/ignore [:loop-without-recur :invalid-arity]}
        (p/loop []
-         (-> (p/delay polling-ms)
-             (p/chain (fn [_]
-                        (when-let [task (store/dequeue-task store)]
-                          (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
-                          (p/vthread
-                            (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))
-                        (when @run?
-                          (p/recur)))))))
-     (fn [] (reset! run? false)))))
+         (when @run?
+           (p/let [_ (p/delay polling-ms)]
+             (when-let [task (store/dequeue-task store)]
+               (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
+               (p/vthread
+                 (worker-execute-fn store protocols task task-counter (fn [] (not @run?))))
+               (when @run?
+                 (p/recur)))))))
+     (fn []
+       (reset! run? false)))))
 
 (defn enqueue-and-wait
   [{:keys [store] :as opts} task]

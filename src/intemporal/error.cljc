@@ -1,5 +1,8 @@
 (ns intemporal.error)
 
+(defn not-implemented []
+  (ex-info "Not implemented" {}))
+
 (defn internal-error? [ex]
   (when-let [t (-> ex ex-data ::type)]
     (or (= :internal t)
@@ -14,3 +17,4 @@
 
 (defn panic [msg]
   (ex-info msg {::type :panic}))
+
