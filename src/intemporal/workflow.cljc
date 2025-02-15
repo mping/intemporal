@@ -123,9 +123,9 @@
              (when-let [task (store/dequeue-task store)]
                (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
                (p/vthread
-                 (worker-execute-fn store protocols task task-counter (fn [] (not @run?))))
-               (when @run?
-                 (p/recur)))))))
+                 (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))
+             (when @run?
+               (p/recur))))))
      (fn []
        (reset! run? false)))))
 

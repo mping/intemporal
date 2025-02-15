@@ -244,8 +244,7 @@
              (do
                (watch-task this id (fn [task]
                                      (when (si/terminal? task)
-                                       (p/resolve! deferred task)
-                                       true)))
+                                       (p/resolve! deferred task))))
                ;; wait for resolution
                ;; remember: js doesnt have blocking op so we need to chain
                (-> (p/timeout deferred timeout-ms ::timeout)
