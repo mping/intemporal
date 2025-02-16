@@ -2,8 +2,6 @@ goog.provide("goog.html.SafeUrl");
 goog.require("goog.asserts");
 goog.require("goog.fs.url");
 goog.require("goog.html.TrustedResourceUrl");
-goog.require("goog.i18n.bidi.Dir");
-goog.require("goog.i18n.bidi.DirectionalString");
 goog.require("goog.string.Const");
 goog.require("goog.string.TypedString");
 goog.require("goog.string.internal");
@@ -11,17 +9,13 @@ goog.html.SafeUrl = class {
   constructor(value, token) {
     this.privateDoNotAccessOrElseSafeUrlWrappedValue_ = token === goog.html.SafeUrl.CONSTRUCTOR_TOKEN_PRIVATE_ ? value : "";
   }
+  toString() {
+    return this.privateDoNotAccessOrElseSafeUrlWrappedValue_.toString();
+  }
 };
 goog.html.SafeUrl.INNOCUOUS_STRING = "about:invalid#zClosurez";
 goog.html.SafeUrl.prototype.implementsGoogStringTypedString = true;
 goog.html.SafeUrl.prototype.getTypedStringValue = function() {
-  return this.privateDoNotAccessOrElseSafeUrlWrappedValue_.toString();
-};
-goog.html.SafeUrl.prototype.implementsGoogI18nBidiDirectionalString = true;
-goog.html.SafeUrl.prototype.getDirection = function() {
-  return goog.i18n.bidi.Dir.LTR;
-};
-goog.html.SafeUrl.prototype.toString = function() {
   return this.privateDoNotAccessOrElseSafeUrlWrappedValue_.toString();
 };
 goog.html.SafeUrl.unwrap = function(safeUrl) {
@@ -35,7 +29,7 @@ goog.html.SafeUrl.unwrap = function(safeUrl) {
 goog.html.SafeUrl.fromConstant = function(url) {
   return goog.html.SafeUrl.createSafeUrlSecurityPrivateDoNotAccessOrElse(goog.string.Const.unwrap(url));
 };
-goog.html.SAFE_MIME_TYPE_PATTERN_ = new RegExp("^(?:audio/(?:3gpp2|3gpp|aac|L16|midi|mp3|mp4|mpeg|oga|ogg|opus|x-m4a|x-matroska|x-wav|wav|webm)|" + "font/\\w+|" + "image/(?:bmp|gif|jpeg|jpg|png|tiff|webp|x-icon)|" + "video/(?:mpeg|mp4|ogg|webm|quicktime|x-matroska))" + '(?:;\\w+\x3d(?:\\w+|"[\\w;,\x3d ]+"))*$', "i");
+goog.html.SAFE_MIME_TYPE_PATTERN_ = new RegExp("^(?:audio/(?:3gpp2|3gpp|aac|L16|midi|mp3|mp4|mpeg|oga|ogg|opus|x-m4a|x-matroska|x-wav|wav|webm)|" + "font/\\w+|" + "image/(?:bmp|gif|jpeg|jpg|png|tiff|webp|x-icon|heic|heif)|" + "video/(?:mpeg|mp4|ogg|webm|quicktime|x-matroska))" + '(?:;\\w+\x3d(?:\\w+|"[\\w;,\x3d ]+"))*$', "i");
 goog.html.SafeUrl.isSafeMimeType = function(mimeType) {
   return goog.html.SAFE_MIME_TYPE_PATTERN_.test(mimeType);
 };
@@ -59,8 +53,7 @@ goog.html.SafeUrl.tryFromDataUrl = function(dataUrl) {
   dataUrl = String(dataUrl);
   var filteredDataUrl = dataUrl.replace(/(%0A|%0D)/g, "");
   var match = filteredDataUrl.match(goog.html.DATA_URL_PATTERN_);
-  var valid = match && goog.html.SafeUrl.isSafeMimeType(match[1]);
-  if (valid) {
+  if (match) {
     return goog.html.SafeUrl.createSafeUrlSecurityPrivateDoNotAccessOrElse(filteredDataUrl);
   }
   return null;
@@ -194,6 +187,29 @@ goog.html.SafeUrl.sanitizeAssertUnchanged = function(url, opt_allowDataUrl) {
     }
   }
   if (!goog.asserts.assert(goog.html.SAFE_URL_PATTERN_.test(url), "%s does not match the safe URL pattern", url)) {
+    url = goog.html.SafeUrl.INNOCUOUS_STRING;
+  }
+  return goog.html.SafeUrl.createSafeUrlSecurityPrivateDoNotAccessOrElse(url);
+};
+goog.html.SafeUrl.extractScheme = function(url) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+  } catch (e) {
+    return "https:";
+  }
+  return parsedUrl.protocol;
+};
+goog.html.SafeUrl.sanitizeJavascriptUrlAssertUnchanged = function(url) {
+  if (url instanceof goog.html.SafeUrl) {
+    return url;
+  } else if (typeof url == "object" && url.implementsGoogStringTypedString) {
+    url = url.getTypedStringValue();
+  } else {
+    url = String(url);
+  }
+  const parsedScheme = goog.html.SafeUrl.extractScheme(url);
+  if (!goog.asserts.assert(parsedScheme !== "javascript:", "%s is a javascript: URL", url)) {
     url = goog.html.SafeUrl.INNOCUOUS_STRING;
   }
   return goog.html.SafeUrl.createSafeUrlSecurityPrivateDoNotAccessOrElse(url);

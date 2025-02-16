@@ -1,12 +1,6 @@
 goog.provide("goog.string.format");
 goog.require("goog.string");
 goog.string.format = function(formatString, var_args) {
-  const args = Array.prototype.slice.call(arguments);
-  const template = args.shift();
-  if (typeof template == "undefined") {
-    throw new Error("[goog.string.format] Template required");
-  }
-  const formatRe = /%([0\- \+]*)(\d+)?(\.(\d+))?([%sfdiu])/g;
   function replacerDemuxer(match, flags, width, dotp, precision, type, offset, wholeString) {
     if (type == "%") {
       return "%";
@@ -18,6 +12,12 @@ goog.string.format = function(formatString, var_args) {
     arguments[0] = value;
     return goog.string.format.demuxes_[type].apply(null, arguments);
   }
+  const args = Array.prototype.slice.call(arguments);
+  const template = args.shift();
+  if (typeof template == "undefined") {
+    throw new Error("[goog.string.format] Template required");
+  }
+  const formatRe = /%([0\- \+]*)(\d+)?(\.(\d+))?([%sfdiu])/g;
   return template.replace(formatRe, replacerDemuxer);
 };
 goog.string.format.demuxes_ = {};

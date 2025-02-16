@@ -9,7 +9,8 @@ goog.reflect.sinkValue = function(x) {
   goog.reflect.sinkValue[" "](x);
   return x;
 };
-goog.reflect.sinkValue[" "] = goog.nullFunction;
+goog.reflect.sinkValue[" "] = function() {
+};
 goog.reflect.canAccessProperty = function(obj, prop) {
   try {
     goog.reflect.sinkValue(obj[prop]);

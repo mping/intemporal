@@ -87,7 +87,7 @@ goog.math.Rect.difference = function(a, b) {
   if (b.top > a.top) {
     result.push(new goog.math.Rect(a.left, a.top, a.width, b.top - a.top));
     top = b.top;
-    height -= b.top - a.top;
+    height = height - (b.top - a.top);
   }
   if (bb < ab) {
     result.push(new goog.math.Rect(a.left, bb, a.width, ab - bb));

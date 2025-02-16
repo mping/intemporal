@@ -1,7 +1,4 @@
 goog.loadModule(function(exports) {
-  "use strict";
-  goog.module("goog.object");
-  goog.module.declareLegacyNamespace();
   function forEach(obj, f, opt_obj) {
     for (const key in obj) {
       f.call(opt_obj, obj[key], key, obj);
@@ -184,6 +181,8 @@ goog.loadModule(function(exports) {
       return new Map(obj);
     } else if (typeof Set !== "undefined" && obj instanceof Set) {
       return new Set(obj);
+    } else if (obj instanceof Date) {
+      return new Date(obj.getTime());
     }
     const clone = Array.isArray(obj) ? [] : typeof ArrayBuffer === "function" && typeof ArrayBuffer.isView === "function" && ArrayBuffer.isView(obj) && !(obj instanceof DataView) ? new obj.constructor(obj.length) : {};
     for (const key in obj) {
@@ -198,7 +197,6 @@ goog.loadModule(function(exports) {
     }
     return transposed;
   }
-  const PROTOTYPE_FIELDS = ["constructor", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString", "toString", "valueOf",];
   function extend(target, var_args) {
     let key;
     let source;
@@ -224,7 +222,7 @@ goog.loadModule(function(exports) {
       throw new Error("Uneven number of arguments");
     }
     const rv = {};
-    for (let i = 0; i < argLength; i += 2) {
+    for (let i = 0; i < argLength; i = i + 2) {
       rv[arguments[i]] = arguments[i + 1];
     }
     return rv;
@@ -260,7 +258,7 @@ goog.loadModule(function(exports) {
     }
     const visitedSet = {};
     let proto = obj;
-    while (proto && (proto !== Object.prototype || !!includeObjectPrototype) && (proto !== Function.prototype || !!includeFunctionPrototype)) {
+    for (; proto && (proto !== Object.prototype || !!includeObjectPrototype) && (proto !== Function.prototype || !!includeFunctionPrototype);) {
       const names = Object.getOwnPropertyNames(proto);
       for (let i = 0; i < names.length; i++) {
         visitedSet[names[i]] = true;
@@ -273,7 +271,11 @@ goog.loadModule(function(exports) {
     const proto = Object.getPrototypeOf(constructor.prototype);
     return proto && proto.constructor;
   }
-  exports = {add, clear, clone, contains, containsKey, containsValue, create, createImmutableView, createSet, equals, every, extend, filter, findKey, findValue, forEach, get, getAllPropertyNames, getAnyKey, getAnyValue, getCount, getKeys, getSuperClass, getValueByKeys, getValues, isEmpty, isImmutableView, map, remove, set, setIfUndefined, setWithReturnValueIfNotSet, some, transpose, unsafeClone,};
+  "use strict";
+  goog.module("goog.object");
+  goog.module.declareLegacyNamespace();
+  const PROTOTYPE_FIELDS = ["constructor", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString", "toString", "valueOf"];
+  exports = {add, clear, clone, contains, containsKey, containsValue, create, createImmutableView, createSet, equals, every, extend, filter, findKey, findValue, forEach, get, getAllPropertyNames, getAnyKey, getAnyValue, getCount, getKeys, getSuperClass, getValueByKeys, getValues, isEmpty, isImmutableView, map, remove, set, setIfUndefined, setWithReturnValueIfNotSet, some, transpose, unsafeClone};
   return exports;
 });
 

@@ -14,6 +14,9 @@ goog.loadModule(function(exports) {
       this.privateDoNotAccessOrElseSafeStyleSheetWrappedValue_ = token === CONSTRUCTOR_TOKEN_PRIVATE ? value : "";
       this.implementsGoogStringTypedString = true;
     }
+    toString() {
+      return this.privateDoNotAccessOrElseSafeStyleSheetWrappedValue_.toString();
+    }
     static createRule(selector, style) {
       if (contains(selector, "\x3c")) {
         throw new Error(`Selector does not allow '<', got: ${selector}`);
@@ -52,7 +55,7 @@ goog.loadModule(function(exports) {
         if (Array.isArray(argument)) {
           argument.forEach(addArgument);
         } else {
-          result += SafeStyleSheet.unwrap(argument);
+          result = result + SafeStyleSheet.unwrap(argument);
         }
       };
       Array.prototype.forEach.call(arguments, addArgument);
@@ -81,9 +84,6 @@ goog.loadModule(function(exports) {
       return new SafeStyleSheet(styleSheet, CONSTRUCTOR_TOKEN_PRIVATE);
     }
   }
-  SafeStyleSheet.prototype.toString = function() {
-    return this.privateDoNotAccessOrElseSafeStyleSheetWrappedValue_.toString();
-  };
   SafeStyleSheet.EMPTY = SafeStyleSheet.createSafeStyleSheetSecurityPrivateDoNotAccessOrElse("");
   exports = SafeStyleSheet;
   return exports;

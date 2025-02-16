@@ -1,124 +1,130 @@
-goog.provide("goog.asserts");
-goog.provide("goog.asserts.AssertionError");
-goog.require("goog.debug.Error");
-goog.require("goog.dom.NodeType");
-goog.asserts.ENABLE_ASSERTS = goog.define("goog.asserts.ENABLE_ASSERTS", goog.DEBUG);
-goog.asserts.AssertionError = function(messagePattern, messageArgs) {
-  goog.debug.Error.call(this, goog.asserts.subs_(messagePattern, messageArgs));
-  this.messagePattern = messagePattern;
-};
-goog.inherits(goog.asserts.AssertionError, goog.debug.Error);
-goog.asserts.AssertionError.prototype.name = "AssertionError";
-goog.asserts.DEFAULT_ERROR_HANDLER = function(e) {
-  throw e;
-};
-goog.asserts.errorHandler_ = goog.asserts.DEFAULT_ERROR_HANDLER;
-goog.asserts.subs_ = function(pattern, subs) {
-  var splitParts = pattern.split("%s");
-  var returnString = "";
-  var subLast = splitParts.length - 1;
-  for (var i = 0; i < subLast; i++) {
-    var sub = i < subs.length ? subs[i] : "%s";
-    returnString += splitParts[i] + sub;
+goog.loadModule(function(exports) {
+  function AssertionError(messagePattern, messageArgs) {
+    DebugError.call(this, subs(messagePattern, messageArgs));
+    this.messagePattern = messagePattern;
   }
-  return returnString + splitParts[subLast];
-};
-goog.asserts.doAssertFailure_ = function(defaultMessage, defaultArgs, givenMessage, givenArgs) {
-  var message = "Assertion failed";
-  if (givenMessage) {
-    message += ": " + givenMessage;
-    var args = givenArgs;
-  } else if (defaultMessage) {
-    message += ": " + defaultMessage;
-    args = defaultArgs;
+  function subs(pattern, subs) {
+    const splitParts = pattern.split("%s");
+    let returnString = "";
+    const subLast = splitParts.length - 1;
+    for (let i = 0; i < subLast; i++) {
+      const sub = i < subs.length ? subs[i] : "%s";
+      returnString = returnString + (splitParts[i] + sub);
+    }
+    return returnString + splitParts[subLast];
   }
-  var e = new goog.asserts.AssertionError("" + message, args || []);
-  goog.asserts.errorHandler_(e);
-};
-goog.asserts.setErrorHandler = function(errorHandler) {
-  if (goog.asserts.ENABLE_ASSERTS) {
-    goog.asserts.errorHandler_ = errorHandler;
+  function doAssertFailure(defaultMessage, defaultArgs, givenMessage, givenArgs) {
+    let message = "Assertion failed";
+    let args;
+    if (givenMessage) {
+      message = message + (": " + givenMessage);
+      args = givenArgs;
+    } else if (defaultMessage) {
+      message = message + (": " + defaultMessage);
+      args = defaultArgs;
+    }
+    const e = new AssertionError("" + message, args || []);
+    errorHandler_(e);
   }
-};
-goog.asserts.assert = function(condition, opt_message, var_args) {
-  if (goog.asserts.ENABLE_ASSERTS && !condition) {
-    goog.asserts.doAssertFailure_("", null, opt_message, Array.prototype.slice.call(arguments, 2));
+  function getType(value) {
+    if (value instanceof Function) {
+      return value.displayName || value.name || "unknown type name";
+    } else if (value instanceof Object) {
+      return value.constructor.displayName || value.constructor.name || Object.prototype.toString.call(value);
+    } else {
+      return value === null ? "null" : typeof value;
+    }
   }
-  return condition;
-};
-goog.asserts.assertExists = function(value, opt_message, var_args) {
-  if (goog.asserts.ENABLE_ASSERTS && value == null) {
-    goog.asserts.doAssertFailure_("Expected to exist: %s.", [value], opt_message, Array.prototype.slice.call(arguments, 2));
-  }
-  return value;
-};
-goog.asserts.fail = function(opt_message, var_args) {
-  if (goog.asserts.ENABLE_ASSERTS) {
-    goog.asserts.errorHandler_(new goog.asserts.AssertionError("Failure" + (opt_message ? ": " + opt_message : ""), Array.prototype.slice.call(arguments, 1)));
-  }
-};
-goog.asserts.assertNumber = function(value, opt_message, var_args) {
-  if (goog.asserts.ENABLE_ASSERTS && typeof value !== "number") {
-    goog.asserts.doAssertFailure_("Expected number but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
-  }
-  return value;
-};
-goog.asserts.assertString = function(value, opt_message, var_args) {
-  if (goog.asserts.ENABLE_ASSERTS && typeof value !== "string") {
-    goog.asserts.doAssertFailure_("Expected string but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
-  }
-  return value;
-};
-goog.asserts.assertFunction = function(value, opt_message, var_args) {
-  if (goog.asserts.ENABLE_ASSERTS && typeof value !== "function") {
-    goog.asserts.doAssertFailure_("Expected function but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
-  }
-  return value;
-};
-goog.asserts.assertObject = function(value, opt_message, var_args) {
-  if (goog.asserts.ENABLE_ASSERTS && !goog.isObject(value)) {
-    goog.asserts.doAssertFailure_("Expected object but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
-  }
-  return value;
-};
-goog.asserts.assertArray = function(value, opt_message, var_args) {
-  if (goog.asserts.ENABLE_ASSERTS && !Array.isArray(value)) {
-    goog.asserts.doAssertFailure_("Expected array but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
-  }
-  return value;
-};
-goog.asserts.assertBoolean = function(value, opt_message, var_args) {
-  if (goog.asserts.ENABLE_ASSERTS && typeof value !== "boolean") {
-    goog.asserts.doAssertFailure_("Expected boolean but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
-  }
-  return value;
-};
-goog.asserts.assertElement = function(value, opt_message, var_args) {
-  if (goog.asserts.ENABLE_ASSERTS && (!goog.isObject(value) || value.nodeType != goog.dom.NodeType.ELEMENT)) {
-    goog.asserts.doAssertFailure_("Expected Element but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
-  }
-  return value;
-};
-goog.asserts.assertInstanceof = function(value, type, opt_message, var_args) {
-  if (goog.asserts.ENABLE_ASSERTS && !(value instanceof type)) {
-    goog.asserts.doAssertFailure_("Expected instanceof %s but got %s.", [goog.asserts.getType_(type), goog.asserts.getType_(value)], opt_message, Array.prototype.slice.call(arguments, 3));
-  }
-  return value;
-};
-goog.asserts.assertFinite = function(value, opt_message, var_args) {
-  if (goog.asserts.ENABLE_ASSERTS && (typeof value != "number" || !isFinite(value))) {
-    goog.asserts.doAssertFailure_("Expected %s to be a finite number but it is not.", [value], opt_message, Array.prototype.slice.call(arguments, 2));
-  }
-  return value;
-};
-goog.asserts.getType_ = function(value) {
-  if (value instanceof Function) {
-    return value.displayName || value.name || "unknown type name";
-  } else if (value instanceof Object) {
-    return value.constructor.displayName || value.constructor.name || Object.prototype.toString.call(value);
-  } else {
-    return value === null ? "null" : typeof value;
-  }
-};
+  "use strict";
+  goog.module("goog.asserts");
+  goog.module.declareLegacyNamespace();
+  const DebugError = goog.require("goog.debug.Error");
+  const NodeType = goog.require("goog.dom.NodeType");
+  exports.ENABLE_ASSERTS = goog.define("goog.asserts.ENABLE_ASSERTS", goog.DEBUG);
+  goog.inherits(AssertionError, DebugError);
+  exports.AssertionError = AssertionError;
+  AssertionError.prototype.name = "AssertionError";
+  exports.DEFAULT_ERROR_HANDLER = function(e) {
+    throw e;
+  };
+  let errorHandler_ = exports.DEFAULT_ERROR_HANDLER;
+  exports.setErrorHandler = function(errorHandler) {
+    if (exports.ENABLE_ASSERTS) {
+      errorHandler_ = errorHandler;
+    }
+  };
+  exports.assert = function(condition, opt_message, var_args) {
+    if (exports.ENABLE_ASSERTS && !condition) {
+      doAssertFailure("", null, opt_message, Array.prototype.slice.call(arguments, 2));
+    }
+    return condition;
+  };
+  exports.assertExists = function(value, opt_message, var_args) {
+    if (exports.ENABLE_ASSERTS && value == null) {
+      doAssertFailure("Expected to exist: %s.", [value], opt_message, Array.prototype.slice.call(arguments, 2));
+    }
+    return value;
+  };
+  exports.fail = function(opt_message, var_args) {
+    if (exports.ENABLE_ASSERTS) {
+      errorHandler_(new AssertionError("Failure" + (opt_message ? ": " + opt_message : ""), Array.prototype.slice.call(arguments, 1)));
+    }
+  };
+  exports.assertNumber = function(value, opt_message, var_args) {
+    if (exports.ENABLE_ASSERTS && typeof value !== "number") {
+      doAssertFailure("Expected number but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
+    }
+    return value;
+  };
+  exports.assertString = function(value, opt_message, var_args) {
+    if (exports.ENABLE_ASSERTS && typeof value !== "string") {
+      doAssertFailure("Expected string but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
+    }
+    return value;
+  };
+  exports.assertFunction = function(value, opt_message, var_args) {
+    if (exports.ENABLE_ASSERTS && typeof value !== "function") {
+      doAssertFailure("Expected function but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
+    }
+    return value;
+  };
+  exports.assertObject = function(value, opt_message, var_args) {
+    if (exports.ENABLE_ASSERTS && !goog.isObject(value)) {
+      doAssertFailure("Expected object but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
+    }
+    return value;
+  };
+  exports.assertArray = function(value, opt_message, var_args) {
+    if (exports.ENABLE_ASSERTS && !Array.isArray(value)) {
+      doAssertFailure("Expected array but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
+    }
+    return value;
+  };
+  exports.assertBoolean = function(value, opt_message, var_args) {
+    if (exports.ENABLE_ASSERTS && typeof value !== "boolean") {
+      doAssertFailure("Expected boolean but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
+    }
+    return value;
+  };
+  exports.assertElement = function(value, opt_message, var_args) {
+    if (exports.ENABLE_ASSERTS && (!goog.isObject(value) || value.nodeType != NodeType.ELEMENT)) {
+      doAssertFailure("Expected Element but got %s: %s.", [goog.typeOf(value), value], opt_message, Array.prototype.slice.call(arguments, 2));
+    }
+    return value;
+  };
+  exports.assertInstanceof = function(value, type, opt_message, var_args) {
+    if (exports.ENABLE_ASSERTS && !(value instanceof type)) {
+      doAssertFailure("Expected instanceof %s but got %s.", [getType(type), getType(value)], opt_message, Array.prototype.slice.call(arguments, 3));
+    }
+    return value;
+  };
+  exports.assertFinite = function(value, opt_message, var_args) {
+    if (exports.ENABLE_ASSERTS && (typeof value != "number" || !isFinite(value))) {
+      doAssertFailure("Expected %s to be a finite number but it is not.", [value], opt_message, Array.prototype.slice.call(arguments, 2));
+    }
+    return value;
+  };
+  return exports;
+});
 
 //# sourceMappingURL=goog.asserts.asserts.js.map

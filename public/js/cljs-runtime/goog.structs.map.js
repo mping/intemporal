@@ -1,7 +1,7 @@
 goog.provide("goog.structs.Map");
 goog.require("goog.collections.iters");
+goog.require("goog.iter");
 goog.require("goog.iter.Iterator");
-goog.require("goog.iter.StopIteration");
 goog.require("goog.iter.es6");
 goog.structs.Map = function(opt_map, var_args) {
   this.map_ = {};
@@ -13,7 +13,8 @@ goog.structs.Map = function(opt_map, var_args) {
     if (argLength % 2) {
       throw new Error("Uneven number of arguments");
     }
-    for (var i = 0; i < argLength; i += 2) {
+    var i = 0;
+    for (; i < argLength; i = i + 2) {
       this.set(arguments[i], arguments[i + 1]);
     }
   } else if (opt_map) {
@@ -26,7 +27,8 @@ goog.structs.Map.prototype.getCount = function() {
 goog.structs.Map.prototype.getValues = function() {
   this.cleanupKeysArray_();
   var rv = [];
-  for (var i = 0; i < this.keys_.length; i++) {
+  var i = 0;
+  for (; i < this.keys_.length; i++) {
     var key = this.keys_[i];
     rv.push(this.map_[key]);
   }
@@ -43,7 +45,8 @@ goog.structs.Map.prototype.has = function(key) {
   return goog.structs.Map.hasKey_(this.map_, key);
 };
 goog.structs.Map.prototype.containsValue = function(val) {
-  for (var i = 0; i < this.keys_.length; i++) {
+  var i = 0;
+  for (; i < this.keys_.length; i++) {
     var key = this.keys_[i];
     if (goog.structs.Map.hasKey_(this.map_, key) && this.map_[key] == val) {
       return true;
@@ -60,7 +63,9 @@ goog.structs.Map.prototype.equals = function(otherMap, opt_equalityFn) {
   }
   var equalityFn = opt_equalityFn || goog.structs.Map.defaultEquals;
   this.cleanupKeysArray_();
-  for (var key, i = 0; key = this.keys_[i]; i++) {
+  var key;
+  var i = 0;
+  for (; key = this.keys_[i]; i++) {
     if (!equalityFn(this.get(key), otherMap.get(key))) {
       return false;
     }
@@ -98,7 +103,7 @@ goog.structs.Map.prototype.cleanupKeysArray_ = function() {
   if (this.size != this.keys_.length) {
     var srcIndex = 0;
     var destIndex = 0;
-    while (srcIndex < this.keys_.length) {
+    for (; srcIndex < this.keys_.length;) {
       var key = this.keys_[srcIndex];
       if (goog.structs.Map.hasKey_(this.map_, key)) {
         this.keys_[destIndex++] = key;
@@ -109,10 +114,10 @@ goog.structs.Map.prototype.cleanupKeysArray_ = function() {
   }
   if (this.size != this.keys_.length) {
     var seen = {};
-    var srcIndex = 0;
-    var destIndex = 0;
-    while (srcIndex < this.keys_.length) {
-      var key = this.keys_[srcIndex];
+    srcIndex = 0;
+    destIndex = 0;
+    for (; srcIndex < this.keys_.length;) {
+      key = this.keys_[srcIndex];
       if (!goog.structs.Map.hasKey_(seen, key)) {
         this.keys_[destIndex++] = key;
         seen[key] = 1;
@@ -139,18 +144,21 @@ goog.structs.Map.prototype.set = function(key, value) {
 goog.structs.Map.prototype.addAll = function(map) {
   if (map instanceof goog.structs.Map) {
     var keys = map.getKeys();
-    for (var i = 0; i < keys.length; i++) {
+    var i = 0;
+    for (; i < keys.length; i++) {
       this.set(keys[i], map.get(keys[i]));
     }
   } else {
-    for (var key in map) {
+    var key;
+    for (key in map) {
       this.set(key, map[key]);
     }
   }
 };
 goog.structs.Map.prototype.forEach = function(f, opt_obj) {
   var keys = this.getKeys();
-  for (var i = 0; i < keys.length; i++) {
+  var i = 0;
+  for (; i < keys.length; i++) {
     var key = keys[i];
     var value = this.get(key);
     f.call(opt_obj, value, key, this);
@@ -161,7 +169,8 @@ goog.structs.Map.prototype.clone = function() {
 };
 goog.structs.Map.prototype.transpose = function() {
   var transposed = new goog.structs.Map();
-  for (var i = 0; i < this.keys_.length; i++) {
+  var i = 0;
+  for (; i < this.keys_.length; i++) {
     var key = this.keys_[i];
     var value = this.map_[key];
     transposed.set(value, key);
@@ -171,7 +180,8 @@ goog.structs.Map.prototype.transpose = function() {
 goog.structs.Map.prototype.toObject = function() {
   this.cleanupKeysArray_();
   var obj = {};
-  for (var i = 0; i < this.keys_.length; i++) {
+  var i = 0;
+  for (; i < this.keys_.length; i++) {
     var key = this.keys_[i];
     obj[key] = this.map_[key];
   }
@@ -201,15 +211,15 @@ goog.structs.Map.prototype.__iterator__ = function(opt_keys) {
   var version = this.version_;
   var selfObj = this;
   var newIter = new goog.iter.Iterator();
-  newIter.nextValueOrThrow = function() {
+  newIter.next = function() {
     if (version != selfObj.version_) {
       throw new Error("The map has changed since the iterator was created");
     }
     if (i >= selfObj.keys_.length) {
-      throw goog.iter.StopIteration;
+      return goog.iter.ES6_ITERATOR_DONE;
     }
     var key = selfObj.keys_[i++];
-    return opt_keys ? key : selfObj.map_[key];
+    return goog.iter.createEs6IteratorYield(opt_keys ? key : selfObj.map_[key]);
   };
   return newIter;
 };

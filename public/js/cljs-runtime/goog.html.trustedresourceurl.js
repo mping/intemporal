@@ -4,22 +4,19 @@ goog.require("goog.fs.blob");
 goog.require("goog.fs.url");
 goog.require("goog.html.SafeScript");
 goog.require("goog.html.trustedtypes");
-goog.require("goog.i18n.bidi.Dir");
-goog.require("goog.i18n.bidi.DirectionalString");
 goog.require("goog.string.Const");
 goog.require("goog.string.TypedString");
 goog.html.TrustedResourceUrl = class {
   constructor(value, token) {
     this.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue_ = token === goog.html.TrustedResourceUrl.CONSTRUCTOR_TOKEN_PRIVATE_ ? value : "";
   }
+  toString() {
+    return this.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue_ + "";
+  }
 };
 goog.html.TrustedResourceUrl.prototype.implementsGoogStringTypedString = true;
 goog.html.TrustedResourceUrl.prototype.getTypedStringValue = function() {
   return this.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue_.toString();
-};
-goog.html.TrustedResourceUrl.prototype.implementsGoogI18nBidiDirectionalString = true;
-goog.html.TrustedResourceUrl.prototype.getDirection = function() {
-  return goog.i18n.bidi.Dir.LTR;
 };
 goog.html.TrustedResourceUrl.prototype.cloneWithParams = function(searchParams, opt_hashParams) {
   var url = goog.html.TrustedResourceUrl.unwrap(this);
@@ -28,9 +25,6 @@ goog.html.TrustedResourceUrl.prototype.cloneWithParams = function(searchParams, 
   var urlSearch = parts[2] || "";
   var urlHash = parts[3] || "";
   return goog.html.TrustedResourceUrl.createTrustedResourceUrlSecurityPrivateDoNotAccessOrElse(urlBase + goog.html.TrustedResourceUrl.stringifyParams_("?", urlSearch, searchParams) + goog.html.TrustedResourceUrl.stringifyParams_("#", urlHash, opt_hashParams));
-};
-goog.html.TrustedResourceUrl.prototype.toString = function() {
-  return this.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue_ + "";
 };
 goog.html.TrustedResourceUrl.unwrap = function(trustedResourceUrl) {
   return goog.html.TrustedResourceUrl.unwrapTrustedScriptURL(trustedResourceUrl).toString();
@@ -73,8 +67,9 @@ goog.html.TrustedResourceUrl.fromConstant = function(url) {
 };
 goog.html.TrustedResourceUrl.fromConstants = function(parts) {
   var unwrapped = "";
-  for (var i = 0; i < parts.length; i++) {
-    unwrapped += goog.string.Const.unwrap(parts[i]);
+  var i = 0;
+  for (; i < parts.length; i++) {
+    unwrapped = unwrapped + goog.string.Const.unwrap(parts[i]);
   }
   return goog.html.TrustedResourceUrl.createTrustedResourceUrlSecurityPrivateDoNotAccessOrElse(unwrapped);
 };
@@ -85,8 +80,9 @@ goog.html.TrustedResourceUrl.fromSafeScript = function(safeScript) {
 };
 goog.html.TrustedResourceUrl.CONSTRUCTOR_TOKEN_PRIVATE_ = {};
 goog.html.TrustedResourceUrl.createTrustedResourceUrlSecurityPrivateDoNotAccessOrElse = function(url) {
+  const noinlineUrl = url;
   const policy = goog.html.trustedtypes.getPolicyPrivateDoNotAccessOrElse();
-  var value = policy ? policy.createScriptURL(url) : url;
+  const value = policy ? policy.createScriptURL(noinlineUrl) : noinlineUrl;
   return new goog.html.TrustedResourceUrl(value, goog.html.TrustedResourceUrl.CONSTRUCTOR_TOKEN_PRIVATE_);
 };
 goog.html.TrustedResourceUrl.stringifyParams_ = function(prefix, currentString, params) {
@@ -96,17 +92,19 @@ goog.html.TrustedResourceUrl.stringifyParams_ = function(prefix, currentString, 
   if (typeof params === "string") {
     return params ? prefix + encodeURIComponent(params) : "";
   }
-  for (var key in params) {
+  var key;
+  for (key in params) {
     if (Object.prototype.hasOwnProperty.call(params, key)) {
       var value = params[key];
       var outputValues = Array.isArray(value) ? value : [value];
-      for (var i = 0; i < outputValues.length; i++) {
+      var i = 0;
+      for (; i < outputValues.length; i++) {
         var outputValue = outputValues[i];
         if (outputValue != null) {
           if (!currentString) {
             currentString = prefix;
           }
-          currentString += (currentString.length > prefix.length ? "\x26" : "") + encodeURIComponent(key) + "\x3d" + encodeURIComponent(String(outputValue));
+          currentString = currentString + ((currentString.length > prefix.length ? "\x26" : "") + encodeURIComponent(key) + "\x3d" + encodeURIComponent(String(outputValue)));
         }
       }
     }

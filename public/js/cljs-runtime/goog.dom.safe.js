@@ -1,6 +1,7 @@
 goog.provide("goog.dom.safe");
 goog.provide("goog.dom.safe.InsertAdjacentHtmlPosition");
 goog.require("goog.asserts");
+goog.require("goog.asserts.dom");
 goog.require("goog.dom.asserts");
 goog.require("goog.functions");
 goog.require("goog.html.SafeHtml");
@@ -33,7 +34,7 @@ goog.dom.safe.isInnerHtmlCleanupRecursive_ = goog.functions.cacheReturnValue(fun
 });
 goog.dom.safe.unsafeSetInnerHtmlDoNotUseOrElse = function(elem, html) {
   if (goog.dom.safe.isInnerHtmlCleanupRecursive_()) {
-    while (elem.lastChild) {
+    for (; elem.lastChild;) {
       elem.removeChild(elem.lastChild);
     }
   }
@@ -59,27 +60,27 @@ goog.dom.safe.setFormElementAction = function(form, url) {
   if (url instanceof goog.html.SafeUrl) {
     safeUrl = url;
   } else {
-    safeUrl = goog.html.SafeUrl.sanitizeAssertUnchanged(url);
+    safeUrl = goog.html.SafeUrl.sanitizeJavascriptUrlAssertUnchanged(url);
   }
-  goog.dom.asserts.assertIsHTMLFormElement(form).action = goog.html.SafeUrl.unwrap(safeUrl);
+  goog.asserts.dom.assertIsHtmlFormElement(form).action = goog.html.SafeUrl.unwrap(safeUrl);
 };
 goog.dom.safe.setButtonFormAction = function(button, url) {
   var safeUrl;
   if (url instanceof goog.html.SafeUrl) {
     safeUrl = url;
   } else {
-    safeUrl = goog.html.SafeUrl.sanitizeAssertUnchanged(url);
+    safeUrl = goog.html.SafeUrl.sanitizeJavascriptUrlAssertUnchanged(url);
   }
-  goog.dom.asserts.assertIsHTMLButtonElement(button).formAction = goog.html.SafeUrl.unwrap(safeUrl);
+  goog.asserts.dom.assertIsHtmlButtonElement(button).formAction = goog.html.SafeUrl.unwrap(safeUrl);
 };
 goog.dom.safe.setInputFormAction = function(input, url) {
   var safeUrl;
   if (url instanceof goog.html.SafeUrl) {
     safeUrl = url;
   } else {
-    safeUrl = goog.html.SafeUrl.sanitizeAssertUnchanged(url);
+    safeUrl = goog.html.SafeUrl.sanitizeJavascriptUrlAssertUnchanged(url);
   }
-  goog.dom.asserts.assertIsHTMLInputElement(input).formAction = goog.html.SafeUrl.unwrap(safeUrl);
+  goog.asserts.dom.assertIsHtmlInputElement(input).formAction = goog.html.SafeUrl.unwrap(safeUrl);
 };
 goog.dom.safe.setStyle = function(elem, style) {
   elem.style.cssText = goog.html.SafeStyle.unwrap(style);
@@ -88,66 +89,53 @@ goog.dom.safe.documentWrite = function(doc, html) {
   doc.write(goog.html.SafeHtml.unwrapTrustedHTML(html));
 };
 goog.dom.safe.setAnchorHref = function(anchor, url) {
-  goog.dom.asserts.assertIsHTMLAnchorElement(anchor);
+  goog.asserts.dom.assertIsHtmlAnchorElement(anchor);
   var safeUrl;
   if (url instanceof goog.html.SafeUrl) {
     safeUrl = url;
   } else {
-    safeUrl = goog.html.SafeUrl.sanitizeAssertUnchanged(url);
+    safeUrl = goog.html.SafeUrl.sanitizeJavascriptUrlAssertUnchanged(url);
   }
   anchor.href = goog.html.SafeUrl.unwrap(safeUrl);
 };
-goog.dom.safe.setImageSrc = function(imageElement, url) {
-  goog.dom.asserts.assertIsHTMLImageElement(imageElement);
-  var safeUrl;
-  if (url instanceof goog.html.SafeUrl) {
-    safeUrl = url;
-  } else {
-    var allowDataUrl = /^data:image\//i.test(url);
-    safeUrl = goog.html.SafeUrl.sanitizeAssertUnchanged(url, allowDataUrl);
-  }
-  imageElement.src = goog.html.SafeUrl.unwrap(safeUrl);
-};
 goog.dom.safe.setAudioSrc = function(audioElement, url) {
-  goog.dom.asserts.assertIsHTMLAudioElement(audioElement);
+  goog.asserts.dom.assertIsHtmlAudioElement(audioElement);
   var safeUrl;
   if (url instanceof goog.html.SafeUrl) {
     safeUrl = url;
   } else {
-    var allowDataUrl = /^data:audio\//i.test(url);
-    safeUrl = goog.html.SafeUrl.sanitizeAssertUnchanged(url, allowDataUrl);
+    safeUrl = goog.html.SafeUrl.sanitizeJavascriptUrlAssertUnchanged(url);
   }
   audioElement.src = goog.html.SafeUrl.unwrap(safeUrl);
 };
 goog.dom.safe.setVideoSrc = function(videoElement, url) {
-  goog.dom.asserts.assertIsHTMLVideoElement(videoElement);
+  goog.asserts.dom.assertIsHtmlVideoElement(videoElement);
   var safeUrl;
   if (url instanceof goog.html.SafeUrl) {
     safeUrl = url;
   } else {
-    var allowDataUrl = /^data:video\//i.test(url);
-    safeUrl = goog.html.SafeUrl.sanitizeAssertUnchanged(url, allowDataUrl);
+    safeUrl = goog.html.SafeUrl.sanitizeJavascriptUrlAssertUnchanged(url);
   }
   videoElement.src = goog.html.SafeUrl.unwrap(safeUrl);
 };
 goog.dom.safe.setEmbedSrc = function(embed, url) {
-  goog.dom.asserts.assertIsHTMLEmbedElement(embed);
+  goog.asserts.dom.assertIsHtmlEmbedElement(embed);
   embed.src = goog.html.TrustedResourceUrl.unwrapTrustedScriptURL(url);
 };
 goog.dom.safe.setFrameSrc = function(frame, url) {
-  goog.dom.asserts.assertIsHTMLFrameElement(frame);
+  goog.asserts.dom.assertIsHtmlFrameElement(frame);
   frame.src = goog.html.TrustedResourceUrl.unwrap(url);
 };
 goog.dom.safe.setIframeSrc = function(iframe, url) {
-  goog.dom.asserts.assertIsHTMLIFrameElement(iframe);
+  goog.asserts.dom.assertIsHtmlIFrameElement(iframe);
   iframe.src = goog.html.TrustedResourceUrl.unwrap(url);
 };
 goog.dom.safe.setIframeSrcdoc = function(iframe, html) {
-  goog.dom.asserts.assertIsHTMLIFrameElement(iframe);
+  goog.asserts.dom.assertIsHtmlIFrameElement(iframe);
   iframe.srcdoc = goog.html.SafeHtml.unwrapTrustedHTML(html);
 };
 goog.dom.safe.setLinkHrefAndRel = function(link, url, rel) {
-  goog.dom.asserts.assertIsHTMLLinkElement(link);
+  goog.asserts.dom.assertIsHtmlLinkElement(link);
   link.rel = rel;
   if (goog.string.internal.caseInsensitiveContains(rel, "stylesheet")) {
     goog.asserts.assert(url instanceof goog.html.TrustedResourceUrl, 'URL must be TrustedResourceUrl because "rel" contains "stylesheet"');
@@ -162,22 +150,22 @@ goog.dom.safe.setLinkHrefAndRel = function(link, url, rel) {
   } else if (url instanceof goog.html.SafeUrl) {
     link.href = goog.html.SafeUrl.unwrap(url);
   } else {
-    link.href = goog.html.SafeUrl.unwrap(goog.html.SafeUrl.sanitizeAssertUnchanged(url));
+    link.href = goog.html.SafeUrl.unwrap(goog.html.SafeUrl.sanitizeJavascriptUrlAssertUnchanged(url));
   }
 };
 goog.dom.safe.setObjectData = function(object, url) {
-  goog.dom.asserts.assertIsHTMLObjectElement(object);
+  goog.asserts.dom.assertIsHtmlObjectElement(object);
   object.data = goog.html.TrustedResourceUrl.unwrapTrustedScriptURL(url);
 };
 goog.dom.safe.setScriptSrc = function(script, url) {
-  goog.dom.asserts.assertIsHTMLScriptElement(script);
-  script.src = goog.html.TrustedResourceUrl.unwrapTrustedScriptURL(url);
+  goog.asserts.dom.assertIsHtmlScriptElement(script);
   goog.dom.safe.setNonceForScriptElement_(script);
+  script.src = goog.html.TrustedResourceUrl.unwrapTrustedScriptURL(url);
 };
 goog.dom.safe.setScriptContent = function(script, content) {
-  goog.dom.asserts.assertIsHTMLScriptElement(script);
-  script.textContent = goog.html.SafeScript.unwrapTrustedScript(content);
+  goog.asserts.dom.assertIsHtmlScriptElement(script);
   goog.dom.safe.setNonceForScriptElement_(script);
+  script.textContent = goog.html.SafeScript.unwrapTrustedScript(content);
 };
 goog.dom.safe.setNonceForScriptElement_ = function(script) {
   var win = script.ownerDocument && script.ownerDocument.defaultView;
@@ -192,7 +180,7 @@ goog.dom.safe.setLocationHref = function(loc, url) {
   if (url instanceof goog.html.SafeUrl) {
     safeUrl = url;
   } else {
-    safeUrl = goog.html.SafeUrl.sanitizeAssertUnchanged(url);
+    safeUrl = goog.html.SafeUrl.sanitizeJavascriptUrlAssertUnchanged(url);
   }
   loc.href = goog.html.SafeUrl.unwrap(safeUrl);
 };
@@ -202,7 +190,7 @@ goog.dom.safe.assignLocation = function(loc, url) {
   if (url instanceof goog.html.SafeUrl) {
     safeUrl = url;
   } else {
-    safeUrl = goog.html.SafeUrl.sanitizeAssertUnchanged(url);
+    safeUrl = goog.html.SafeUrl.sanitizeJavascriptUrlAssertUnchanged(url);
   }
   loc.assign(goog.html.SafeUrl.unwrap(safeUrl));
 };
@@ -211,7 +199,7 @@ goog.dom.safe.replaceLocation = function(loc, url) {
   if (url instanceof goog.html.SafeUrl) {
     safeUrl = url;
   } else {
-    safeUrl = goog.html.SafeUrl.sanitizeAssertUnchanged(url);
+    safeUrl = goog.html.SafeUrl.sanitizeJavascriptUrlAssertUnchanged(url);
   }
   loc.replace(goog.html.SafeUrl.unwrap(safeUrl));
 };
@@ -220,7 +208,7 @@ goog.dom.safe.openInWindow = function(url, opt_openerWin, opt_name, opt_specs) {
   if (url instanceof goog.html.SafeUrl) {
     safeUrl = url;
   } else {
-    safeUrl = goog.html.SafeUrl.sanitizeAssertUnchanged(url);
+    safeUrl = goog.html.SafeUrl.sanitizeJavascriptUrlAssertUnchanged(url);
   }
   var win = opt_openerWin || goog.global;
   var name = opt_name instanceof goog.string.Const ? goog.string.Const.unwrap(opt_name) : opt_name || "";
@@ -245,7 +233,7 @@ goog.dom.safe.createImageFromBlob = function(blob) {
   image.onload = function() {
     goog.global.URL.revokeObjectURL(objectUrl);
   };
-  goog.dom.safe.setImageSrc(image, goog.html.uncheckedconversions.safeUrlFromStringKnownToSatisfyTypeContract(goog.string.Const.from("Image blob URL."), objectUrl));
+  image.src = objectUrl;
   return image;
 };
 goog.dom.safe.createContextualFragment = function(range, html) {

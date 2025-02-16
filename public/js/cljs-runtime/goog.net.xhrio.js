@@ -46,7 +46,7 @@ goog.scope(function() {
   };
   goog.inherits(goog.net.XhrIo, goog.events.EventTarget);
   const XhrIo = goog.net.XhrIo;
-  goog.net.XhrIo.ResponseType = {DEFAULT:"", TEXT:"text", DOCUMENT:"document", BLOB:"blob", ARRAY_BUFFER:"arraybuffer",};
+  goog.net.XhrIo.ResponseType = {DEFAULT:"", TEXT:"text", DOCUMENT:"document", BLOB:"blob", ARRAY_BUFFER:"arraybuffer"};
   const ResponseType = goog.net.XhrIo.ResponseType;
   goog.net.XhrIo.prototype.logger_ = goog.log.getLogger("goog.net.XhrIo");
   goog.net.XhrIo.CONTENT_TYPE_HEADER = "Content-Type";
@@ -76,7 +76,7 @@ goog.scope(function() {
   };
   goog.net.XhrIo.cleanup = function() {
     const instances = goog.net.XhrIo.sendInstances_;
-    while (instances.length) {
+    for (; instances.length;) {
       instances.pop().dispose();
     }
   };
@@ -161,7 +161,9 @@ goog.scope(function() {
         throw new Error("Unknown input type for opt_headers: " + String(opt_headers));
       }
     }
-    const contentTypeKey = Array.from(headers.keys()).find(header => goog.string.caseInsensitiveEquals(goog.net.XhrIo.CONTENT_TYPE_HEADER, header));
+    const contentTypeKey = Array.from(headers.keys()).find(header => {
+      return goog.string.caseInsensitiveEquals(goog.net.XhrIo.CONTENT_TYPE_HEADER, header);
+    });
     const contentIsFormData = goog.global["FormData"] && content instanceof goog.global["FormData"];
     if (goog.array.contains(goog.net.XhrIo.METHODS_WITH_FORM_DATA, method) && !contentTypeKey && !contentIsFormData) {
       headers.set(goog.net.XhrIo.CONTENT_TYPE_HEADER, goog.net.XhrIo.FORM_CONTENT_TYPE);
@@ -204,7 +206,7 @@ goog.scope(function() {
     }
   };
   goog.net.XhrIo.shouldUseXhr2Timeout_ = function(xhr) {
-    return goog.userAgent.IE && goog.userAgent.isVersionOrHigher(9) && typeof xhr[goog.net.XhrIo.XHR2_TIMEOUT_] === "number" && xhr[goog.net.XhrIo.XHR2_ON_TIMEOUT_] !== undefined;
+    return goog.userAgent.IE && typeof xhr[goog.net.XhrIo.XHR2_TIMEOUT_] === "number" && xhr[goog.net.XhrIo.XHR2_ON_TIMEOUT_] !== undefined;
   };
   goog.net.XhrIo.prototype.createXhr = function() {
     return this.xmlHttpFactory_ ? this.xmlHttpFactory_.createInstance() : goog.net.XmlHttp();
@@ -313,13 +315,14 @@ goog.scope(function() {
     this.dispatchEvent(goog.net.XhrIo.buildProgressEvent_(e, opt_isDownload ? goog.net.EventType.DOWNLOAD_PROGRESS : goog.net.EventType.UPLOAD_PROGRESS));
   };
   goog.net.XhrIo.buildProgressEvent_ = function(e, eventType) {
-    return {type:eventType, lengthComputable:e.lengthComputable, loaded:e.loaded, total:e.total,};
+    return {type:eventType, lengthComputable:e.lengthComputable, loaded:e.loaded, total:e.total};
   };
   goog.net.XhrIo.prototype.cleanUpXhr_ = function(opt_fromDispose) {
     if (this.xhr_) {
       this.cleanUpTimeoutTimer_();
       const xhr = this.xhr_;
-      const clearedOnReadyStateChange = this.xhrOptions_[goog.net.XmlHttp.OptionType.USE_NULL_FUNCTION] ? goog.nullFunction : null;
+      const clearedOnReadyStateChange = this.xhrOptions_[goog.net.XmlHttp.OptionType.USE_NULL_FUNCTION] ? () => {
+      } : null;
       this.xhr_ = null;
       this.xhrOptions_ = null;
       if (!opt_fromDispose) {
@@ -444,7 +447,7 @@ goog.scope(function() {
     return value === null ? undefined : value;
   };
   goog.net.XhrIo.prototype.getAllResponseHeaders = function() {
-    return this.xhr_ && this.isComplete() ? this.xhr_.getAllResponseHeaders() || "" : "";
+    return this.xhr_ && this.getReadyState() >= goog.net.XmlHttp.ReadyState.LOADED ? this.xhr_.getAllResponseHeaders() || "" : "";
   };
   goog.net.XhrIo.prototype.getResponseHeaders = function() {
     const headersObject = {};

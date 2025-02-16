@@ -4,7 +4,8 @@ goog.math.Integer = function(bits, sign) {
   this.sign_ = sign;
   var localBits = [];
   var top = true;
-  for (var i = bits.length - 1; i >= 0; i--) {
+  var i = bits.length - 1;
+  for (; i >= 0; i--) {
     var val = bits[i] | 0;
     if (!top || val != sign) {
       localBits[i] = val;
@@ -30,9 +31,10 @@ goog.math.Integer.fromNumber = function(value) {
   } else {
     var bits = [];
     var pow = 1;
-    for (var i = 0; value >= pow; i++) {
+    var i = 0;
+    for (; value >= pow; i++) {
       bits[i] = value / pow | 0;
-      pow *= goog.math.Integer.TWO_PWR_32_DBL_;
+      pow = pow * goog.math.Integer.TWO_PWR_32_DBL_;
     }
     return new goog.math.Integer(bits, 0);
   }
@@ -56,7 +58,8 @@ goog.math.Integer.fromString = function(str, opt_radix) {
   }
   var radixToPower = goog.math.Integer.fromNumber(Math.pow(radix, 8));
   var result = goog.math.Integer.ZERO;
-  for (var i = 0; i < str.length; i += 8) {
+  var i = 0;
+  for (; i < str.length; i = i + 8) {
     var size = Math.min(8, str.length - i);
     var value = parseInt(str.substring(i, i + size), radix);
     if (size < 8) {
@@ -82,9 +85,10 @@ goog.math.Integer.prototype.toNumber = function() {
   } else {
     var val = 0;
     var pow = 1;
-    for (var i = 0; i < this.bits_.length; i++) {
-      val += this.getBitsUnsigned(i) * pow;
-      pow *= goog.math.Integer.TWO_PWR_32_DBL_;
+    var i = 0;
+    for (; i < this.bits_.length; i++) {
+      val = val + this.getBitsUnsigned(i) * pow;
+      pow = pow * goog.math.Integer.TWO_PWR_32_DBL_;
     }
     return val;
   }
@@ -102,7 +106,7 @@ goog.math.Integer.prototype.toString = function(opt_radix) {
   var radixToPower = goog.math.Integer.fromNumber(Math.pow(radix, 6));
   var rem = this;
   var result = "";
-  while (true) {
+  for (; true;) {
     var remDiv = rem.divide(radixToPower);
     var intval = rem.subtract(remDiv.multiply(radixToPower)).toInt() >>> 0;
     var digits = intval.toString(radix);
@@ -110,7 +114,7 @@ goog.math.Integer.prototype.toString = function(opt_radix) {
     if (rem.isZero()) {
       return digits + result;
     } else {
-      while (digits.length < 6) {
+      for (; digits.length < 6;) {
         digits = "0" + digits;
       }
       result = "" + digits + result;
@@ -137,7 +141,8 @@ goog.math.Integer.prototype.isZero = function() {
   if (this.sign_ != 0) {
     return false;
   }
-  for (var i = 0; i < this.bits_.length; i++) {
+  var i = 0;
+  for (; i < this.bits_.length; i++) {
     if (this.bits_[i] != 0) {
       return false;
     }
@@ -155,7 +160,8 @@ goog.math.Integer.prototype.equals = function(other) {
     return false;
   }
   var len = Math.max(this.bits_.length, other.bits_.length);
-  for (var i = 0; i < len; i++) {
+  var i = 0;
+  for (; i < len; i++) {
     if (this.getBits(i) != other.getBits(i)) {
       return false;
     }
@@ -191,13 +197,14 @@ goog.math.Integer.prototype.shorten = function(numBits) {
   var arr_index = numBits - 1 >> 5;
   var bit_index = (numBits - 1) % 32;
   var bits = [];
-  for (var i = 0; i < arr_index; i++) {
+  var i = 0;
+  for (; i < arr_index; i++) {
     bits[i] = this.getBits(i);
   }
   var sigBits = bit_index == 31 ? 4294967295 : (1 << bit_index + 1) - 1;
   var val = this.getBits(arr_index) & sigBits;
   if (val & 1 << bit_index) {
-    val |= 4294967295 - sigBits;
+    val = val | 4294967295 - sigBits;
     bits[arr_index] = val;
     return new goog.math.Integer(bits, -1);
   } else {
@@ -215,7 +222,8 @@ goog.math.Integer.prototype.add = function(other) {
   var len = Math.max(this.bits_.length, other.bits_.length);
   var arr = [];
   var carry = 0;
-  for (var i = 0; i <= len; i++) {
+  var i = 0;
+  for (; i <= len; i++) {
     var a1 = this.getBits(i) >>> 16;
     var a0 = this.getBits(i) & 65535;
     var b1 = other.getBits(i) >>> 16;
@@ -223,8 +231,8 @@ goog.math.Integer.prototype.add = function(other) {
     var c0 = carry + a0 + b0;
     var c1 = (c0 >>> 16) + a1 + b1;
     carry = c1 >>> 16;
-    c0 &= 65535;
-    c1 &= 65535;
+    c0 = c0 & 65535;
+    c1 = c1 & 65535;
     arr[i] = c1 << 16 | c0;
   }
   return goog.math.Integer.fromBits(arr);
@@ -252,11 +260,14 @@ goog.math.Integer.prototype.multiply = function(other) {
   }
   var len = this.bits_.length + other.bits_.length;
   var arr = [];
-  for (var i = 0; i < 2 * len; i++) {
+  var i = 0;
+  for (; i < 2 * len; i++) {
     arr[i] = 0;
   }
-  for (var i = 0; i < this.bits_.length; i++) {
-    for (var j = 0; j < other.bits_.length; j++) {
+  i = 0;
+  for (; i < this.bits_.length; i++) {
+    var j = 0;
+    for (; j < other.bits_.length; j++) {
       var a1 = this.getBits(i) >>> 16;
       var a0 = this.getBits(i) & 65535;
       var b1 = other.getBits(j) >>> 16;
@@ -271,16 +282,18 @@ goog.math.Integer.prototype.multiply = function(other) {
       goog.math.Integer.carry16_(arr, 2 * i + 2 * j + 2);
     }
   }
-  for (var i = 0; i < len; i++) {
+  i = 0;
+  for (; i < len; i++) {
     arr[i] = arr[2 * i + 1] << 16 | arr[2 * i];
   }
-  for (var i = len; i < 2 * len; i++) {
+  i = len;
+  for (; i < 2 * len; i++) {
     arr[i] = 0;
   }
   return new goog.math.Integer(arr, 0);
 };
 goog.math.Integer.carry16_ = function(bits, index) {
-  while ((bits[index] & 65535) != bits[index]) {
+  for (; (bits[index] & 65535) != bits[index];) {
     bits[index + 1] += bits[index] >>> 16;
     bits[index] &= 65535;
     index++;
@@ -292,7 +305,7 @@ goog.math.Integer.prototype.slowDivide_ = function(other) {
   }
   var twoPower = goog.math.Integer.ONE;
   var multiple = other;
-  while (multiple.lessThanOrEqual(this)) {
+  for (; multiple.lessThanOrEqual(this);) {
     twoPower = twoPower.shiftLeft(1);
     multiple = multiple.shiftLeft(1);
   }
@@ -301,7 +314,7 @@ goog.math.Integer.prototype.slowDivide_ = function(other) {
   var total2;
   multiple = multiple.shiftRight(2);
   twoPower = twoPower.shiftRight(2);
-  while (!multiple.isZero()) {
+  for (; !multiple.isZero();) {
     total2 = total.add(multiple);
     if (total2.lessThanOrEqual(this)) {
       res = res.add(twoPower);
@@ -330,7 +343,7 @@ goog.math.Integer.prototype.divideAndRemainder = function(other) {
     var result = this.negate().divideAndRemainder(other);
     return new goog.math.Integer.DivisionResult(result.quotient.negate(), result.remainder.negate());
   } else if (other.isNegative()) {
-    var result = this.divideAndRemainder(other.negate());
+    result = this.divideAndRemainder(other.negate());
     return new goog.math.Integer.DivisionResult(result.quotient.negate(), result.remainder);
   }
   if (this.bits_.length > 30) {
@@ -338,14 +351,14 @@ goog.math.Integer.prototype.divideAndRemainder = function(other) {
   }
   var res = goog.math.Integer.ZERO;
   var rem = this;
-  while (rem.greaterThanOrEqual(other)) {
+  for (; rem.greaterThanOrEqual(other);) {
     var approx = Math.max(1, Math.floor(rem.toNumber() / other.toNumber()));
     var log2 = Math.ceil(Math.log(approx) / Math.LN2);
     var delta = log2 <= 48 ? 1 : Math.pow(2, log2 - 48);
     var approxRes = goog.math.Integer.fromNumber(approx);
     var approxRem = approxRes.multiply(other);
-    while (approxRem.isNegative() || approxRem.greaterThan(rem)) {
-      approx -= delta;
+    for (; approxRem.isNegative() || approxRem.greaterThan(rem);) {
+      approx = approx - delta;
       approxRes = goog.math.Integer.fromNumber(approx);
       approxRem = approxRes.multiply(other);
     }
@@ -363,7 +376,8 @@ goog.math.Integer.prototype.modulo = function(other) {
 goog.math.Integer.prototype.not = function() {
   var len = this.bits_.length;
   var arr = [];
-  for (var i = 0; i < len; i++) {
+  var i = 0;
+  for (; i < len; i++) {
     arr[i] = ~this.bits_[i];
   }
   return new goog.math.Integer(arr, ~this.sign_);
@@ -371,7 +385,8 @@ goog.math.Integer.prototype.not = function() {
 goog.math.Integer.prototype.and = function(other) {
   var len = Math.max(this.bits_.length, other.bits_.length);
   var arr = [];
-  for (var i = 0; i < len; i++) {
+  var i = 0;
+  for (; i < len; i++) {
     arr[i] = this.getBits(i) & other.getBits(i);
   }
   return new goog.math.Integer(arr, this.sign_ & other.sign_);
@@ -379,7 +394,8 @@ goog.math.Integer.prototype.and = function(other) {
 goog.math.Integer.prototype.or = function(other) {
   var len = Math.max(this.bits_.length, other.bits_.length);
   var arr = [];
-  for (var i = 0; i < len; i++) {
+  var i = 0;
+  for (; i < len; i++) {
     arr[i] = this.getBits(i) | other.getBits(i);
   }
   return new goog.math.Integer(arr, this.sign_ | other.sign_);
@@ -387,7 +403,8 @@ goog.math.Integer.prototype.or = function(other) {
 goog.math.Integer.prototype.xor = function(other) {
   var len = Math.max(this.bits_.length, other.bits_.length);
   var arr = [];
-  for (var i = 0; i < len; i++) {
+  var i = 0;
+  for (; i < len; i++) {
     arr[i] = this.getBits(i) ^ other.getBits(i);
   }
   return new goog.math.Integer(arr, this.sign_ ^ other.sign_);
@@ -397,7 +414,8 @@ goog.math.Integer.prototype.shiftLeft = function(numBits) {
   var bit_delta = numBits % 32;
   var len = this.bits_.length + arr_delta + (bit_delta > 0 ? 1 : 0);
   var arr = [];
-  for (var i = 0; i < len; i++) {
+  var i = 0;
+  for (; i < len; i++) {
     if (bit_delta > 0) {
       arr[i] = this.getBits(i - arr_delta) << bit_delta | this.getBits(i - arr_delta - 1) >>> 32 - bit_delta;
     } else {
@@ -411,7 +429,8 @@ goog.math.Integer.prototype.shiftRight = function(numBits) {
   var bit_delta = numBits % 32;
   var len = this.bits_.length - arr_delta;
   var arr = [];
-  for (var i = 0; i < len; i++) {
+  var i = 0;
+  for (; i < len; i++) {
     if (bit_delta > 0) {
       arr[i] = this.getBits(i + arr_delta) >>> bit_delta | this.getBits(i + arr_delta + 1) << 32 - bit_delta;
     } else {

@@ -6,7 +6,7 @@ goog.require("goog.string.Const");
 goog.require("goog.string.internal");
 goog.string.DETECT_DOUBLE_ESCAPING = goog.define("goog.string.DETECT_DOUBLE_ESCAPING", false);
 goog.string.FORCE_NON_DOM_HTML_UNESCAPING = goog.define("goog.string.FORCE_NON_DOM_HTML_UNESCAPING", false);
-goog.string.Unicode = {NBSP:" "};
+goog.string.Unicode = {NBSP:" ", ZERO_WIDTH_SPACE:"​"};
 goog.string.startsWith = goog.string.internal.startsWith;
 goog.string.endsWith = goog.string.internal.endsWith;
 goog.string.caseInsensitiveStartsWith = goog.string.internal.caseInsensitiveStartsWith;
@@ -16,8 +16,8 @@ goog.string.subs = function(str, var_args) {
   const splitParts = str.split("%s");
   let returnString = "";
   const subsArguments = Array.prototype.slice.call(arguments, 1);
-  while (subsArguments.length && splitParts.length > 1) {
-    returnString += splitParts.shift() + subsArguments.shift();
+  for (; subsArguments.length && splitParts.length > 1;) {
+    returnString = returnString + (splitParts.shift() + subsArguments.shift());
   }
   return returnString + splitParts.join("%s");
 };
@@ -158,7 +158,7 @@ goog.string.unescapeEntitiesUsingDom_ = function(str, opt_document) {
       return value;
     }
     if (entity.charAt(0) == "#") {
-      const n = Number("0" + entity.substr(1));
+      const n = Number("0" + entity.slice(1));
       if (!isNaN(n)) {
         value = String.fromCharCode(n);
       }
@@ -183,7 +183,7 @@ goog.string.unescapePureXmlEntities_ = function(str) {
         return '"';
       default:
         if (entity.charAt(0) == "#") {
-          const n = Number("0" + entity.substr(1));
+          const n = Number("0" + entity.slice(1));
           if (!isNaN(n)) {
             return String.fromCharCode(n);
           }
@@ -235,7 +235,7 @@ goog.string.truncateMiddle = function(str, chars, opt_protectEscapedCharacters, 
   } else if (str.length > chars) {
     let half = Math.floor(chars / 2);
     const endPos = str.length - half;
-    half += chars % 2;
+    half = half + chars % 2;
     str = str.substring(0, half) + "..." + str.substring(endPos);
   }
   if (opt_protectEscapedCharacters) {
@@ -278,15 +278,15 @@ goog.string.escapeChar = function(c) {
     if (cc < 256) {
       rv = "\\x";
       if (cc < 16 || cc > 256) {
-        rv += "0";
+        rv = rv + "0";
       }
     } else {
       rv = "\\u";
       if (cc < 4096) {
-        rv += "0";
+        rv = rv + "0";
       }
     }
-    rv += cc.toString(16).toUpperCase();
+    rv = rv + cc.toString(16).toUpperCase();
   }
   return goog.string.jsEscapeCache_[c] = rv;
 };
@@ -298,7 +298,7 @@ goog.string.countOf = function(s, ss) {
 goog.string.removeAt = function(s, index, stringLength) {
   let resultStr = s;
   if (index >= 0 && index < s.length && stringLength > 0) {
-    resultStr = s.substr(0, index) + s.substr(index + stringLength, s.length - index - stringLength);
+    resultStr = s.slice(0, index) + s.slice(index + stringLength);
   }
   return resultStr;
 };
@@ -322,6 +322,9 @@ goog.string.repeat = String.prototype.repeat ? function(string, length) {
   return (new Array(length + 1)).join(string);
 };
 goog.string.padNumber = function(num, length, opt_precision) {
+  if (!Number.isFinite(num)) {
+    return String(num);
+  }
   let s = opt_precision !== undefined ? num.toFixed(opt_precision) : String(num);
   let index = s.indexOf(".");
   if (index === -1) {
@@ -335,9 +338,6 @@ goog.string.padNumber = function(num, length, opt_precision) {
 };
 goog.string.makeSafe = function(obj) {
   return obj == null ? "" : String(obj);
-};
-goog.string.buildString = function(var_args) {
-  return Array.prototype.join.call(arguments, "");
 };
 goog.string.getRandomString = function() {
   const x = 2147483648;
@@ -385,7 +385,7 @@ goog.string.toTitleCase = function(str, opt_delimiters) {
   });
 };
 goog.string.capitalize = function(str) {
-  return String(str.charAt(0)).toUpperCase() + String(str.substr(1)).toLowerCase();
+  return String(str.charAt(0)).toUpperCase() + String(str.slice(1)).toLowerCase();
 };
 goog.string.parseInt = function(value) {
   if (isFinite(value)) {
@@ -399,7 +399,7 @@ goog.string.parseInt = function(value) {
 goog.string.splitLimit = function(str, separator, limit) {
   const parts = str.split(separator);
   const returnVal = [];
-  while (limit > 0 && parts.length) {
+  for (; limit > 0 && parts.length;) {
     returnVal.push(parts.shift());
     limit--;
   }

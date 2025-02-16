@@ -4,7 +4,7 @@
             [promesa.core :as p]
             [intemporal.fsm :as fsm]
             [hiccups.runtime :as hiccupsrt])
-  (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]
+  (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow env-let]]
                    [hiccups.core :as hiccups :refer [html]]))
 
 ;;;;
@@ -27,32 +27,28 @@
                     {::fsm/event :event/error ::fsm/to :state/killing}]
    :state/killed   []})
 
-;; event producer
-(defprotocol EventHandler
-  (process-event [this event] "Processes the event, returns the next event"))
-
-(defn make-event-handler []
-  (reify EventHandler
-    (process-event [this event]
-      (js/console.log "Going to process event" event)
-      (let [nxt (condp = event
-                  :event/create :event/created
-                  :event/created :event/start
-                  :event/start :event/started
-                  :event/started :event/stop
-                  :event/stop :event/stopped
-                  :event/stopped :event/kill
-                  :event/kill :event/killed
-                  nil)]
-        nxt))))
+(defn process-event [event]
+  (js/console.log "Going to process event" event)
+  (let [nxt (condp = event
+              :event/create :event/created
+              :event/created :event/start
+              :event/start :event/started
+              :event/started :event/stop
+              :event/stop :event/stopped
+              :event/stopped :event/kill
+              :event/kill :event/killed
+              nil)]
+    nxt))
 
 ;;;;
 ;; workflow registration
 
-(defn run-fsm-workflow
-  [store rules init-state init-event]
-  (let [stub      (stub-protocol EventHandler {:idempotent true})
-        initstate {::fsm/rules rules ::fsm/state init-state}]
+(defn-workflow run-fsm-workflow
+  [rules init-state init-event]
+  (let [stub      (stub-function process-event)
+        initstate {::fsm/rules rules ::fsm/state init-state}
+        ;; capture the env before chaining promises
+        env       (w/current-env)]
 
     (p/loop [state initstate
              evt   init-event]
@@ -60,12 +56,10 @@
         (p/recur (fsm/transit state evt)
                  ;; because we may end up in another "thread" we may loose the dynamic *env*
                  ;; so we need to set it up again
-                 (w/with-env {:store store}
-                   (process-event stub evt)))
+                 (w/with-env env
+                   (stub evt)))
         (::fsm/state state)))))
 
-(def mstore (s/make-store))
-(def worker (w/start-worker! mstore {:protocols {`EventHandler (make-event-handler)}}))
 ;;;;
 ;; workflow registration
 
@@ -96,9 +90,8 @@
 
 
 (defn render-tables! [the-store]
-  (let [tasks  (vals @(::s/task-store the-store))
-        events (->> (vals @(::s/history-store the-store))
-                    (flatten)
+  (let [tasks  (s/list-tasks the-store)
+        events (->> (s/list-events the-store)
                     (sort-by :id))]
     (render-table! "tasks" tasks)
     (render-table! "events" events)
@@ -108,19 +101,22 @@
 ;;;;
 ;; bootstrap
 (defn init []
-  (let [res (w/with-env {:store mstore}
-              (run-fsm-workflow mstore resource-rules :state/init :event/create))]
+  (let [mstore (s/make-store)
+        stop   (w/start-worker! mstore)
+        res    (w/with-env {:store mstore}
+                 (run-fsm-workflow resource-rules :state/init :event/create))]
 
     ;; set-results!
     (-> res
         (p/then (fn [r]
                   (js/console.log "res" r)
                   (set-results! (prn-str r))
-                  (render-tables! @mstore)))
+                  (render-tables! mstore)))
 
         (p/catch (fn [r]
                    (js/console.error "error" r)
-                   (set-results! (prn-str r)))))))
+                   (set-results! (prn-str r))))
+        (p/finally stop))))
 
 (comment
   (require '[shadow.cljs.devtools.api :as shadow])

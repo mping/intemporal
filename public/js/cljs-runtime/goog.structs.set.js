@@ -16,7 +16,7 @@ goog.structs.Set.getKey_ = function(val) {
   if (type == "object" && val || type == "function") {
     return "o" + goog.structs.Set.getUid_(val);
   } else {
-    return type.substr(0, 1) + val;
+    return type.slice(0, 1) + val;
   }
 };
 goog.structs.Set.prototype.getCount = function() {
@@ -29,7 +29,8 @@ goog.structs.Set.prototype.add = function(element) {
 goog.structs.Set.prototype.addAll = function(col) {
   var values = goog.structs.getValues(col);
   var l = values.length;
-  for (var i = 0; i < l; i++) {
+  var i = 0;
+  for (; i < l; i++) {
     this.add(values[i]);
   }
   this.setSizeInternal_(this.map_.size);
@@ -37,7 +38,8 @@ goog.structs.Set.prototype.addAll = function(col) {
 goog.structs.Set.prototype.removeAll = function(col) {
   var values = goog.structs.getValues(col);
   var l = values.length;
-  for (var i = 0; i < l; i++) {
+  var i = 0;
+  for (; i < l; i++) {
     this.remove(values[i]);
   }
   this.setSizeInternal_(this.map_.size);
@@ -69,7 +71,8 @@ goog.structs.Set.prototype.containsAll = function(col) {
 goog.structs.Set.prototype.intersection = function(col) {
   var result = new goog.structs.Set();
   var values = goog.structs.getValues(col);
-  for (var i = 0; i < values.length; i++) {
+  var i = 0;
+  for (; i < values.length; i++) {
     var value = values[i];
     if (this.contains(value)) {
       result.add(value);

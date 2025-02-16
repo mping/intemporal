@@ -32,7 +32,8 @@ goog.events.EventTarget.prototype.removeEventListener = function(type, handler, 
 };
 goog.events.EventTarget.prototype.dispatchEvent = function(e) {
   this.assertInitialized_();
-  var ancestorsTree, ancestor = this.getParentEventTarget();
+  var ancestorsTree;
+  var ancestor = this.getParentEventTarget();
   if (ancestor) {
     ancestorsTree = [];
     var ancestorCount = 1;
@@ -74,7 +75,8 @@ goog.events.EventTarget.prototype.fireListeners = function(type, capture, eventO
   }
   listenerArray = listenerArray.concat();
   var rv = true;
-  for (var i = 0; i < listenerArray.length; ++i) {
+  var i = 0;
+  for (; i < listenerArray.length; ++i) {
     var listener = listenerArray[i];
     if (listener && !listener.removed && listener.capture == capture) {
       var listenerFn = listener.listener;
@@ -114,9 +116,11 @@ goog.events.EventTarget.dispatchEventInternal_ = function(target, e, opt_ancesto
   } else {
     e.target = e.target || target;
   }
-  var rv = true, currentTarget;
+  var rv = true;
+  var currentTarget;
   if (opt_ancestorsTree) {
-    for (var i = opt_ancestorsTree.length - 1; !e.hasPropagationStopped() && i >= 0; i--) {
+    var i = opt_ancestorsTree.length - 1;
+    for (; !e.hasPropagationStopped() && i >= 0; i--) {
       currentTarget = e.currentTarget = opt_ancestorsTree[i];
       rv = currentTarget.fireListeners(type, true, e) && rv;
     }
@@ -129,7 +133,8 @@ goog.events.EventTarget.dispatchEventInternal_ = function(target, e, opt_ancesto
     }
   }
   if (opt_ancestorsTree) {
-    for (i = 0; !e.hasPropagationStopped() && i < opt_ancestorsTree.length; i++) {
+    i = 0;
+    for (; !e.hasPropagationStopped() && i < opt_ancestorsTree.length; i++) {
       currentTarget = e.currentTarget = opt_ancestorsTree[i];
       rv = currentTarget.fireListeners(type, false, e) && rv;
     }

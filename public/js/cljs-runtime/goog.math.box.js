@@ -9,7 +9,8 @@ goog.math.Box = function(top, right, bottom, left) {
 };
 goog.math.Box.boundingBox = function(var_args) {
   var box = new goog.math.Box(arguments[0].y, arguments[0].x, arguments[0].y, arguments[0].x);
-  for (var i = 1; i < arguments.length; i++) {
+  var i = 1;
+  for (; i < arguments.length; i++) {
     box.expandToIncludeCoordinate(arguments[i]);
   }
   return box;

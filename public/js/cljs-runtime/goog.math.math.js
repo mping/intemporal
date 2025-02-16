@@ -68,15 +68,19 @@ goog.math.longestCommonSubsequence = function(array1, array2, opt_compareFn, opt
   var length1 = array1.length;
   var length2 = array2.length;
   var arr = [];
-  for (var i = 0; i < length1 + 1; i++) {
+  var i = 0;
+  for (; i < length1 + 1; i++) {
     arr[i] = [];
     arr[i][0] = 0;
   }
-  for (var j = 0; j < length2 + 1; j++) {
+  var j = 0;
+  for (; j < length2 + 1; j++) {
     arr[0][j] = 0;
   }
-  for (i = 1; i <= length1; i++) {
-    for (j = 1; j <= length2; j++) {
+  i = 1;
+  for (; i <= length1; i++) {
+    j = 1;
+    for (; j <= length2; j++) {
       if (compare(array1[i - 1], array2[j - 1])) {
         arr[i][j] = arr[i - 1][j - 1] + 1;
       } else {
@@ -85,8 +89,9 @@ goog.math.longestCommonSubsequence = function(array1, array2, opt_compareFn, opt
     }
   }
   var result = [];
-  var i = length1, j = length2;
-  while (i > 0 && j > 0) {
+  i = length1;
+  j = length2;
+  for (; i > 0 && j > 0;) {
     if (compare(array1[i - 1], array2[j - 1])) {
       result.unshift(collect(i - 1, j - 1));
       i--;

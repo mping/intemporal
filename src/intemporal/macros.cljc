@@ -81,6 +81,7 @@
   "Stubs `f`, wrapping it in an activity-aware function."
   [f]
   `(fn [& argv#]
+     (assert (some? (:next-id i/*env*)) "no next-id function, are you inside `defn-workflow`?")
      (let [ref#  (:ref i/*env*)
            root# (:root i/*env*)
            fvar# (var ~f)]
@@ -92,6 +93,7 @@
              id#     ((:next-id i/*env*))
              ref#    nil ;; no enqueued task => no ref
              task#   (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv# id#)]
+
          ;; an embedded workflow engine doesn't need to have a task per invocation
          (t/log! {:level :debug :_data {:env i/*env* :task task#}}  ["Invoking task with id " id#])
          (let [res# (i/resume-task i/*env* store# protos# task#)]

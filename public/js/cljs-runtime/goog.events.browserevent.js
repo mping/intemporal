@@ -6,7 +6,6 @@ goog.require("goog.events.Event");
 goog.require("goog.events.EventType");
 goog.require("goog.reflect");
 goog.require("goog.userAgent");
-goog.events.USE_LAYER_XY_AS_OFFSET_XY = goog.define("goog.events.USE_LAYER_XY_AS_OFFSET_XY", false);
 goog.events.BrowserEvent = function(opt_e, opt_currentTarget) {
   goog.events.BrowserEvent.base(this, "constructor", opt_e ? opt_e.type : "");
   this.target = null;
@@ -36,7 +35,8 @@ goog.events.BrowserEvent = function(opt_e, opt_currentTarget) {
   }
 };
 goog.inherits(goog.events.BrowserEvent, goog.events.Event);
-goog.events.BrowserEvent.MouseButton = {LEFT:0, MIDDLE:1, RIGHT:2};
+goog.events.BrowserEvent.USE_LAYER_XY_AS_OFFSET_XY = goog.define("goog.events.BrowserEvent.USE_LAYER_XY_AS_OFFSET_XY", false);
+goog.events.BrowserEvent.MouseButton = {LEFT:0, MIDDLE:1, RIGHT:2, BACK:3, FORWARD:4};
 goog.events.BrowserEvent.PointerType = {MOUSE:"mouse", PEN:"pen", TOUCH:"touch"};
 goog.events.BrowserEvent.IEButtonMap = goog.debug.freeze([1, 4, 2]);
 goog.events.BrowserEvent.IE_BUTTON_MAP = goog.events.BrowserEvent.IEButtonMap;
@@ -65,7 +65,7 @@ goog.events.BrowserEvent.prototype.init = function(e, opt_currentTarget) {
     this.screenX = relevantTouch.screenX || 0;
     this.screenY = relevantTouch.screenY || 0;
   } else {
-    if (goog.events.USE_LAYER_XY_AS_OFFSET_XY) {
+    if (goog.events.BrowserEvent.USE_LAYER_XY_AS_OFFSET_XY) {
       this.offsetX = e.layerX !== undefined ? e.layerX : e.offsetX;
       this.offsetY = e.layerY !== undefined ? e.layerY : e.offsetY;
     } else {

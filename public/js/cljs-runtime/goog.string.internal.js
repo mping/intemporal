@@ -7,10 +7,10 @@ goog.string.internal.endsWith = function(str, suffix) {
   return l >= 0 && str.indexOf(suffix, l) == l;
 };
 goog.string.internal.caseInsensitiveStartsWith = function(str, prefix) {
-  return goog.string.internal.caseInsensitiveCompare(prefix, str.substr(0, prefix.length)) == 0;
+  return goog.string.internal.caseInsensitiveCompare(prefix, str.slice(0, prefix.length)) == 0;
 };
 goog.string.internal.caseInsensitiveEndsWith = function(str, suffix) {
-  return goog.string.internal.caseInsensitiveCompare(suffix, str.substr(str.length - suffix.length, suffix.length)) == 0;
+  return goog.string.internal.caseInsensitiveCompare(suffix, str.slice(str.length - suffix.length)) == 0;
 };
 goog.string.internal.caseInsensitiveEquals = function(str1, str2) {
   return str1.toLowerCase() == str2.toLowerCase();

@@ -9,26 +9,26 @@ goog.uri.utils.CharCode_ = {AMPERSAND:38, EQUAL:61, HASH:35, QUESTION:63};
 goog.uri.utils.buildFromEncodedParts = function(opt_scheme, opt_userInfo, opt_domain, opt_port, opt_path, opt_queryData, opt_fragment) {
   var out = "";
   if (opt_scheme) {
-    out += opt_scheme + ":";
+    out = out + (opt_scheme + ":");
   }
   if (opt_domain) {
-    out += "//";
+    out = out + "//";
     if (opt_userInfo) {
-      out += opt_userInfo + "@";
+      out = out + (opt_userInfo + "@");
     }
-    out += opt_domain;
+    out = out + opt_domain;
     if (opt_port) {
-      out += ":" + opt_port;
+      out = out + (":" + opt_port);
     }
   }
   if (opt_path) {
-    out += opt_path;
+    out = out + opt_path;
   }
   if (opt_queryData) {
-    out += "?" + opt_queryData;
+    out = out + ("?" + opt_queryData);
   }
   if (opt_fragment) {
-    out += "#" + opt_fragment;
+    out = out + ("#" + opt_fragment);
   }
   return out;
 };
@@ -61,7 +61,7 @@ goog.uri.utils.getEffectiveScheme = function(uri) {
   var scheme = goog.uri.utils.getScheme(uri);
   if (!scheme && goog.global.self && goog.global.self.location) {
     var protocol = goog.global.self.location.protocol;
-    scheme = protocol.substr(0, protocol.length - 1);
+    scheme = protocol.slice(0, -1);
   }
   return scheme ? scheme.toLowerCase() : "";
 };
@@ -91,7 +91,7 @@ goog.uri.utils.getQueryData = function(uri) {
 };
 goog.uri.utils.getFragmentEncoded = function(uri) {
   var hashIndex = uri.indexOf("#");
-  return hashIndex < 0 ? null : uri.substr(hashIndex + 1);
+  return hashIndex < 0 ? null : uri.slice(hashIndex + 1);
 };
 goog.uri.utils.setFragmentEncoded = function(uri, fragment) {
   return goog.uri.utils.removeFragment(uri) + (fragment ? "#" + fragment : "");
@@ -113,7 +113,7 @@ goog.uri.utils.getPathAndAfter = function(uri) {
 };
 goog.uri.utils.removeFragment = function(uri) {
   var hashIndex = uri.indexOf("#");
-  return hashIndex < 0 ? uri : uri.substr(0, hashIndex);
+  return hashIndex < 0 ? uri : uri.slice(0, hashIndex);
 };
 goog.uri.utils.haveSameDomain = function(uri1, uri2) {
   var pieces1 = goog.uri.utils.split(uri1);
@@ -130,7 +130,8 @@ goog.uri.utils.parseQueryData = function(encodedQuery, callback) {
     return;
   }
   var pairs = encodedQuery.split("\x26");
-  for (var i = 0; i < pairs.length; i++) {
+  var i = 0;
+  for (; i < pairs.length; i++) {
     var indexOfEquals = pairs[i].indexOf("\x3d");
     var name = null;
     var value = null;
@@ -156,7 +157,7 @@ goog.uri.utils.splitQueryData_ = function(uri) {
   } else {
     queryData = uri.substring(questionIndex + 1, hashIndex);
   }
-  return [uri.substr(0, questionIndex), queryData, uri.substr(hashIndex)];
+  return [uri.slice(0, questionIndex), queryData, uri.slice(hashIndex)];
 };
 goog.uri.utils.joinQueryData_ = function(parts) {
   return parts[0] + (parts[1] ? "?" + parts[1] : "") + parts[2];
@@ -179,7 +180,8 @@ goog.uri.utils.appendKeyValuePairs_ = function(key, value, pairs) {
   goog.asserts.assertString(key);
   if (Array.isArray(value)) {
     goog.asserts.assertArray(value);
-    for (var j = 0; j < value.length; j++) {
+    var j = 0;
+    for (; j < value.length; j++) {
       goog.uri.utils.appendKeyValuePairs_(key, String(value[j]), pairs);
     }
   } else if (value != null) {
@@ -189,7 +191,8 @@ goog.uri.utils.appendKeyValuePairs_ = function(key, value, pairs) {
 goog.uri.utils.buildQueryData = function(keysAndValues, opt_startIndex) {
   goog.asserts.assert(Math.max(keysAndValues.length - (opt_startIndex || 0), 0) % 2 == 0, "goog.uri.utils: Key/value lists must be even in length.");
   var params = [];
-  for (var i = opt_startIndex || 0; i < keysAndValues.length; i += 2) {
+  var i = opt_startIndex || 0;
+  for (; i < keysAndValues.length; i = i + 2) {
     var key = keysAndValues[i];
     goog.uri.utils.appendKeyValuePairs_(key, keysAndValues[i + 1], params);
   }
@@ -197,7 +200,8 @@ goog.uri.utils.buildQueryData = function(keysAndValues, opt_startIndex) {
 };
 goog.uri.utils.buildQueryDataFromMap = function(map) {
   var params = [];
-  for (var key in map) {
+  var key;
+  for (key in map) {
     goog.uri.utils.appendKeyValuePairs_(key, map[key], params);
   }
   return params.join("\x26");
@@ -217,7 +221,7 @@ goog.uri.utils.appendParam = function(uri, key, opt_value) {
 goog.uri.utils.findParam_ = function(uri, startIndex, keyEncoded, hashOrEndIndex) {
   var index = startIndex;
   var keyLength = keyEncoded.length;
-  while ((index = uri.indexOf(keyEncoded, index)) >= 0 && index < hashOrEndIndex) {
+  for (; (index = uri.indexOf(keyEncoded, index)) >= 0 && index < hashOrEndIndex;) {
     var precedingChar = uri.charCodeAt(index - 1);
     if (precedingChar == goog.uri.utils.CharCode_.AMPERSAND || precedingChar == goog.uri.utils.CharCode_.QUESTION) {
       var followingChar = uri.charCodeAt(index + keyLength);
@@ -225,7 +229,7 @@ goog.uri.utils.findParam_ = function(uri, startIndex, keyEncoded, hashOrEndIndex
         return index;
       }
     }
-    index += keyLength + 1;
+    index = index + (keyLength + 1);
   }
   return -1;
 };
@@ -243,8 +247,8 @@ goog.uri.utils.getParamValue = function(uri, keyEncoded) {
     if (endPosition < 0 || endPosition > hashOrEndIndex) {
       endPosition = hashOrEndIndex;
     }
-    foundIndex += keyEncoded.length + 1;
-    return goog.string.urlDecode(uri.substr(foundIndex, endPosition - foundIndex));
+    foundIndex = foundIndex + (keyEncoded.length + 1);
+    return goog.string.urlDecode(uri.slice(foundIndex, endPosition !== -1 ? endPosition : 0));
   }
 };
 goog.uri.utils.getParamValues = function(uri, keyEncoded) {
@@ -252,13 +256,13 @@ goog.uri.utils.getParamValues = function(uri, keyEncoded) {
   var position = 0;
   var foundIndex;
   var result = [];
-  while ((foundIndex = goog.uri.utils.findParam_(uri, position, keyEncoded, hashOrEndIndex)) >= 0) {
+  for (; (foundIndex = goog.uri.utils.findParam_(uri, position, keyEncoded, hashOrEndIndex)) >= 0;) {
     position = uri.indexOf("\x26", foundIndex);
     if (position < 0 || position > hashOrEndIndex) {
       position = hashOrEndIndex;
     }
-    foundIndex += keyEncoded.length + 1;
-    result.push(goog.string.urlDecode(uri.substr(foundIndex, position - foundIndex)));
+    foundIndex = foundIndex + (keyEncoded.length + 1);
+    result.push(goog.string.urlDecode(uri.slice(foundIndex, Math.max(position, 0))));
   }
   return result;
 };
@@ -268,11 +272,11 @@ goog.uri.utils.removeParam = function(uri, keyEncoded) {
   var position = 0;
   var foundIndex;
   var buffer = [];
-  while ((foundIndex = goog.uri.utils.findParam_(uri, position, keyEncoded, hashOrEndIndex)) >= 0) {
+  for (; (foundIndex = goog.uri.utils.findParam_(uri, position, keyEncoded, hashOrEndIndex)) >= 0;) {
     buffer.push(uri.substring(position, foundIndex));
     position = Math.min(uri.indexOf("\x26", foundIndex) + 1 || hashOrEndIndex, hashOrEndIndex);
   }
-  buffer.push(uri.substr(position));
+  buffer.push(uri.slice(position));
   return buffer.join("").replace(goog.uri.utils.trailingQueryPunctuationRe_, "$1");
 };
 goog.uri.utils.setParam = function(uri, keyEncoded, value) {
@@ -285,7 +289,7 @@ goog.uri.utils.setParamsFromMap = function(uri, params) {
   if (queryData) {
     queryData.split("\x26").forEach(function(pair) {
       var indexOfEquals = pair.indexOf("\x3d");
-      var name = indexOfEquals >= 0 ? pair.substr(0, indexOfEquals) : pair;
+      var name = indexOfEquals >= 0 ? pair.slice(0, indexOfEquals) : pair;
       if (!params.hasOwnProperty(name)) {
         buffer.push(pair);
       }
@@ -297,10 +301,10 @@ goog.uri.utils.setParamsFromMap = function(uri, params) {
 goog.uri.utils.appendPath = function(baseUri, path) {
   goog.uri.utils.assertNoFragmentsOrQueries_(baseUri);
   if (goog.string.endsWith(baseUri, "/")) {
-    baseUri = baseUri.substr(0, baseUri.length - 1);
+    baseUri = baseUri.slice(0, -1);
   }
   if (goog.string.startsWith(path, "/")) {
-    path = path.substr(1);
+    path = path.slice(1);
   }
   return "" + baseUri + "/" + path;
 };

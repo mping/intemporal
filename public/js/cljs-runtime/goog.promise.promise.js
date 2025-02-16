@@ -5,6 +5,8 @@ goog.require("goog.async.FreeList");
 goog.require("goog.async.run");
 goog.require("goog.async.throwException");
 goog.require("goog.debug.Error");
+goog.require("goog.debug.asyncStackTag");
+goog.require("goog.functions");
 goog.require("goog.promise.Resolver");
 goog.Promise = function(resolver, opt_context) {
   this.state_ = goog.Promise.State_.PENDING;
@@ -23,7 +25,7 @@ goog.Promise = function(resolver, opt_context) {
     this.addStackTrace_(new Error("created"));
     this.currentStep_ = 0;
   }
-  if (resolver != goog.nullFunction) {
+  if (resolver != goog.functions.UNDEFINED) {
     try {
       var self = this;
       resolver.call(opt_context, function(value) {
@@ -84,7 +86,7 @@ goog.Promise.resolve = function(opt_value) {
   if (opt_value instanceof goog.Promise) {
     return opt_value;
   }
-  var promise = new goog.Promise(goog.nullFunction);
+  var promise = new goog.Promise(goog.functions.UNDEFINED);
   promise.resolve_(goog.Promise.State_.FULFILLED, opt_value);
   return promise;
 };
@@ -104,7 +106,9 @@ goog.Promise.race = function(promises) {
     if (!promises.length) {
       resolve(undefined);
     }
-    for (var i = 0, promise; i < promises.length; i++) {
+    var i = 0;
+    var promise;
+    for (; i < promises.length; i++) {
       promise = promises[i];
       goog.Promise.resolveThen_(promise, resolve, reject);
     }
@@ -128,7 +132,9 @@ goog.Promise.all = function(promises) {
     var onReject = function(reason) {
       reject(reason);
     };
-    for (var i = 0, promise; i < promises.length; i++) {
+    var i = 0;
+    var promise;
+    for (; i < promises.length; i++) {
       promise = promises[i];
       goog.Promise.resolveThen_(promise, goog.partial(onFulfill, i), onReject);
     }
@@ -149,7 +155,9 @@ goog.Promise.allSettled = function(promises) {
         resolve(results);
       }
     };
-    for (var i = 0, promise; i < promises.length; i++) {
+    var i = 0;
+    var promise;
+    for (; i < promises.length; i++) {
       promise = promises[i];
       goog.Promise.resolveThen_(promise, goog.partial(onSettled, i, true), goog.partial(onSettled, i, false));
     }
@@ -173,14 +181,17 @@ goog.Promise.firstFulfilled = function(promises) {
         reject(reasons);
       }
     };
-    for (var i = 0, promise; i < promises.length; i++) {
+    var i = 0;
+    var promise;
+    for (; i < promises.length; i++) {
       promise = promises[i];
       goog.Promise.resolveThen_(promise, onFulfill, goog.partial(onReject, i));
     }
   });
 };
 goog.Promise.withResolver = function() {
-  var resolve, reject;
+  var resolve;
+  var reject;
   var promise = new goog.Promise(function(rs, rj) {
     resolve = rs;
     reject = rj;
@@ -210,7 +221,7 @@ goog.Promise.prototype.thenVoid = function(opt_onFulfilled, opt_onRejected, opt_
   if (goog.Promise.LONG_STACK_TRACES) {
     this.addStackTrace_(new Error("then"));
   }
-  this.addCallbackEntry_(goog.Promise.getCallbackEntry_(opt_onFulfilled || goog.nullFunction, opt_onRejected || null, opt_context));
+  this.addCallbackEntry_(goog.Promise.getCallbackEntry_(opt_onFulfilled || goog.functions.UNDEFINED, opt_onRejected || null, opt_context));
 };
 goog.Promise.prototype.thenAlways = function(onSettled, opt_context) {
   if (goog.Promise.LONG_STACK_TRACES) {
@@ -227,6 +238,7 @@ goog.Promise.prototype.thenCatch = function(onRejected, opt_context) {
   }
   return this.addChildPromise_(null, onRejected, opt_context);
 };
+goog.Promise.prototype.catch = goog.Promise.prototype.thenCatch;
 goog.Promise.prototype.cancel = function(opt_message) {
   if (this.state_ == goog.Promise.State_.PENDING) {
     var err = new goog.Promise.CancellationError(opt_message);
@@ -252,7 +264,8 @@ goog.Promise.prototype.cancelChild_ = function(childPromise, err) {
   var childCount = 0;
   var childEntry = null;
   var beforeChildEntry = null;
-  for (var entry = this.callbackEntries_; entry; entry = entry.next) {
+  var entry = this.callbackEntries_;
+  for (; entry; entry = entry.next) {
     if (!entry.always) {
       childCount++;
       if (entry.child == childPromise) {
@@ -286,6 +299,12 @@ goog.Promise.prototype.addCallbackEntry_ = function(callbackEntry) {
   this.queueEntry_(callbackEntry);
 };
 goog.Promise.prototype.addChildPromise_ = function(onFulfilled, onRejected, opt_context) {
+  if (onFulfilled) {
+    onFulfilled = goog.debug.asyncStackTag.wrap(onFulfilled, "goog.Promise.then");
+  }
+  if (onRejected) {
+    onRejected = goog.debug.asyncStackTag.wrap(onRejected, "goog.Promise.then");
+  }
   var callbackEntry = goog.Promise.getCallbackEntry_(null, null, null);
   callbackEntry.child = new goog.Promise(function(resolve, reject) {
     callbackEntry.onFulfilled = onFulfilled ? function(value) {
@@ -431,7 +450,7 @@ goog.Promise.prototype.removeEntryAfter_ = function(previous) {
 };
 goog.Promise.prototype.executeCallbacks_ = function() {
   var entry = null;
-  while (entry = this.popEntry_()) {
+  for (; entry = this.popEntry_();) {
     if (goog.Promise.LONG_STACK_TRACES) {
       this.currentStep_++;
     }
@@ -466,15 +485,17 @@ goog.Promise.prototype.addStackTrace_ = function(err) {
   if (goog.Promise.LONG_STACK_TRACES && typeof err.stack === "string") {
     var trace = err.stack.split("\n", 4)[3];
     var message = err.message;
-    message += Array(11 - message.length).join(" ");
+    message = message + Array(11 - message.length).join(" ");
     this.stack_.push(message + trace);
   }
 };
 goog.Promise.prototype.appendLongStack_ = function(err) {
   if (goog.Promise.LONG_STACK_TRACES && err && typeof err.stack === "string" && this.stack_.length) {
     var longTrace = ["Promise trace:"];
-    for (var promise = this; promise; promise = promise.parent_) {
-      for (var i = this.currentStep_; i >= 0; i--) {
+    var promise = this;
+    for (; promise; promise = promise.parent_) {
+      var i = this.currentStep_;
+      for (; i >= 0; i--) {
         longTrace.push(promise.stack_[i]);
       }
       longTrace.push("Value: " + "[" + (promise.state_ == goog.Promise.State_.REJECTED ? "REJECTED" : "FULFILLED") + "] " + "\x3c" + String(promise.result_) + "\x3e");
@@ -484,12 +505,14 @@ goog.Promise.prototype.appendLongStack_ = function(err) {
 };
 goog.Promise.prototype.removeUnhandledRejection_ = function() {
   if (goog.Promise.UNHANDLED_REJECTION_DELAY > 0) {
-    for (var p = this; p && p.unhandledRejectionId_; p = p.parent_) {
+    var p = this;
+    for (; p && p.unhandledRejectionId_; p = p.parent_) {
       goog.global.clearTimeout(p.unhandledRejectionId_);
       p.unhandledRejectionId_ = 0;
     }
   } else if (goog.Promise.UNHANDLED_REJECTION_DELAY == 0) {
-    for (var p = this; p && p.hadUnhandledRejection_; p = p.parent_) {
+    p = this;
+    for (; p && p.hadUnhandledRejection_; p = p.parent_) {
       p.hadUnhandledRejection_ = false;
     }
   }

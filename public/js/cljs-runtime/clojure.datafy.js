@@ -31,6 +31,20 @@ return clojure.core.protocols.nav(coll,k,v);
 clojure.datafy.datify_ref = (function clojure$datafy$datify_ref(r){
 return cljs.core.with_meta(new cljs.core.PersistentVector(null, 1, 5, cljs.core.PersistentVector.EMPTY_NODE, [cljs.core.deref(r)], null),cljs.core.meta(r));
 });
+(Error.prototype.clojure$core$protocols$Datafiable$ = cljs.core.PROTOCOL_SENTINEL);
+
+(Error.prototype.clojure$core$protocols$Datafiable$datafy$arity$1 = (function (x){
+var x__$1 = this;
+return cljs.core.Throwable__GT_map(x__$1);
+}));
+
+(cljs.core.ExceptionInfo.prototype.clojure$core$protocols$Datafiable$ = cljs.core.PROTOCOL_SENTINEL);
+
+(cljs.core.ExceptionInfo.prototype.clojure$core$protocols$Datafiable$datafy$arity$1 = (function (x){
+var x__$1 = this;
+return cljs.core.Throwable__GT_map(x__$1);
+}));
+
 (cljs.core.Var.prototype.clojure$core$protocols$Datafiable$ = cljs.core.PROTOCOL_SENTINEL);
 
 (cljs.core.Var.prototype.clojure$core$protocols$Datafiable$datafy$arity$1 = (function (r){

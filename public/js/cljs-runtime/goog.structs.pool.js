@@ -56,7 +56,7 @@ goog.structs.Pool.prototype.releaseObject = function(obj) {
 };
 goog.structs.Pool.prototype.removeFreeObject_ = function() {
   var obj;
-  while (this.getFreeCount() > 0) {
+  for (; this.getFreeCount() > 0;) {
     obj = this.freeQueue_.dequeue();
     if (!this.objectCanBeReused(obj)) {
       this.adjustForMinMax();
@@ -79,10 +79,10 @@ goog.structs.Pool.prototype.addFreeObject = function(obj) {
 };
 goog.structs.Pool.prototype.adjustForMinMax = function() {
   var freeQueue = this.freeQueue_;
-  while (this.getCount() < this.minCount_) {
+  for (; this.getCount() < this.minCount_;) {
     freeQueue.enqueue(this.createObject());
   }
-  while (this.getCount() > this.maxCount_ && this.getFreeCount() > 0) {
+  for (; this.getCount() > this.maxCount_ && this.getFreeCount() > 0;) {
     this.disposeObject(freeQueue.dequeue());
   }
 };
@@ -93,7 +93,8 @@ goog.structs.Pool.prototype.disposeObject = function(obj) {
   if (typeof obj.dispose == "function") {
     obj.dispose();
   } else {
-    for (var i in obj) {
+    var i;
+    for (i in obj) {
       obj[i] = null;
     }
   }
@@ -126,7 +127,7 @@ goog.structs.Pool.prototype.disposeInternal = function() {
   }
   delete this.inUseSet_;
   var freeQueue = this.freeQueue_;
-  while (!freeQueue.isEmpty()) {
+  for (; !freeQueue.isEmpty();) {
     this.disposeObject(freeQueue.dequeue());
   }
   delete this.freeQueue_;

@@ -3,7 +3,6 @@ goog.provide("goog.json.Replacer");
 goog.provide("goog.json.Reviver");
 goog.provide("goog.json.Serializer");
 goog.json.USE_NATIVE_JSON = goog.define("goog.json.USE_NATIVE_JSON", false);
-goog.json.TRY_NATIVE_JSON = goog.define("goog.json.TRY_NATIVE_JSON", true);
 goog.json.isValid = function(s) {
   if (/^\s*$/.test(s)) {
     return false;
@@ -14,18 +13,17 @@ goog.json.isValid = function(s) {
   const remainderRe = /^[\],:{}\s\u2028\u2029]*$/;
   return remainderRe.test(s.replace(backslashesRe, "@").replace(simpleValuesRe, "]").replace(openBracketsRe, ""));
 };
-goog.json.errorLogger_ = goog.nullFunction;
+goog.json.errorLogger_ = () => {
+};
 goog.json.setErrorLogger = function(errorLogger) {
   goog.json.errorLogger_ = errorLogger;
 };
 goog.json.parse = goog.json.USE_NATIVE_JSON ? goog.global["JSON"]["parse"] : function(s) {
   let error;
-  if (goog.json.TRY_NATIVE_JSON) {
-    try {
-      return goog.global["JSON"]["parse"](s);
-    } catch (ex) {
-      error = ex;
-    }
+  try {
+    return goog.global["JSON"]["parse"](s);
+  } catch (ex) {
+    error = ex;
   }
   const o = String(s);
   if (goog.json.isValid(o)) {
@@ -92,7 +90,7 @@ goog.json.Serializer.prototype.serializeString_ = function(s, sb) {
   sb.push('"', s.replace(goog.json.Serializer.charsToReplace_, function(c) {
     let rv = goog.json.Serializer.charToJsonCharCache_[c];
     if (!rv) {
-      rv = "\\u" + (c.charCodeAt(0) | 65536).toString(16).substr(1);
+      rv = "\\u" + (c.charCodeAt(0) | 65536).toString(16).slice(1);
       goog.json.Serializer.charToJsonCharCache_[c] = rv;
     }
     return rv;

@@ -11,8 +11,8 @@
 ;; runtime
 
 (def ^:dynamic *env* nil)
-(def default-env {:compensations      (atom '())
-                  :timeout-ms         (* 15 60 1000)})
+(def default-env {:compensations (atom '())
+                  :timeout-ms    (* 15 60 1000)})
 
 (defn- env->runtime
   "Derives the `runtime` attrs from the current env."
@@ -116,16 +116,16 @@
                                (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id])
                                (store/task<-event store id (assoc next-event :result r))
                                r)))
-            handle-fail   (fn [e]
-                            (if (shutting-down?)
-                              (do
-                                (t/log! {:level :warn :data {:exception e}} ["Exception caught during shutdown, panicking task"])
-                                (store/task<-panic store id (error/panic "Worker shutting down during invocation failure handling")))
-                              (do
-                                (t/log! {:level :debug :data {:sym sym :exception e}} ["Exception caught during actual function invocation for task" id])
-                                (store/task<-event store id (cond-> (assoc next-failure :error e)
-                                                                    (error/internal-error? e) (assoc :type ::failure)))))
-                            (p/rejected e))
+            handle-fail  (fn [e]
+                           (if (shutting-down?)
+                             (do
+                               (t/log! {:level :warn :data {:exception e}} ["Exception caught during shutdown, panicking task"])
+                               (store/task<-panic store id (error/panic "Worker shutting down during invocation failure handling")))
+                             (do
+                               (t/log! {:level :debug :data {:sym sym :exception e}} ["Exception caught during actual function invocation for task" id])
+                               (store/task<-event store id (cond-> (assoc next-failure :error e)
+                                                                   (error/internal-error? e) (assoc :type ::failure)))))
+                           (p/rejected e))
             retval       (cond
                            (some? res?)
                            (let [success? (some? (:result res?))
@@ -170,7 +170,7 @@
 
                            (not (or (event-matches? res? next-event) ;; replay success
                                     (event-matches? res? next-failure))) ;; replay failure
-                           (throw (error/internal-error "Transition unexpected" {:got     (:type res?)
+                           (throw (error/internal-error "Transition unexpected" {:got      (:type res?)
                                                                                  :expected [success failure]})))]
         (t/log! {:level :debug :data {:sym sym :retval retval}} ["Finished internal execution for task" id])
         retval))
@@ -202,17 +202,17 @@
   "Enqueues `task` onto the store and awaits its execution.
   If the exact task is alread present (eg we are resuming a crashed workflow),
   the existing task will be awaited instead."
-  [{:keys [store] :as opts} task]
+  [{:keys [store] :as opts} {:keys [id] :as task}]
   ;; because execution engine is supposed to be deterministic,
   ;; we can safely assume that if an identic task exists at this point
   ;; we are replaying some events
   (assert (some? store) "store should exist")
   (assert (some? task) "task should exist")
 
-  (let [t    (or (store/find-task store (:id task))
-                 (store/enqueue-task store task))
+  (let [db-task (or (store/find-task store id)
+                    (store/enqueue-task store task))
 
-        prom (store/await-task store (:id t) opts)]
+        prom    (store/await-task store (:id db-task) opts)]
 
     #?(:clj  (deref prom)
        :cljs prom)))

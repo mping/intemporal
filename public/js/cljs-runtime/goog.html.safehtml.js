@@ -1,10 +1,45 @@
 goog.loadModule(function(exports) {
+  function getAttrNameAndValue(tagName, name, value) {
+    if (value instanceof Const) {
+      value = Const.unwrap(value);
+    } else if (name.toLowerCase() == "style") {
+      if (SafeHtml.SUPPORT_STYLE_ATTRIBUTE) {
+        value = getStyleValue(value);
+      } else {
+        throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? 'Attribute "style" not supported.' : "");
+      }
+    } else if (/^on/i.test(name)) {
+      throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? `Attribute "${name}` + '" requires goog.string.Const value, "' + value + '" given.' : "");
+    } else if (name.toLowerCase() in URL_ATTRIBUTES) {
+      if (value instanceof TrustedResourceUrl) {
+        value = TrustedResourceUrl.unwrap(value);
+      } else if (value instanceof SafeUrl) {
+        value = SafeUrl.unwrap(value);
+      } else if (typeof value === "string") {
+        value = SafeUrl.sanitize(value).getTypedStringValue();
+      } else {
+        throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? `Attribute "${name}" on tag "${tagName}` + '" requires goog.html.SafeUrl, goog.string.Const, or' + ' string, value "' + value + '" given.' : "");
+      }
+    }
+    if (value.implementsGoogStringTypedString) {
+      value = value.getTypedStringValue();
+    }
+    asserts.assert(typeof value === "string" || typeof value === "number", "String or number value expected, got " + typeof value + " with value: " + value);
+    return `${name}="` + internal.htmlEscape(String(value)) + '"';
+  }
+  function getStyleValue(value) {
+    if (!goog.isObject(value)) {
+      throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? 'The "style" attribute requires goog.html.SafeStyle or map ' + "of style properties, " + typeof value + " given: " + value : "");
+    }
+    if (!(value instanceof SafeStyle)) {
+      value = SafeStyle.create(value);
+    }
+    return SafeStyle.unwrap(value);
+  }
   "use strict";
   goog.module("goog.html.SafeHtml");
   goog.module.declareLegacyNamespace();
   const Const = goog.require("goog.string.Const");
-  const Dir = goog.require("goog.i18n.bidi.Dir");
-  const DirectionalString = goog.require("goog.i18n.bidi.DirectionalString");
   const SafeScript = goog.require("goog.html.SafeScript");
   const SafeStyle = goog.require("goog.html.SafeStyle");
   const SafeStyleSheet = goog.require("goog.html.SafeStyleSheet");
@@ -21,14 +56,9 @@ goog.loadModule(function(exports) {
   const trustedtypes = goog.require("goog.html.trustedtypes");
   const CONSTRUCTOR_TOKEN_PRIVATE = {};
   class SafeHtml {
-    constructor(value, dir, token) {
+    constructor(value, token) {
       this.privateDoNotAccessOrElseSafeHtmlWrappedValue_ = token === CONSTRUCTOR_TOKEN_PRIVATE ? value : "";
-      this.dir_ = dir;
-      this.implementsGoogI18nBidiDirectionalString = true;
       this.implementsGoogStringTypedString = true;
-    }
-    getDirection() {
-      return this.dir_;
     }
     getTypedStringValue() {
       return this.privateDoNotAccessOrElseSafeHtmlWrappedValue_.toString();
@@ -52,34 +82,30 @@ goog.loadModule(function(exports) {
         return textOrHtml;
       }
       const textIsObject = typeof textOrHtml == "object";
-      let dir = null;
-      if (textIsObject && textOrHtml.implementsGoogI18nBidiDirectionalString) {
-        dir = textOrHtml.getDirection();
-      }
       let textAsString;
       if (textIsObject && textOrHtml.implementsGoogStringTypedString) {
         textAsString = textOrHtml.getTypedStringValue();
       } else {
         textAsString = String(textOrHtml);
       }
-      return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(internal.htmlEscape(textAsString), dir);
+      return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(internal.htmlEscape(textAsString));
     }
     static htmlEscapePreservingNewlines(textOrHtml) {
       if (textOrHtml instanceof SafeHtml) {
         return textOrHtml;
       }
       const html = SafeHtml.htmlEscape(textOrHtml);
-      return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(internal.newLineToBr(SafeHtml.unwrap(html)), html.getDirection());
+      return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(internal.newLineToBr(SafeHtml.unwrap(html)));
     }
     static htmlEscapePreservingNewlinesAndSpaces(textOrHtml) {
       if (textOrHtml instanceof SafeHtml) {
         return textOrHtml;
       }
       const html = SafeHtml.htmlEscape(textOrHtml);
-      return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(internal.whitespaceEscape(SafeHtml.unwrap(html)), html.getDirection());
+      return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(internal.whitespaceEscape(SafeHtml.unwrap(html)));
     }
     static comment(text) {
-      return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse("\x3c!--" + internal.htmlEscape(text) + "--\x3e", null);
+      return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse("\x3c!--" + internal.htmlEscape(text) + "--\x3e");
     }
     static create(tagName, attributes = undefined, content = undefined) {
       SafeHtml.verifyTagName(String(tagName));
@@ -133,7 +159,7 @@ goog.loadModule(function(exports) {
       for (let attr in attributes) {
         if (Object.prototype.hasOwnProperty.call(attributes, attr)) {
           const attrLower = attr.toLowerCase();
-          if (attrLower == "language" || attrLower == "src" || attrLower == "text" || attrLower == "type") {
+          if (attrLower == "language" || attrLower == "src" || attrLower == "text") {
             throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? `Cannot set "${attrLower}" attribute` : "");
           }
         }
@@ -141,9 +167,9 @@ goog.loadModule(function(exports) {
       let content = "";
       script = googArray.concat(script);
       for (let i = 0; i < script.length; i++) {
-        content += SafeScript.unwrap(script[i]);
+        content = content + SafeScript.unwrap(script[i]);
       }
-      const htmlContent = SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(content, Dir.NEUTRAL);
+      const htmlContent = SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(content);
       return SafeHtml.createSafeHtmlTagSecurityPrivateDoNotAccessOrElse("script", attributes, htmlContent);
     }
     static createStyle(styleSheet, attributes = undefined) {
@@ -153,9 +179,9 @@ goog.loadModule(function(exports) {
       let content = "";
       styleSheet = googArray.concat(styleSheet);
       for (let i = 0; i < styleSheet.length; i++) {
-        content += SafeStyleSheet.unwrap(styleSheet[i]);
+        content = content + SafeStyleSheet.unwrap(styleSheet[i]);
       }
-      const htmlContent = SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(content, Dir.NEUTRAL);
+      const htmlContent = SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(content);
       return SafeHtml.createSafeHtmlTagSecurityPrivateDoNotAccessOrElse("style", combinedAttrs, htmlContent);
     }
     static createMetaRefresh(url, secs = undefined) {
@@ -165,17 +191,11 @@ goog.loadModule(function(exports) {
           unwrappedUrl = "'" + unwrappedUrl.replace(/'/g, "%27") + "'";
         }
       }
-      const attributes = {"http-equiv":"refresh", "content":(secs || 0) + "; url\x3d" + unwrappedUrl,};
+      const attributes = {"http-equiv":"refresh", "content":(secs || 0) + "; url\x3d" + unwrappedUrl};
       return SafeHtml.createSafeHtmlTagSecurityPrivateDoNotAccessOrElse("meta", attributes);
-    }
-    static createWithDir(dir, tagName, attributes = undefined, content = undefined) {
-      const html = SafeHtml.create(tagName, attributes, content);
-      html.dir_ = dir;
-      return html;
     }
     static join(separator, parts) {
       const separatorHtml = SafeHtml.htmlEscape(separator);
-      let dir = separatorHtml.getDirection();
       const content = [];
       const addArgument = argument => {
         if (Array.isArray(argument)) {
@@ -183,34 +203,23 @@ goog.loadModule(function(exports) {
         } else {
           const html = SafeHtml.htmlEscape(argument);
           content.push(SafeHtml.unwrap(html));
-          const htmlDir = html.getDirection();
-          if (dir == Dir.NEUTRAL) {
-            dir = htmlDir;
-          } else if (htmlDir != Dir.NEUTRAL && dir != htmlDir) {
-            dir = null;
-          }
         }
       };
       parts.forEach(addArgument);
-      return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(content.join(SafeHtml.unwrap(separatorHtml)), dir);
+      return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(content.join(SafeHtml.unwrap(separatorHtml)));
     }
     static concat(var_args) {
       return SafeHtml.join(SafeHtml.EMPTY, Array.prototype.slice.call(arguments));
     }
-    static concatWithDir(dir, var_args) {
-      const html = SafeHtml.concat(Array.prototype.slice.call(arguments, 1));
-      html.dir_ = dir;
-      return html;
-    }
-    static createSafeHtmlSecurityPrivateDoNotAccessOrElse(html, dir) {
+    static createSafeHtmlSecurityPrivateDoNotAccessOrElse(html) {
+      const noinlineHtml = html;
       const policy = trustedtypes.getPolicyPrivateDoNotAccessOrElse();
-      const trustedHtml = policy ? policy.createHTML(html) : html;
-      return new SafeHtml(trustedHtml, dir, CONSTRUCTOR_TOKEN_PRIVATE);
+      const trustedHtml = policy ? policy.createHTML(noinlineHtml) : noinlineHtml;
+      return new SafeHtml(trustedHtml, CONSTRUCTOR_TOKEN_PRIVATE);
     }
     static createSafeHtmlTagSecurityPrivateDoNotAccessOrElse(tagName, attributes = undefined, content = undefined) {
-      let dir = null;
       let result = `<${tagName}`;
-      result += SafeHtml.stringifyAttributes(tagName, attributes);
+      result = result + SafeHtml.stringifyAttributes(tagName, attributes);
       if (content == null) {
         content = [];
       } else if (!Array.isArray(content)) {
@@ -218,21 +227,12 @@ goog.loadModule(function(exports) {
       }
       if (tags.isVoidTag(tagName.toLowerCase())) {
         asserts.assert(!content.length, `Void tag <${tagName}> does not allow content.`);
-        result += "\x3e";
+        result = result + "\x3e";
       } else {
         const html = SafeHtml.concat(content);
-        result += "\x3e" + SafeHtml.unwrap(html) + "\x3c/" + tagName + "\x3e";
-        dir = html.getDirection();
+        result = result + ("\x3e" + SafeHtml.unwrap(html) + "\x3c/" + tagName + "\x3e");
       }
-      const dirAttribute = attributes && attributes["dir"];
-      if (dirAttribute) {
-        if (/^(ltr|rtl|auto)$/i.test(dirAttribute)) {
-          dir = Dir.NEUTRAL;
-        } else {
-          dir = null;
-        }
-      }
-      return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(result, dir);
+      return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(result);
     }
     static stringifyAttributes(tagName, attributes = undefined) {
       let result = "";
@@ -246,7 +246,7 @@ goog.loadModule(function(exports) {
             if (value == null) {
               continue;
             }
-            result += " " + getAttrNameAndValue(tagName, name, value);
+            result = result + (" " + getAttrNameAndValue(tagName, name, value));
           }
         }
       }
@@ -291,50 +291,13 @@ goog.loadModule(function(exports) {
   const URL_ATTRIBUTES = googObject.createSet("action", "cite", "data", "formaction", "href", "manifest", "poster", "src");
   const NOT_ALLOWED_TAG_NAMES = googObject.createSet(TagName.APPLET, TagName.BASE, TagName.EMBED, TagName.IFRAME, TagName.LINK, TagName.MATH, TagName.META, TagName.OBJECT, TagName.SCRIPT, TagName.STYLE, TagName.SVG, TagName.TEMPLATE);
   SafeHtml.AttributeValue;
-  function getAttrNameAndValue(tagName, name, value) {
-    if (value instanceof Const) {
-      value = Const.unwrap(value);
-    } else if (name.toLowerCase() == "style") {
-      if (SafeHtml.SUPPORT_STYLE_ATTRIBUTE) {
-        value = getStyleValue(value);
-      } else {
-        throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? 'Attribute "style" not supported.' : "");
-      }
-    } else if (/^on/i.test(name)) {
-      throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? `Attribute "${name}` + '" requires goog.string.Const value, "' + value + '" given.' : "");
-    } else if (name.toLowerCase() in URL_ATTRIBUTES) {
-      if (value instanceof TrustedResourceUrl) {
-        value = TrustedResourceUrl.unwrap(value);
-      } else if (value instanceof SafeUrl) {
-        value = SafeUrl.unwrap(value);
-      } else if (typeof value === "string") {
-        value = SafeUrl.sanitize(value).getTypedStringValue();
-      } else {
-        throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? `Attribute "${name}" on tag "${tagName}` + '" requires goog.html.SafeUrl, goog.string.Const, or' + ' string, value "' + value + '" given.' : "");
-      }
-    }
-    if (value.implementsGoogStringTypedString) {
-      value = value.getTypedStringValue();
-    }
-    asserts.assert(typeof value === "string" || typeof value === "number", "String or number value expected, got " + typeof value + " with value: " + value);
-    return `${name}="` + internal.htmlEscape(String(value)) + '"';
-  }
-  function getStyleValue(value) {
-    if (!goog.isObject(value)) {
-      throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? 'The "style" attribute requires goog.html.SafeStyle or map ' + "of style properties, " + typeof value + " given: " + value : "");
-    }
-    if (!(value instanceof SafeStyle)) {
-      value = SafeStyle.create(value);
-    }
-    return SafeStyle.unwrap(value);
-  }
   SafeHtml.DOCTYPE_HTML = {valueOf:function() {
-    return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse("\x3c!DOCTYPE html\x3e", Dir.NEUTRAL);
-  },}.valueOf();
-  SafeHtml.EMPTY = new SafeHtml(goog.global.trustedTypes && goog.global.trustedTypes.emptyHTML || "", Dir.NEUTRAL, CONSTRUCTOR_TOKEN_PRIVATE);
+    return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse("\x3c!DOCTYPE html\x3e");
+  }}.valueOf();
+  SafeHtml.EMPTY = new SafeHtml(goog.global.trustedTypes && goog.global.trustedTypes.emptyHTML || "", CONSTRUCTOR_TOKEN_PRIVATE);
   SafeHtml.BR = {valueOf:function() {
-    return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse("\x3cbr\x3e", Dir.NEUTRAL);
-  },}.valueOf();
+    return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse("\x3cbr\x3e");
+  }}.valueOf();
   exports = SafeHtml;
   return exports;
 });

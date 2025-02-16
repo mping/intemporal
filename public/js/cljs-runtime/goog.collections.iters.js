@@ -1,28 +1,29 @@
 goog.loadModule(function(exports) {
-  "use strict";
-  goog.module("goog.collections.iters");
-  goog.module.declareLegacyNamespace();
   function getIterator(iterable) {
     return iterable[goog.global.Symbol.iterator]();
   }
-  exports.getIterator = getIterator;
-  exports.forEach = function(iterable, f) {
-    for (const elem of iterable) {
-      f(elem);
+  function forEach(iterator, f) {
+    let result;
+    for (; !(result = iterator.next()).done;) {
+      f(result.value);
     }
-  };
+  }
+  "use strict";
+  goog.module("goog.collections.iters");
+  goog.module.declareLegacyNamespace();
+  exports.getIterator = getIterator;
+  exports.forEach = forEach;
   class MapIterator {
     constructor(childIter, mapFn) {
       this.childIterator_ = getIterator(childIter);
       this.mapFn_ = mapFn;
-      this.nextIndex_ = 0;
     }
     [Symbol.iterator]() {
       return this;
     }
     next() {
       const childResult = this.childIterator_.next();
-      return {value:childResult.done ? undefined : this.mapFn_.call(undefined, childResult.value, this.nextIndex_++), done:childResult.done,};
+      return {value:childResult.done ? undefined : this.mapFn_.call(undefined, childResult.value), done:childResult.done};
     }
   }
   exports.map = function(iterable, f) {
@@ -32,18 +33,17 @@ goog.loadModule(function(exports) {
     constructor(childIter, filterFn) {
       this.childIter_ = getIterator(childIter);
       this.filterFn_ = filterFn;
-      this.nextIndex_ = 0;
     }
     [Symbol.iterator]() {
       return this;
     }
     next() {
-      while (true) {
+      for (; true;) {
         const childResult = this.childIter_.next();
         if (childResult.done) {
           return {done:true, value:undefined};
         }
-        const passesFilter = this.filterFn_.call(undefined, childResult.value, this.nextIndex_++);
+        const passesFilter = this.filterFn_.call(undefined, childResult.value);
         if (passesFilter) {
           return childResult;
         }
@@ -62,7 +62,7 @@ goog.loadModule(function(exports) {
       return this;
     }
     next() {
-      while (this.iterIndex_ < this.iterators_.length) {
+      for (; this.iterIndex_ < this.iterators_.length;) {
         const result = this.iterators_[this.iterIndex_].next();
         if (!result.done) {
           return result;
@@ -74,6 +74,13 @@ goog.loadModule(function(exports) {
   }
   exports.concat = function(...iterables) {
     return new ConcatIterator(iterables.map(getIterator));
+  };
+  exports.toArray = function(iterator) {
+    const arr = [];
+    forEach(iterator, e => {
+      return arr.push(e);
+    });
+    return arr;
   };
   return exports;
 });

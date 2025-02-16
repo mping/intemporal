@@ -15,10 +15,10 @@ goog.async.nextTick = function(callback, opt_context, opt_useSetImmediate) {
     goog.global.setImmediate(cb);
     return;
   }
-  if (!goog.async.nextTick.setImmediate_) {
-    goog.async.nextTick.setImmediate_ = goog.async.nextTick.getSetImmediateEmulator_();
+  if (!goog.async.nextTick.nextTickImpl) {
+    goog.async.nextTick.nextTickImpl = goog.async.nextTick.getNextTickImpl_();
   }
-  goog.async.nextTick.setImmediate_(cb);
+  goog.async.nextTick.nextTickImpl(cb);
 };
 goog.async.nextTick.useSetImmediate_ = function() {
   if (!goog.global.Window || !goog.global.Window.prototype) {
@@ -29,8 +29,8 @@ goog.async.nextTick.useSetImmediate_ = function() {
   }
   return false;
 };
-goog.async.nextTick.setImmediate_;
-goog.async.nextTick.getSetImmediateEmulator_ = function() {
+goog.async.nextTick.nextTickImpl;
+goog.async.nextTick.getNextTickImpl_ = function() {
   var Channel = goog.global["MessageChannel"];
   if (typeof Channel === "undefined" && typeof window !== "undefined" && window.postMessage && window.addEventListener && !goog.labs.userAgent.engine.isPresto()) {
     Channel = function() {

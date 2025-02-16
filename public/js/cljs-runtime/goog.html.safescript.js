@@ -12,6 +12,9 @@ goog.loadModule(function(exports) {
       this.privateDoNotAccessOrElseSafeScriptWrappedValue_ = token === CONSTRUCTOR_TOKEN_PRIVATE ? value : "";
       this.implementsGoogStringTypedString = true;
     }
+    toString() {
+      return this.privateDoNotAccessOrElseSafeScriptWrappedValue_.toString();
+    }
     static fromConstant(script) {
       const scriptString = Const.unwrap(script);
       if (scriptString.length === 0) {
@@ -41,17 +44,15 @@ goog.loadModule(function(exports) {
       return json.replace(/</g, "\\x3c");
     }
     static createSafeScriptSecurityPrivateDoNotAccessOrElse(script) {
+      const noinlineScript = script;
       const policy = trustedtypes.getPolicyPrivateDoNotAccessOrElse();
-      const trustedScript = policy ? policy.createScript(script) : script;
+      const trustedScript = policy ? policy.createScript(noinlineScript) : noinlineScript;
       return new SafeScript(trustedScript, CONSTRUCTOR_TOKEN_PRIVATE);
     }
   }
-  SafeScript.prototype.toString = function() {
-    return this.privateDoNotAccessOrElseSafeScriptWrappedValue_.toString();
-  };
   SafeScript.EMPTY = {valueOf:function() {
     return SafeScript.createSafeScriptSecurityPrivateDoNotAccessOrElse("");
-  },}.valueOf();
+  }}.valueOf();
   exports = SafeScript;
   return exports;
 });

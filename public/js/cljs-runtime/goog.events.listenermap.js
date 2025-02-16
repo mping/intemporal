@@ -15,8 +15,9 @@ goog.events.ListenerMap.prototype.getTypeCount = function() {
 };
 goog.events.ListenerMap.prototype.getListenerCount = function() {
   var count = 0;
-  for (var type in this.listeners) {
-    count += this.listeners[type].length;
+  var type;
+  for (type in this.listeners) {
+    count = count + this.listeners[type].length;
   }
   return count;
 };
@@ -78,10 +79,12 @@ goog.events.ListenerMap.prototype.removeByKey = function(listener) {
 goog.events.ListenerMap.prototype.removeAll = function(opt_type) {
   var typeStr = opt_type && opt_type.toString();
   var count = 0;
-  for (var type in this.listeners) {
+  var type;
+  for (type in this.listeners) {
     if (!typeStr || type == typeStr) {
       var listenerArray = this.listeners[type];
-      for (var i = 0; i < listenerArray.length; i++) {
+      var i = 0;
+      for (; i < listenerArray.length; i++) {
         ++count;
         listenerArray[i].markAsRemoved();
       }
@@ -95,7 +98,8 @@ goog.events.ListenerMap.prototype.getListeners = function(type, capture) {
   var listenerArray = this.listeners[type.toString()];
   var rv = [];
   if (listenerArray) {
-    for (var i = 0; i < listenerArray.length; ++i) {
+    var i = 0;
+    for (; i < listenerArray.length; ++i) {
       var listenerObj = listenerArray[i];
       if (listenerObj.capture == capture) {
         rv.push(listenerObj);
@@ -117,7 +121,8 @@ goog.events.ListenerMap.prototype.hasListener = function(opt_type, opt_capture) 
   var typeStr = hasType ? opt_type.toString() : "";
   var hasCapture = opt_capture !== undefined;
   return goog.object.some(this.listeners, function(listenerArray, type) {
-    for (var i = 0; i < listenerArray.length; ++i) {
+    var i = 0;
+    for (; i < listenerArray.length; ++i) {
       if ((!hasType || listenerArray[i].type == typeStr) && (!hasCapture || listenerArray[i].capture == opt_capture)) {
         return true;
       }
@@ -126,7 +131,8 @@ goog.events.ListenerMap.prototype.hasListener = function(opt_type, opt_capture) 
   });
 };
 goog.events.ListenerMap.findListenerIndex_ = function(listenerArray, listener, opt_useCapture, opt_listenerScope) {
-  for (var i = 0; i < listenerArray.length; ++i) {
+  var i = 0;
+  for (; i < listenerArray.length; ++i) {
     var listenerObj = listenerArray[i];
     if (!listenerObj.removed && listenerObj.listener == listener && listenerObj.capture == !!opt_useCapture && listenerObj.handler == opt_listenerScope) {
       return i;

@@ -35,7 +35,8 @@ goog.dom.forms.submitFormDataInNewWindow = function(actionUri, method, formData)
   newForm.method = method;
   goog.dom.safe.setFormElementAction(newForm, actionUri);
   formData.forEach(function(fieldValues, fieldName) {
-    for (var i = 0; i < fieldValues.length; i++) {
+    var i = 0;
+    for (; i < fieldValues.length; i++) {
       var fieldValue = fieldValues[i];
       var newInput = newDocument.createElement("input");
       newInput.name = fieldName;
@@ -59,7 +60,9 @@ goog.dom.forms.getFormDataString = function(form) {
 };
 goog.dom.forms.getFormDataHelper_ = function(form, result, fnAppend) {
   var els = form.elements;
-  for (var el, i = 0; el = els.item(i); i++) {
+  var el;
+  var i = 0;
+  for (; el = els.item(i); i++) {
     if (el.form != form || el.disabled || el.tagName == goog.dom.TagName.FIELDSET) {
       continue;
     }
@@ -73,20 +76,24 @@ goog.dom.forms.getFormDataHelper_ = function(form, result, fnAppend) {
       case goog.dom.InputType.SELECT_MULTIPLE:
         var values = goog.dom.forms.getValue(el);
         if (values != null) {
-          for (var value, j = 0; value = values[j]; j++) {
+          var value;
+          var j = 0;
+          for (; value = values[j]; j++) {
             fnAppend(result, name, value);
           }
         }
         break;
       default:
-        var value = goog.dom.forms.getValue(el);
+        value = goog.dom.forms.getValue(el);
         if (value != null) {
           fnAppend(result, name, value);
         }
     }
   }
   var inputs = form.getElementsByTagName(String(goog.dom.TagName.INPUT));
-  for (var input, i = 0; input = inputs[i]; i++) {
+  var input;
+  i = 0;
+  for (; input = inputs[i]; i++) {
     if (input.form == form && input.type.toLowerCase() == goog.dom.InputType.IMAGE) {
       name = input.name;
       fnAppend(result, name, input.value);
@@ -108,7 +115,9 @@ goog.dom.forms.addFormDataToStringBuffer_ = function(sb, name, value) {
 };
 goog.dom.forms.hasFileInput = function(form) {
   var els = form.elements;
-  for (var el, i = 0; el = els[i]; i++) {
+  var el;
+  var i = 0;
+  for (; el = els[i]; i++) {
     if (!el.disabled && el.type && el.type.toLowerCase() == goog.dom.InputType.FILE) {
       return true;
     }
@@ -118,7 +127,8 @@ goog.dom.forms.hasFileInput = function(form) {
 goog.dom.forms.setDisabled = function(el, disabled) {
   if (el.tagName == goog.dom.TagName.FORM) {
     var els = el.elements;
-    for (var i = 0; el = els.item(i); i++) {
+    var i = 0;
+    for (; el = els.item(i); i++) {
       goog.dom.forms.setDisabled(el, disabled);
     }
   } else {
@@ -166,7 +176,8 @@ goog.dom.forms.getValueByName = function(form, name) {
   } else if (els.type) {
     return goog.dom.forms.getValue(els);
   } else {
-    for (var i = 0; i < els.length; i++) {
+    var i = 0;
+    for (; i < els.length; i++) {
       var val = goog.dom.forms.getValue(els[i]);
       if (val) {
         return val;
@@ -184,7 +195,9 @@ goog.dom.forms.getSelectSingle_ = function(el) {
 };
 goog.dom.forms.getSelectMultiple_ = function(el) {
   var values = [];
-  for (var option, i = 0; option = el.options[i]; i++) {
+  var option;
+  var i = 0;
+  for (; option = el.options[i]; i++) {
     if (option.selected) {
       values.push(option.value);
     }
@@ -214,7 +227,9 @@ goog.dom.forms.setInputChecked_ = function(el, opt_value) {
 goog.dom.forms.setSelectSingle_ = function(el, opt_value) {
   el.selectedIndex = -1;
   if (typeof opt_value === "string") {
-    for (var option, i = 0; option = el.options[i]; i++) {
+    var option;
+    var i = 0;
+    for (; option = el.options[i]; i++) {
       if (option.value == opt_value) {
         option.selected = true;
         break;
@@ -226,10 +241,14 @@ goog.dom.forms.setSelectMultiple_ = function(el, opt_value) {
   if (typeof opt_value === "string") {
     opt_value = [opt_value];
   }
-  for (var option, i = 0; option = el.options[i]; i++) {
+  var option;
+  var i = 0;
+  for (; option = el.options[i]; i++) {
     option.selected = false;
     if (opt_value) {
-      for (var value, j = 0; value = opt_value[j]; j++) {
+      var value;
+      var j = 0;
+      for (; value = opt_value[j]; j++) {
         if (option.value == value) {
           option.selected = true;
         }

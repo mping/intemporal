@@ -4,7 +4,6 @@ goog.loadModule(function(exports) {
   goog.module.declareLegacyNamespace();
   const GoogIterable = goog.require("goog.iter.Iterable");
   const GoogIterator = goog.require("goog.iter.Iterator");
-  const StopIteration = goog.require("goog.iter.StopIteration");
   class ShimIterable {
     __iterator__() {
     }
@@ -15,37 +14,22 @@ goog.loadModule(function(exports) {
     static of(iter) {
       if (iter instanceof ShimIterableImpl || iter instanceof ShimGoogIterator || iter instanceof ShimEs6Iterator) {
         return iter;
-      } else if (typeof iter.nextValueOrThrow == "function") {
-        return new ShimIterableImpl(() => wrapGoog(iter));
+      } else if (typeof iter.next == "function") {
+        return new ShimIterableImpl(() => {
+          return iter;
+        });
       } else if (typeof iter[Symbol.iterator] == "function") {
-        return new ShimIterableImpl(() => iter[Symbol.iterator]());
+        return new ShimIterableImpl(() => {
+          return iter[Symbol.iterator]();
+        });
       } else if (typeof iter.__iterator__ == "function") {
-        return new ShimIterableImpl(() => wrapGoog(iter.__iterator__()));
+        return new ShimIterableImpl(() => {
+          return iter.__iterator__();
+        });
       }
       throw new Error("Not an iterator or iterable.");
     }
   }
-  const wrapGoog = iter => {
-    if (!(iter instanceof GoogIterator)) {
-      return iter;
-    }
-    let done = false;
-    return {next() {
-      let value;
-      while (!done) {
-        try {
-          value = iter.nextValueOrThrow();
-          break;
-        } catch (err) {
-          if (err !== StopIteration) {
-            throw err;
-          }
-          done = true;
-        }
-      }
-      return {value, done};
-    },};
-  };
   class ShimIterableImpl {
     constructor(func) {
       this.func_ = func;
@@ -68,12 +52,8 @@ goog.loadModule(function(exports) {
       super();
       this.iter_ = iter;
     }
-    nextValueOrThrow() {
-      const result = this.iter_.next();
-      if (result.done) {
-        throw StopIteration;
-      }
-      return result.value;
+    next() {
+      return this.iter_.next();
     }
     toGoog() {
       return this;
@@ -87,14 +67,16 @@ goog.loadModule(function(exports) {
   }
   class ShimEs6Iterator extends ShimIterableImpl {
     constructor(iter) {
-      super(() => iter);
+      super(() => {
+        return iter;
+      });
       this.iter_ = iter;
     }
     next() {
       return this.iter_.next();
     }
   }
-  exports = {ShimIterable, ShimEs6Iterator, ShimGoogIterator,};
+  exports = {ShimIterable, ShimEs6Iterator, ShimGoogIterator};
   return exports;
 });
 

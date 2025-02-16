@@ -1,7 +1,28 @@
 goog.provide('shadow.cljs.devtools.client.websocket');
-shadow.cljs.devtools.client.websocket.start = (function shadow$cljs$devtools$client$websocket$start(runtime){
+shadow.cljs.devtools.client.websocket.start = (function shadow$cljs$devtools$client$websocket$start(var_args){
+var G__43667 = arguments.length;
+switch (G__43667) {
+case 1:
+return shadow.cljs.devtools.client.websocket.start.cljs$core$IFn$_invoke$arity$1((arguments[(0)]));
+
+break;
+case 2:
+return shadow.cljs.devtools.client.websocket.start.cljs$core$IFn$_invoke$arity$2((arguments[(0)]),(arguments[(1)]));
+
+break;
+default:
+throw (new Error(["Invalid arity: ",cljs.core.str.cljs$core$IFn$_invoke$arity$1(arguments.length)].join('')));
+
+}
+});
+
+(shadow.cljs.devtools.client.websocket.start.cljs$core$IFn$_invoke$arity$1 = (function (runtime){
+return shadow.cljs.devtools.client.websocket.start.cljs$core$IFn$_invoke$arity$2(WebSocket,runtime);
+}));
+
+(shadow.cljs.devtools.client.websocket.start.cljs$core$IFn$_invoke$arity$2 = (function (ws_impl,runtime){
 var ws_url = shadow.cljs.devtools.client.env.get_ws_relay_url();
-var socket = (new WebSocket(ws_url));
+var socket = (new ws_impl(ws_url));
 (socket.onmessage = (function (e){
 return shadow.cljs.devtools.client.shared.remote_msg(runtime,e.data);
 }));
@@ -19,7 +40,10 @@ return shadow.cljs.devtools.client.shared.remote_error(runtime,e);
 }));
 
 return socket;
-});
+}));
+
+(shadow.cljs.devtools.client.websocket.start.cljs$lang$maxFixedArity = 2);
+
 shadow.cljs.devtools.client.websocket.send = (function shadow$cljs$devtools$client$websocket$send(socket,msg){
 return socket.send(msg);
 });
