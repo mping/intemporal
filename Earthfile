@@ -1,5 +1,9 @@
 VERSION 0.8
 FROM clojure:temurin-23-noble
+DO github.com/earthly/lib+INSTALL_DIND
+
+# setup dind for easy caching
+# FROM earthly/dind:ubuntu-24.04-docker-27.3.1-1
 
 RUN apt update
 RUN apt install -y rlwrap curl unzip wget lcov
@@ -56,7 +60,7 @@ build-all:
 
 test:
   FROM +build-base
-  DO github.com/earthly/lib+INSTALL_DIND
+  #DO github.com/earthly/lib+INSTALL_DIND
   COPY docker ./docker
   COPY docker-compose.yml ./
   WITH DOCKER --compose docker-compose.yml

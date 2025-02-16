@@ -8,15 +8,12 @@ NC='\033[0m' # No Color
 rm -rf coverage
 mkdir -p coverage
 
-trap 'kill 0' SIGINT
 
 printf "${BLUE}running clj tests...${NC}\n"
-CLOVERAGE_OUTPUT=target/coverage-clj bin/kaocha test --reporter documentation &
+CLOVERAGE_OUTPUT=target/coverage-clj bin/kaocha test --reporter documentation
 
 printf "${BLUE}running cljs tests...${NC}\n"
-CLOVERAGE_OUTPUT=target/coverage-cljs bin/kaocha test-cljs --reporter documentation &
-
-wait
+CLOVERAGE_OUTPUT=target/coverage-cljs bin/kaocha test-cljs --reporter documentation
 
 printf "${BLUE}combining coverage reports...${NC}\n"
 lcov --add-tracefile target/coverage-clj/lcov.info  --add-tracefile target/coverage-cljs/lcov.info -o coverage/lcov.merged.info

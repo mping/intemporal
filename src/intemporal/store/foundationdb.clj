@@ -145,7 +145,8 @@
              (do
                (store/watch-task this id (fn [{:keys [state] :as task}]
                                            (when (si/terminal? task)
-                                             (p/resolve! deferred task))))
+                                             (p/resolve! deferred task)
+                                             true)))
                ;; wait for resolution
                (-> (p/timeout deferred timeout-ms ::timeout)
                    (p/then (fn [resolved]
