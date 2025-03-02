@@ -56,8 +56,6 @@
 ;;;;
 ;; helpers
 
-;; TODO dont rely on js/window, nodejs doesnt have window
-
 #_:clj-kondo/ignore
 (defn now []
   #?(:clj  (System/currentTimeMillis)
@@ -86,13 +84,16 @@
 
 ;;;;
 ;; main impl
+;;
+
+(def default-owner "intemporal")
 
 (defn make-store
   "Creates a new memory-based store"
   ([]
    (make-store nil))
   ([{:keys [owner file readers validation-fail-rate]
-     :or   {owner        "intemporal"
+     :or   {owner        default-owner
             validation-fail-rate 0}}]
    ;; TODO use single atom?
    (let [tasks       (atom {})
@@ -270,11 +271,11 @@
        (enqueue-task [this task]
          ;; TODO use owner
          (maybe-fail!)
-         (si/validate-task task)
-         (swap! tasks assoc
-                (:id task) (assoc task :order (swap! tcounter inc)))
-         #?(:cljs (register this (:sym task) (:fvar task)))
-         task)
+         (let [task+owner (assoc task :owner owner :order (swap! tcounter inc))]
+           (si/validate-task task+owner)
+           (swap! tasks assoc (:id task) task+owner)
+           #?(:cljs (register this (:sym task+owner) (:fvar task+owner)))
+           task+owner))
 
        (dequeue-task [this]
          (dequeue-task this {:lease-ms nil}))

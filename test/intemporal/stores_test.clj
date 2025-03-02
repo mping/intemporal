@@ -57,8 +57,10 @@
                                                     nil)]
 
             (testing "enqueue task"
-              (is (= task
-                     (store/enqueue-task store task))))
+              (is (=
+                     (assoc task :owner store/default-owner)
+                     (-> (store/enqueue-task store task)
+                         (dissoc :order)))))
 
             (testing "list tasks"
               (is (match? [(dissoc task :fvar)]

@@ -31,7 +31,7 @@
   ([]
    (make-store nil))
   ([{:keys [owner cluster-file-path]
-     :or {owner "intemporal"}}]
+     :or {owner store/default-owner}}]
    (let [^FDB fdb (cfdb/select-api-version fdb-api-version)
          open-db  #(if cluster-file-path
                      (cfdb/open fdb cluster-file-path)
@@ -170,13 +170,14 @@
 
        (enqueue-task [this task]
          ;; TODO use owner
-         (let [serializable (dissoc task :fvar)]
-           (assert (serializable? serializable) "Task should be serializable")
-           (assert (:id task) "Task should have an id")
-           (validate-task task)
+         (let [task+owner (assoc task :owner owner)]
+           (assert (serializable? task+owner) "Task should be serializable")
+           (assert (:id task+owner) "Task should have an id")
+           (validate-task task+owner)
+
            (with-tx [tx (open-db)]
-             (fc/set tx subspace-tasks [(:id task)] (serialize serializable))))
-         task)
+             (fc/set tx subspace-tasks [(:id task+owner)] (serialize (dissoc task+owner :fvar))))
+           task+owner))
 
        (dequeue-task [this]
          (store/dequeue-task this {:lease-ms nil}))

@@ -1,7 +1,7 @@
 (ns intemporal.store.jdbc
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as i]
-            [intemporal.store.internal :as si :refer [serialize deserialize serializable? validate-task validate-event]]
+            [intemporal.store.internal :as si :refer [serialize deserialize serializable? validate-event]]
             [migratus.core :as migratus]
             [next.jdbc :as jdbc]
             [next.jdbc.sql.builder :as builder]
@@ -61,7 +61,7 @@
 (defn make-store
   "Creates a new Postgres-based store."
   [{:keys [owner migration-dir migrate? watch-polling-ms]
-    :or   {owner "intemporal" migrate? true watch-polling-ms 100} :as opts}]
+    :or   {owner store/default-owner migrate? true watch-polling-ms 100} :as opts}]
   (let [db-spec      (dissoc opts :migration-dir :migrate? :watch-polling-ms)
         config       {:store         :database
                       :migration-dir migration-dir
@@ -86,14 +86,14 @@
       (save-event [this task-id {:keys [type ref root sym args result] :as event}]
         (assert (serializable? args) "Event args should be serializable")
         (assert (serializable? result) "Event result should be serializable")
-        (validate-event (assoc event :id Integer/MAX_VALUE)
-          (let [args   (serialize args)
-                result (serialize result)
-                res    (jdbc/with-transaction [tx db-spec]
-                         (jdbc/execute-one! tx ["INSERT INTO events(type, ref, root, sym, args, result) values (?,?,?,?,?,?) RETURNING id"
-                                                (kw->db type) ref root (str sym) args result]
-                                            default-opts))]
-            (assoc event :id (:id res)))))
+        (validate-event (assoc event :id Integer/MAX_VALUE))
+        (let [args   (serialize args)
+              result (serialize result)
+              res    (jdbc/with-transaction [tx db-spec]
+                       (jdbc/execute-one! tx ["INSERT INTO events(type, ref, root, sym, args, result) values (?,?,?,?,?,?) RETURNING id"
+                                              (kw->db type) ref root (str sym) args result]
+                                          default-opts))]
+          (assoc event :id (:id res))))
 
       (all-events [this task-id]
         (->> (jdbc/with-transaction [tx db-spec]
@@ -196,22 +196,24 @@
           tasks?))
 
       (enqueue-task [this {:keys [id proto type ref root sym args result state lease-end runtime] :as task}]
-        (assert (serializable? args) "Task args should be serializable")
-        (assert (serializable? result) "Task result should be serializable")
-        (assert (serializable? runtime) "Task runtime should be serializable")
-        (assert (or (nil? proto) (some? (:on proto)) "Task protocol not valid, missing :on attribute"))
-        (validate-task task)
-        (let [proto?  (cond (symbol? proto) (str proto)
-                            (some? (:on proto)) (str (:on proto))
-                            (string? proto) proto)
-              args    (serialize args)
-              result  (serialize result)
-              runtime (serialize runtime)]
-          (jdbc/with-transaction [tx db-spec]
-            ;; TODO use owner
-            (jdbc/execute! tx ["INSERT INTO tasks(id,proto,type,ref,root,sym,args,result,state,lease_end,runtime) values (?,?,?,?,?,?,?,?,?,?,?) RETURNING id"
-                               id proto? (kw->db type) (kw->db ref) (kw->db root) (str sym) args result (kw->db state) lease-end runtime])))
-        task)
+        (let [task+owner (assoc task :owner owner)]
+          (assert (serializable? args) "Task args should be serializable")
+          (assert (serializable? result) "Task result should be serializable")
+          (assert (serializable? runtime) "Task runtime should be serializable")
+          (assert (or (nil? proto) (some? (:on proto)) "Task protocol not valid, missing :on attribute"))
+          (si/validate-task task+owner)
+
+          (let [proto?  (cond (symbol? proto) (str proto)
+                              (some? (:on proto)) (str (:on proto))
+                              (string? proto) proto)
+                args    (serialize args)
+                result  (serialize result)
+                runtime (serialize runtime)]
+            (jdbc/with-transaction [tx db-spec]
+              ;; TODO use owner
+              (jdbc/execute! tx ["INSERT INTO tasks(id,owner,proto,type,ref,root,sym,args,result,state,lease_end,runtime) values (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id"
+                                 id owner proto? (kw->db type) (kw->db ref) (kw->db root) (str sym) args result (kw->db state) lease-end runtime])))
+          task+owner))
 
       (dequeue-task [this]
         (store/dequeue-task this {:lease-ms nil}))

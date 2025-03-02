@@ -61,6 +61,7 @@
 (def ^:private Task
   [:map {:closed true}
    [:id [:or :string :uuid]]
+   [:owner [:maybe :string]]
    [:sym :symbol]
    [:ref [:maybe :string]]
    [:root [:maybe :string]]
@@ -91,7 +92,6 @@
 
 (def validate-task (m/coercer Task nil {:registry registry}))
 (def validate-event (m/coercer Event nil {:registry registry}))
-
 
 (defn success? [{:keys [state] :as task}]
   (= :success state))

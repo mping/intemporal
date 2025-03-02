@@ -1,5 +1,5 @@
 {:tasks {"elegant-robinson" {:args [1], :ref nil, :type :workflow, :state :pending, :sym intemporal.recovery-failure-test/my-workflow-,
-                             :root nil, :id "elegant-robinson", :runtime {:timeout-ms 900000}, :order 1, :lease-end nil}},
+                             :root nil, :owner "intemporal", :id "elegant-robinson", :runtime {:timeout-ms 900000}, :order 1, :lease-end nil}},
  :history {"elegant-robinson"
            [{:ref "elegant-robinson", :root "elegant-robinson", :type :intemporal.workflow/invoke, :sym intemporal.recovery-failure-test/my-workflow-, :args [1], :error nil, :result nil, :id 1}]
 

@@ -78,6 +78,7 @@
           (let [db-task (s/find-task store (:id task))]
             (is (= (dissoc db-task :id)
                    {:type :workflow
+                    :owner "intemporal"
                     :ref "some-ref"
                     :root "some-root"
                     :sym  'identity
