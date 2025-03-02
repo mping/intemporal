@@ -20,4 +20,4 @@ lcov --add-tracefile target/coverage-clj/lcov.info  --add-tracefile target/cover
 genhtml coverage/lcov.merged.info -o coverage
 
 printf "${BLUE}done! opening report${NC}\n"
-xdg-open coverage/index.html || true
+xdg-open coverage/index.html || open coverage/index.html ||  true

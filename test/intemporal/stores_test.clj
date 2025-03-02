@@ -11,7 +11,7 @@
 (use-fixtures :once tu/with-trace-logging)
 
 (def stores  {:memory   (store/make-store)
-              :fdb      (fdb/make-store)
+              :fdb      (fdb/make-store {:cluster-file-path "docker/fdb.cluster"})
               :postgres (jdbc/make-store {:jdbcUrl       "jdbc:postgresql://localhost:5432/root?user=root&password=root"
                                           :migration-dir "migrations/postgres"})})
 

@@ -57,7 +57,7 @@
               (let [executor (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
                                                       :polling-ms 10})]
                 (store/reenqueue-pending-tasks mstore (constantly nil))
-                (with-result [_ (Thread/sleep 2000)]
+                (with-result [_ (Thread/sleep 3000)]
 
                   (tu/print-tables mstore)
 
