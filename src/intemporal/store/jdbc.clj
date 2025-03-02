@@ -86,14 +86,14 @@
       (save-event [this task-id {:keys [type ref root sym args result] :as event}]
         (assert (serializable? args) "Event args should be serializable")
         (assert (serializable? result) "Event result should be serializable")
-        (validate-event (assoc event :id Integer/MAX_VALUE))
-        (let [args   (serialize args)
-              result (serialize result)
-              res    (jdbc/with-transaction [tx db-spec]
-                       (jdbc/execute-one! tx ["INSERT INTO events(type, ref, root, sym, args, result) values (?,?,?,?,?,?) RETURNING id"
-                                              (kw->db type) ref root (str sym) args result]
-                                          default-opts))]
-          (assoc event :id (:id res))))
+        (validate-event (assoc event :id Integer/MAX_VALUE)
+          (let [args   (serialize args)
+                result (serialize result)
+                res    (jdbc/with-transaction [tx db-spec]
+                         (jdbc/execute-one! tx ["INSERT INTO events(type, ref, root, sym, args, result) values (?,?,?,?,?,?) RETURNING id"
+                                                (kw->db type) ref root (str sym) args result]
+                                            default-opts))]
+            (assoc event :id (:id res)))))
 
       (all-events [this task-id]
         (->> (jdbc/with-transaction [tx db-spec]

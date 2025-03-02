@@ -50,7 +50,9 @@
                (fc/get-range tx subspace-history {:valfn deserialize}))
              (vals)))
 
-       (save-event [this task-id event]
+       (save-event [this task-id {:keys [type ref root sym args result] :as event}]
+         (assert (serializable? args) "Event args should be serializable")
+         (assert (serializable? result) "Event result should be serializable")
          (let [evt-id (next-id)
                evt+id (assoc event :id evt-id)]
            (assert (serializable? evt+id) "Event should be serializable")
