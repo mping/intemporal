@@ -18,7 +18,6 @@
 
 (def fdb-api-version cfdb/clj-fdb-api-version)
 
-
 (defmacro with-tx [binding & body]
   (let [[tx-sym db-sym] binding
         database (with-meta db-sym {:tag 'com.apple.foundationdb.Database})]
@@ -37,7 +36,8 @@
                      (cfdb/open fdb cluster-file-path)
                      (cfdb/open fdb))
          subspace-tasks (fsub/create ["tasks"])
-         subspace-history (fsub/create ["history"])]
+         subspace-all-history (fsub/create ["history"])
+         subspace-owner-history (fsub/create [(str "history_"owner)])]
      (reify
        store/InternalVarStore
        (register [this sym var])
@@ -47,7 +47,7 @@
        store/HistoryStore
        (list-events [this]
          (-> (with-tx [tx (open-db)]
-               (fc/get-range tx subspace-history {:valfn deserialize}))
+               (fc/get-range tx subspace-owner-history {:valfn deserialize}))
              (vals)))
 
        (save-event [this task-id {:keys [type ref root sym args result] :as event}]
@@ -60,18 +60,18 @@
 
            (with-tx [tx (open-db)]
              ;; TODO use owner
-             (fc/set tx subspace-history [task-id evt-id] (serialize evt+id)))
+             (fc/set tx subspace-owner-history [task-id evt-id] (serialize evt+id)))
            evt+id))
 
        (all-events [this task-id]
          (-> (with-tx [tx (open-db)]
                ;; TODO use owner
-               (fc/get-range tx subspace-history [task-id] {:valfn deserialize}))
+               (fc/get-range tx subspace-owner-history [task-id] {:valfn deserialize}))
              (vals)))
 
        (clear-events [this]
          (with-tx [tx (open-db)]
-           (fc/clear-range tx subspace-history)))
+           (fc/clear-range tx subspace-owner-history)))
 
        store/TaskStore
        (list-tasks [this]
@@ -156,6 +156,9 @@
                              (if (= ::timeout resolved)
                                (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
                                (wrap-result resolved)))))))))
+
+       (release-pending-tasks [this]
+         "TODO: move pending tasks from owner subspace to non-owner subspace")
 
        (reenqueue-pending-tasks [this f]
          (with-tx [tx (open-db)]

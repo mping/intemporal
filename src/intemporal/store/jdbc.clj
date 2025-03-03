@@ -164,6 +164,7 @@
 
       (await-task [this id {:keys [timeout-ms] :as opts}]
         ;; TODO use owner
+        ;; TODO use promise if available
         (let [task        (store/find-task this id)
               deferred    (p/deferred)
               wrap-result (fn [{:keys [state result] :as task}]
@@ -186,6 +187,9 @@
                             (if (= ::timeout resolved)
                               (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
                               (wrap-result resolved)))))))))
+
+      (release-pending-tasks [this]
+        "TODO: set owner=nil from all tasks that are pending for current owner")
 
       (reenqueue-pending-tasks [this f]
         (let [tasks? (jdbc/with-transaction [tx db-spec]

@@ -32,6 +32,8 @@
     "Finds the task on the db by id")
   (reenqueue-pending-tasks [this callback]
     "Marks all pending tasks as `new`")
+  (release-pending-tasks [this]
+    "Disowns all tasks that are pending")
   (enqueue-task [this task]
     "Atomically enqueues a protocol, workflow or activity task execution")
   (dequeue-task [this] [this opts]
@@ -252,6 +254,9 @@
                              (if (= ::timeout resolved)
                                (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
                                (wrap-result resolved)))))))))
+
+       (release-pending-tasks [this]
+         "TODO: dissoc owner from all pending tasks")
 
        (reenqueue-pending-tasks [this f]
          (let [task->run? (atom #{})]
