@@ -1,7 +1,7 @@
 (ns intemporal.store.jdbc
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as i]
-            [intemporal.store.internal :as si :refer [serialize deserialize serializable? validate-event]]
+            [intemporal.store.internal :as si :refer [serialize deserialize]]
             [migratus.core :as migratus]
             [next.jdbc :as jdbc]
             [next.jdbc.sql.builder :as builder]
@@ -84,9 +84,10 @@
              (map db->event)))
 
       (save-event [this task-id {:keys [type ref root sym args result] :as event}]
-        (assert (serializable? args) "Event args should be serializable")
-        (assert (serializable? result) "Event result should be serializable")
-        (validate-event (assoc event :id Integer/MAX_VALUE))
+        (si/validate-serializable! args "Event args should be serializable")
+        (si/validate-serializable! result "Event result should be serializable")
+        (si/validate-event! (assoc event :id Integer/MAX_VALUE))
+
         (let [args   (serialize args)
               result (serialize result)
               res    (jdbc/with-transaction [tx db-spec]
@@ -133,7 +134,7 @@
             (when-not id
               (store/save-event this task-id updated-evt))
             ;; cant really validate because its a partial task
-            ;(validate-task updated-task)
+            ;(validate-task! updated-task)
             (jdbc/execute-one! tx (builder/for-update "tasks" updated-task {:id task-id} default-opts))
             updated-evt)))
 
@@ -196,12 +197,13 @@
           tasks?))
 
       (enqueue-task [this {:keys [id proto type ref root sym args result state lease-end runtime] :as task}]
+        (assert (or (nil? proto) (some? (:on proto)) "Task protocol not valid, missing :on attribute"))
+
         (let [task+owner (assoc task :owner owner)]
-          (assert (serializable? args) "Task args should be serializable")
-          (assert (serializable? result) "Task result should be serializable")
-          (assert (serializable? runtime) "Task runtime should be serializable")
-          (assert (or (nil? proto) (some? (:on proto)) "Task protocol not valid, missing :on attribute"))
-          (si/validate-task task+owner)
+          (si/validate-serializable! args "Task args should be serializable")
+          (si/validate-serializable! result "Task result should be serializable")
+          (si/validate-serializable! runtime "Task runtime should be serializable")
+          (si/validate-task! task+owner)
 
           (let [proto?  (cond (symbol? proto) (str proto)
                               (some? (:on proto)) (str (:on proto))
@@ -210,7 +212,6 @@
                 result  (serialize result)
                 runtime (serialize runtime)]
             (jdbc/with-transaction [tx db-spec]
-              ;; TODO use owner
               (jdbc/execute! tx ["INSERT INTO tasks(id,owner,proto,type,ref,root,sym,args,result,state,lease_end,runtime) values (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id"
                                  id owner proto? (kw->db type) (kw->db ref) (kw->db root) (str sym) args result (kw->db state) lease-end runtime])))
           task+owner))

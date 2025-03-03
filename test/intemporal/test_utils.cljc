@@ -95,7 +95,7 @@
   ```
   "
   [bindings & body]
-  (assert (vector? bindings) "first argument should be a binding of [res resbody]")
+  (assert (vector? bindings) "First argument should be a binding of [res resbody]")
   (let [[res resbody] bindings]
     (macros/case
       :clj

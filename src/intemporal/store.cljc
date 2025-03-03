@@ -125,7 +125,7 @@
                        (when-let [w (find-task this id)]
                          (maybe-fail!)
                          (->> (apply assoc w kvs)
-                              (si/validate-task)
+                              (si/validate-task!)
                               (swap! tasks assoc id))))]
 
      ;; deser the db
@@ -159,7 +159,7 @@
          (apply concat (vals @history)))
        (save-event [this task-id event]
          (let [evt+id (assoc event :id (swap! counter inc))]
-           (si/validate-event evt+id)
+           (si/validate-event! evt+id)
            (swap! history (fn [v]
                             (assoc v task-id (-> (or (get v task-id) [])
                                                  (conj evt+id)))))
@@ -272,7 +272,7 @@
          ;; TODO use owner
          (maybe-fail!)
          (let [task+owner (assoc task :owner owner :order (swap! tcounter inc))]
-           (si/validate-task task+owner)
+           (si/validate-task! task+owner)
            (swap! tasks assoc (:id task) task+owner)
            #?(:cljs (register this (:sym task+owner) (:fvar task+owner)))
            task+owner))

@@ -1,7 +1,7 @@
 (ns intemporal.store.foundationdb
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as i]
-            [intemporal.store.internal :as si :refer [resolve-fvar serialize deserialize serializable? next-id validate-task validate-event]]
+            [intemporal.store.internal :as si :refer [resolve-fvar serialize deserialize next-id]]
             [me.vedang.clj-fdb.FDB :as cfdb]
             [me.vedang.clj-fdb.core :as fc]
             [me.vedang.clj-fdb.transaction :as ftr]
@@ -51,12 +51,13 @@
              (vals)))
 
        (save-event [this task-id {:keys [type ref root sym args result] :as event}]
-         (assert (serializable? args) "Event args should be serializable")
-         (assert (serializable? result) "Event result should be serializable")
+         (si/validate-serializable! args "Event args should be serializable")
+         (si/validate-serializable! result "Event result should be serializable")
          (let [evt-id (next-id)
                evt+id (assoc event :id evt-id)]
-           (assert (serializable? evt+id) "Event should be serializable")
-           (validate-event evt+id)
+           (si/validate-serializable! evt+id "Event should be serializable")
+           (si/validate-event! evt+id)
+
            (with-tx [tx (open-db)]
              ;; TODO use owner
              (fc/set tx subspace-history [task-id evt-id] (serialize evt+id)))
@@ -83,7 +84,7 @@
            (let [task         (fc/get tx subspace-tasks task-id {:valfn (comp resolve-fvar deserialize)})
                  updated-task (assoc task :result error)]
              (when task
-               (validate-task updated-task)
+               (si/validate-task! updated-task)
                (fc/set tx subspace-tasks task-id (serialize updated-task))))))
 
        (task<-event [this task-id {:keys [id ref root type sym args result error] :as event-descr}]
@@ -101,12 +102,12 @@
                                 (some? args) (assoc evt :args args)
                                 (some? error) (assoc evt :error error)
                                 :else (assoc evt :result result))]
-             (assert (serializable? task) "task is not serializable")
+             (si/validate-serializable! task "Task should be serializable")
              (when-not id
                (store/save-event this task-id updated-evt))
              ;; not every invocation will come from a persisted task
              (when task
-               (validate-task updated-task)
+               (si/validate-task! updated-task)
                (fc/set tx subspace-tasks task-id (serialize updated-task)))
              updated-evt)))
 
@@ -170,13 +171,13 @@
 
        (enqueue-task [this task]
          ;; TODO use owner
-         (let [task+owner (assoc task :owner owner)]
-           (assert (serializable? task+owner) "Task should be serializable")
-           (assert (:id task+owner) "Task should have an id")
-           (validate-task task+owner)
+         (let [task+owner (assoc task :owner owner)
+               task-id    (:id task+owner)]
+           (si/validate-serializable! task+owner "Task should be serializable")
+           (si/validate-task! task+owner)
 
            (with-tx [tx (open-db)]
-             (fc/set tx subspace-tasks [(:id task+owner)] (serialize (dissoc task+owner :fvar))))
+             (fc/set tx subspace-tasks [task-id] (serialize (dissoc task+owner :fvar))))
            task+owner))
 
        (dequeue-task [this]

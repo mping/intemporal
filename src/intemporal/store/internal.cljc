@@ -90,8 +90,21 @@
    [:result {:optional true} :any]
    [:error {:optional true} :any]])
 
-(def validate-task (m/coercer Task nil {:registry registry}))
-(def validate-event (m/coercer Event nil {:registry registry}))
+(def validate-task!
+  "Throws if the task is not valid"
+  (m/coercer Task nil {:registry registry}))
+
+(def validate-event!
+  "Throws if the event is not valid"
+  (m/coercer Event nil {:registry registry}))
+
+(defn validate-serializable!
+  "Throws if the object is not serializable"
+  ([obj]
+   (validate-serializable! obj "Object is not serializable"))
+  ([obj msg]
+   (when-not (serializable? obj)
+     (throw (ex-info msg {:object obj})))))
 
 (defn success? [{:keys [state] :as task}]
   (= :success state))

@@ -81,7 +81,7 @@
   "Stubs `f`, wrapping it in an activity-aware function."
   [f]
   `(fn [& argv#]
-     (assert (some? (:next-id i/*env*)) "no next-id function, are you inside `defn-workflow`?")
+     (assert (some? (:next-id i/*env*)) "No next-id function, are you inside `defn-workflow`?")
      (let [ref#  (:ref i/*env*)
            root# (:root i/*env*)
            fvar# (var ~f)]
