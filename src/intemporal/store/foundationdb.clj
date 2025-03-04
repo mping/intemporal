@@ -59,13 +59,11 @@
            (si/validate-event! evt+id)
 
            (with-tx [tx (open-db)]
-             ;; TODO use owner
              (fc/set tx subspace-history [task-id evt-id] (serialize evt+id)))
            evt+id))
 
        (all-events [this task-id]
          (-> (with-tx [tx (open-db)]
-               ;; TODO use owner
                (fc/get-range tx subspace-history [task-id] {:valfn deserialize}))
              (vals)))
 
@@ -185,7 +183,7 @@
                  (when (= :pending (:state task))
                    (f task)
                    (fc/clear tx subspace-tasks (:id task))
-                   (fc/set tx subspace-owned-tasks [(:id task)] (serialize (assoc task :state :new)))))))))
+                   (fc/set tx subspace-owned-tasks [(:id task)] (serialize (assoc task :state :new :owner owner)))))))))
 
        (enqueue-task [this task]
          ;; TODO use owner

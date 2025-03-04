@@ -35,7 +35,7 @@
 
 (deftest store-failure-test
   (testing "failure: task validation fails"
-    (let [mstore      (store/make-store {:validation-fail-rate 1.0})
+    (let [mstore      (store/make-store {:failures {:validation 1.0}})
           stop-worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
 
       (with-result [res (w/with-env {:store mstore}

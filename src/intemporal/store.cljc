@@ -43,7 +43,7 @@
     Opts:
     * `lease-ms`- duration of lease for dequeue. After lease expires, the task is eligible for dequeueing again")
   (clear-tasks [this]
-    "Clears all tasks"))
+    "Deletes all tasks"))
 
 (defprotocol HistoryStore
   (list-events [this] "Lists all events")
@@ -94,9 +94,9 @@
   "Creates a new memory-based store"
   ([]
    (make-store nil))
-  ([{:keys [owner file readers validation-fail-rate]
-     :or   {owner        default-owner
-            validation-fail-rate 0}}]
+  ([{:keys [owner file readers failures]
+     :or   {owner    default-owner
+            failures {:validation 0}}}]
    ;; TODO use single atom?
    (let [tasks       (atom {})
          history     (atom {})
@@ -105,10 +105,10 @@
          ecounter    (atom 0)
          tcounter    (atom 0)
          vars        (atom {})
-         maybe-fail!  (fn []
-                        (when (< (rand-int 100)
-                                 (* 100 validation-fail-rate))
-                          (throw (ex-info "Forced error via failure rate" {:intemporal.workflow.internal/type :internal}))))
+         maybe-fail! (fn []
+                       (when (< (rand-int 100)
+                                (* 100 (get failures :validation)))
+                         (throw (ex-info "Forced error via failure rate" {:intemporal.workflow.internal/type :internal}))))
 
          ;;persistence
          persist!    (fn [k ref old new]
@@ -232,7 +232,6 @@
 
        (await-task [this id {:keys [timeout-ms] :as opts}]
          (maybe-fail!)
-         ;; TODO use owner
          (let [task        (find-task this id)
                deferred    (p/deferred)
                wrap-result (fn [{:keys [result] :as task}]
@@ -261,28 +260,27 @@
          (swap! tasks
                 update-vals
                 (fn [{:keys [state] :as task}]
-                  #_:clj-kondo/ignore
                   (cond-> task
                           (and (= :pending state)
                                (= (:owner task) owner))
-                          (assoc task :owner nil)))))
+                          (assoc :owner nil)))))
 
        (reenqueue-pending-tasks [this f]
          (let [task->run? (atom #{})]
            (swap! tasks
                   update-vals
                   (fn [{:keys [state] :as task}]
-                    #_:clj-kondo/ignore
-                    (cond-> task
-                            (and (= :pending state)
-                                 (or (= (:owner task) owner)
-                                     (nil? (:owner task))))
-                            (do
-                              ;; ensure we only run f once - swap! might run the fn multiple times
-                              (when-not (contains? @task->run? task)
-                                (f task)
-                                (swap! task->run? conj task))
-                              (assoc task :state :new)))))))
+                    (if (and (= :pending state)
+                             (or (= (:owner task) owner)
+                                 (nil? (:owner task))))
+                      (do
+                        ;; ensure we only run f once - swap! might run the fn multiple times
+                        (when-not (contains? @task->run? task)
+                          (f task)
+                          (swap! task->run? conj task))
+                        (assoc task :state :new))
+                      ;; else
+                      task)))))
 
        (enqueue-task [this task]
          ;; TODO use owner
