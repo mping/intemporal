@@ -278,12 +278,11 @@
                         (when-not (contains? @task->run? task)
                           (f task)
                           (swap! task->run? conj task))
-                        (assoc task :state :new))
+                        (assoc task :state :new :owner owner))
                       ;; else
                       task)))))
 
        (enqueue-task [this task]
-         ;; TODO use owner
          (maybe-fail!)
          (let [task+owner (assoc task :owner owner :order (swap! tcounter inc))]
            (si/validate-task! task+owner)
@@ -295,11 +294,12 @@
          (dequeue-task this {:lease-ms nil}))
 
        (dequeue-task [this {:keys [lease-ms]}]
-         ;; TODO check owner
          (let [first-new (fn [v] (->> (vals v)
-                                      (filter #(or (= :new (:state %))
-                                                   (some-> (:lease-end %)
-                                                           (< (now)))))
+                                      (filter #(and
+                                                 (or (= owner (:owner %)) (nil? (:owner %)))
+                                                 (or (= :new (:state %))
+                                                     (some-> (:lease-end %)
+                                                             (< (now))))))
                                       (sort-by :order)
                                       (first)))
                found?    (atom nil)]

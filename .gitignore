@@ -13,6 +13,7 @@ pom.xml.asc
 .hg/
 .clj-kondo
 test/*.db
+.lsp/
 
 .cpcache
 .shadow-cljs

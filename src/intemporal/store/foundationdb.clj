@@ -135,7 +135,6 @@
          (store/await-task this id {:timeout-ms store/default-lease}))
 
        (await-task [this id {:keys [timeout-ms] :as opts}]
-         ;; TODO use owner
          (let [task        (store/find-task this id)
                deferred    (p/deferred)
                wrap-result (fn [{:keys [state result] :as task}]
@@ -186,7 +185,6 @@
                    (fc/set tx subspace-owned-tasks [(:id task)] (serialize (assoc task :state :new :owner owner)))))))))
 
        (enqueue-task [this task]
-         ;; TODO use owner
          (let [task+owner (assoc task :owner owner)
                task-id    (:id task+owner)]
            (si/validate-serializable! task+owner "Task should be serializable")
@@ -200,26 +198,42 @@
          (store/dequeue-task this {:lease-ms nil}))
 
        (dequeue-task [this {:keys [lease-ms]}]
-         ;; TODO check owner
          (let [dequeuable? (fn [{:keys [state lease-end]}]
                              (or (= :new state)
                                  (some-> lease-end
                                          (< (store/now)))))
+               update-task (fn [task]
+                             (assoc task
+                               :owner owner
+                               :state :pending
+                               :fvar (store/sym->var this task)
+                               :lease-end (when lease-ms (+ (store/now) lease-ms))))
                found?      (with-tx [tx (open-db)]
                              (reduce
                                (fn [_ ^KeyValue kv]
                                  (let [task (-> kv .getValue deserialize resolve-fvar)]
                                    (when (dequeuable? task)
-                                     (let [updated-task (assoc task
-                                                          :state :pending
-                                                          :fvar (store/sym->var this task)
-                                                          :lease-end (when lease-ms
-                                                                       (+ (store/now) lease-ms)))]
+                                     (let [updated-task (update-task task)]
                                        (fc/set tx subspace-owned-tasks [(:id task)] (serialize (dissoc updated-task :fvar)))
                                        (reduced updated-task)))))
                                nil
                                (ftr/get-range tx (fsub/range subspace-owned-tasks))))]
-           found?))
+
+              ;; if we cant find any task that we own,
+              ;; try the tasks that were released
+              (if found?
+                found?
+                (with-tx [tx (open-db)]
+                  (reduce
+                    (fn [_ ^KeyValue kv]
+                      (let [task (-> kv .getValue deserialize resolve-fvar)]
+                        (when (dequeuable? task)
+                          (let [updated-task (update-task task)]
+                            (fc/clear tx subspace-tasks (:id task))
+                            (fc/set tx subspace-owned-tasks [(:id task)] (serialize (dissoc updated-task :fvar)))
+                            (reduced updated-task)))))
+                    nil
+                    (ftr/get-range tx (fsub/range subspace-tasks)))))))
 
        (clear-tasks [this]
          (with-tx [tx (open-db)]
