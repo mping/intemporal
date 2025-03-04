@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     type      varchar(50) NOT NULL,
     ref       varchar(50) NULL,
     root      varchar(50) NULL,
-    sym       varchar(50) NOT NULL,
+    sym       varchar(100) NOT NULL,
     args      bytea       NULL,
     result    bytea       NULL,
     state     varchar(20) NOT NULL,

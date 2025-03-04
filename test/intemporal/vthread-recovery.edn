@@ -6,7 +6,7 @@
                                 :root      nil,
                                 :result    nil,
                                 :id        "silly-mcclintock",
-                                :owner     "intempral",
+                                :owner     "intemporal",
                                 :order     1,
                                 :lease-end nil}},
  :history  {"silly-mcclintock"      [{:ref    "silly-mcclintock",

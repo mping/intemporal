@@ -31,7 +31,7 @@
   (find-task [this id]
     "Finds the task on the db by id")
   (reenqueue-pending-tasks [this callback]
-    "Marks all pending tasks as `new`")
+    "Marks all pending tasks belonging to the store's `owner` as `new`")
   (release-pending-tasks [this]
     "Disowns all tasks that are pending")
   (enqueue-task [this task]
@@ -174,7 +174,9 @@
 
        TaskStore
        (list-tasks [this]
-         (vals @tasks))
+         (filter #(or (= owner (:owner %))
+                      (nil? (:owner %)))
+                 (vals @tasks)))
 
        (task<-panic [this task-id error]
          (update-task this task-id :result error))
@@ -256,7 +258,14 @@
                                (wrap-result resolved)))))))))
 
        (release-pending-tasks [this]
-         "TODO: dissoc owner from all pending tasks")
+         (swap! tasks
+                update-vals
+                (fn [{:keys [state] :as task}]
+                  #_:clj-kondo/ignore
+                  (cond-> task
+                          (and (= :pending state)
+                               (= (:owner task) owner))
+                          (assoc task :owner nil)))))
 
        (reenqueue-pending-tasks [this f]
          (let [task->run? (atom #{})]
@@ -265,7 +274,9 @@
                   (fn [{:keys [state] :as task}]
                     #_:clj-kondo/ignore
                     (cond-> task
-                            (= :pending state)
+                            (and (= :pending state)
+                                 (or (= (:owner task) owner)
+                                     (nil? (:owner task))))
                             (do
                               ;; ensure we only run f once - swap! might run the fn multiple times
                               (when-not (contains? @task->run? task)

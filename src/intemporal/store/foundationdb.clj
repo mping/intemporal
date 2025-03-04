@@ -36,8 +36,8 @@
                      (cfdb/open fdb cluster-file-path)
                      (cfdb/open fdb))
          subspace-tasks (fsub/create ["tasks"])
-         subspace-all-history (fsub/create ["history"])
-         subspace-owner-history (fsub/create [(str "history_"owner)])]
+         subspace-owned-tasks (fsub/create [(str owner "_tasks")])
+         subspace-history (fsub/create ["history"])]
      (reify
        store/InternalVarStore
        (register [this sym var])
@@ -47,7 +47,7 @@
        store/HistoryStore
        (list-events [this]
          (-> (with-tx [tx (open-db)]
-               (fc/get-range tx subspace-owner-history {:valfn deserialize}))
+               (fc/get-range tx subspace-history {:valfn deserialize}))
              (vals)))
 
        (save-event [this task-id {:keys [type ref root sym args result] :as event}]
@@ -60,39 +60,43 @@
 
            (with-tx [tx (open-db)]
              ;; TODO use owner
-             (fc/set tx subspace-owner-history [task-id evt-id] (serialize evt+id)))
+             (fc/set tx subspace-history [task-id evt-id] (serialize evt+id)))
            evt+id))
 
        (all-events [this task-id]
          (-> (with-tx [tx (open-db)]
                ;; TODO use owner
-               (fc/get-range tx subspace-owner-history [task-id] {:valfn deserialize}))
+               (fc/get-range tx subspace-history [task-id] {:valfn deserialize}))
              (vals)))
 
        (clear-events [this]
          (with-tx [tx (open-db)]
-           (fc/clear-range tx subspace-owner-history)))
+           (fc/clear-range tx subspace-history)))
 
        store/TaskStore
        (list-tasks [this]
-         (-> (with-tx [tx (open-db)]
-               (fc/get-range tx subspace-tasks {:valfn (comp resolve-fvar deserialize)}))
-             (vals)))
+         (let [owned (-> (with-tx [tx (open-db)]
+                           (fc/get-range tx subspace-owned-tasks {:valfn (comp resolve-fvar deserialize)}))
+                         (vals))
+               free (-> (with-tx [tx (open-db)]
+                          (fc/get-range tx subspace-tasks {:valfn (comp resolve-fvar deserialize)}))
+                        (vals))]
+           (into owned free)))
 
        (task<-panic [this task-id error]
          (with-tx [tx (open-db)]
-           (let [task         (fc/get tx subspace-tasks task-id {:valfn (comp resolve-fvar deserialize)})
+           (let [task         (fc/get tx subspace-owned-tasks task-id {:valfn (comp resolve-fvar deserialize)})
                  updated-task (assoc task :result error)]
              (when task
                (si/validate-task! updated-task)
-               (fc/set tx subspace-tasks task-id (serialize updated-task))))))
+               (fc/set tx subspace-owned-tasks task-id (serialize updated-task))))))
 
        (task<-event [this task-id {:keys [id ref root type sym args result error] :as event-descr}]
          ;; some redundancy between :result in task and event
          ;; note that we save the event first, because update-task can trigger some watchers
          ;; and they would expect the event to be present in the history
          (with-tx [tx (open-db)]
-           (let [task         (fc/get tx subspace-tasks task-id {:valfn (comp resolve-fvar deserialize)})
+           (let [task         (fc/get tx subspace-owned-tasks task-id {:valfn (comp resolve-fvar deserialize)})
                  evt          {:ref ref :root root :type type :sym sym :args args}
                  updated-task (cond
                                 (some? args) (assoc task :state :pending)
@@ -108,12 +112,12 @@
              ;; not every invocation will come from a persisted task
              (when task
                (si/validate-task! updated-task)
-               (fc/set tx subspace-tasks task-id (serialize updated-task)))
+               (fc/set tx subspace-owned-tasks task-id (serialize updated-task)))
              updated-evt)))
 
        (find-task [this id]
          (with-tx [^FDBTransaction tx (open-db)]
-           (when-let [task? (fc/get tx subspace-tasks id)]
+           (when-let [task? (fc/get tx subspace-owned-tasks id)]
              (resolve-fvar (deserialize task?)))))
 
        (watch-task [this id f]
@@ -121,11 +125,11 @@
            (p/vthread
              (while @watch?
                @(with-tx [^FDBTransaction tx (open-db)]
-                  (when (fc/get tx subspace-tasks id)
-                    (.watch tx (fsub/pack subspace-tasks (Tuple/from (object-array [id]))))))
+                  (when (fc/get tx subspace-owned-tasks id)
+                    (.watch tx (fsub/pack subspace-owned-tasks (Tuple/from (object-array [id]))))))
 
                (with-tx [^FDBTransaction tx (open-db)]
-                 (when-let [task? (fc/get tx subspace-tasks id)]
+                 (when-let [task? (fc/get tx subspace-owned-tasks id)]
                    (when (f (resolve-fvar (deserialize task?)))
                      (reset! watch? false))))))))
 
@@ -158,19 +162,30 @@
                                (wrap-result resolved)))))))))
 
        (release-pending-tasks [this]
-         "TODO: move pending tasks from owner subspace to non-owner subspace")
+         (with-tx [tx (open-db)]
+           (let [owned-tasks @(.asList (ftr/get-range tx (fsub/range subspace-owned-tasks)))]
+             (doseq [kv owned-tasks]
+               (let [task (-> kv .getValue deserialize resolve-fvar)]
+                 (when (= :pending (:state task))
+                   (fc/set tx subspace-tasks [(:id task)] (serialize (assoc task :owner nil)))
+                   (fc/clear tx subspace-owned-tasks (:id task))))))))
 
        (reenqueue-pending-tasks [this f]
          (with-tx [tx (open-db)]
-           (reduce
-             (fn [acc ^KeyValue kv]
+           (let [owned-tasks @(.asList (ftr/get-range tx (fsub/range subspace-owned-tasks)))
+                 free-tasks  @(.asList (ftr/get-range tx (fsub/range subspace-tasks)))]
+             (doseq [kv owned-tasks]
                (let [task (-> kv .getValue deserialize resolve-fvar)]
                  (when (= :pending (:state task))
                    (f task)
-                   (fc/set tx subspace-tasks [(:id task)] (serialize (assoc task :state :new))))
-                 acc))
-             nil
-             (ftr/get-range tx (fsub/range subspace-tasks)))))
+                   (fc/set tx subspace-owned-tasks [(:id task)] (serialize (assoc task :state :new))))))
+
+             (doseq [kv free-tasks]
+               (let [task (-> kv .getValue deserialize resolve-fvar)]
+                 (when (= :pending (:state task))
+                   (f task)
+                   (fc/clear tx subspace-tasks (:id task))
+                   (fc/set tx subspace-owned-tasks [(:id task)] (serialize (assoc task :state :new)))))))))
 
        (enqueue-task [this task]
          ;; TODO use owner
@@ -180,7 +195,7 @@
            (si/validate-task! task+owner)
 
            (with-tx [tx (open-db)]
-             (fc/set tx subspace-tasks [task-id] (serialize (dissoc task+owner :fvar))))
+             (fc/set tx subspace-owned-tasks [task-id] (serialize (dissoc task+owner :fvar))))
            task+owner))
 
        (dequeue-task [this]
@@ -202,15 +217,15 @@
                                                           :fvar (store/sym->var this task)
                                                           :lease-end (when lease-ms
                                                                        (+ (store/now) lease-ms)))]
-                                       (fc/set tx subspace-tasks [(:id task)] (serialize (dissoc updated-task :fvar)))
+                                       (fc/set tx subspace-owned-tasks [(:id task)] (serialize (dissoc updated-task :fvar)))
                                        (reduced updated-task)))))
                                nil
-                               (ftr/get-range tx (fsub/range subspace-tasks))))]
+                               (ftr/get-range tx (fsub/range subspace-owned-tasks))))]
            found?))
 
        (clear-tasks [this]
          (with-tx [tx (open-db)]
-           (fc/clear-range tx subspace-tasks)))))))
+           (fc/clear-range tx subspace-owned-tasks)))))))
 
 
 (comment

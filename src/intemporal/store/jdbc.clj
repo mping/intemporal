@@ -31,7 +31,7 @@
 (defn- db->kw [v]
   (when v (keyword v)))
 
-(defn- db->task [{:keys [id proto type ref root sym args result state lease_end runtime] :as task}]
+(defn- db->task [{:keys [id proto type ref root sym args result state lease_end runtime owner] :as task}]
   (let [dargs    (deserialize args)
         dresult  (deserialize result)
         druntime (deserialize runtime)
@@ -42,7 +42,8 @@
               "workflow" (i/create-workflow-task ref root ssym (resolve ssym) dargs id dresult kstate druntime)
               "activity" (i/create-activity-task ref root ssym (resolve ssym) dargs id dresult kstate druntime)
               "proto-activity" (i/create-proto-activity-task sproto ref root ssym (resolve ssym) dargs id dresult kstate druntime))
-            lease_end (assoc :lease-end lease_end))))
+            lease_end (assoc :lease-end lease_end)
+            owner (assoc :owner owner))))
 
 (defn- db->event [{:keys [id type ref root sym args result] :as event}]
   (let [dargs   (deserialize args)
@@ -108,7 +109,7 @@
       store/TaskStore
       (list-tasks [this]
         (->> (jdbc/with-transaction [tx db-spec]
-               (jdbc/execute! tx ["select * from tasks"] default-opts))
+               (jdbc/execute! tx ["select * from tasks where (owner is null or owner=?)" owner] default-opts))
              (map db->task)))
 
       (task<-panic [this task-id error]
@@ -189,12 +190,13 @@
                               (wrap-result resolved)))))))))
 
       (release-pending-tasks [this]
-        "TODO: set owner=nil from all tasks that are pending for current owner")
+        (jdbc/with-transaction [tx db-spec]
+          (jdbc/execute-one! tx ["update tasks set owner=null where owner=?" owner])))
 
       (reenqueue-pending-tasks [this f]
         (let [tasks? (jdbc/with-transaction [tx db-spec]
-                       (let [tasks (jdbc/execute! tx ["select * from tasks where state='pending'"] default-opts)]
-                         (jdbc/execute-one! tx ["update tasks set state='new' where id = ANY(?)" (into-array (mapv :id tasks))])
+                       (let [tasks (jdbc/execute! tx ["select * from tasks where state='pending' and (owner is null or owner=?)" owner] default-opts)]
+                         (jdbc/execute-one! tx ["update tasks set state='new', owner=? where id = ANY(?)" owner (into-array (mapv :id tasks))])
                          (doseq [row tasks]
                            (f (db->task row)))
                          tasks))]
