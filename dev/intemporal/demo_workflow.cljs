@@ -36,7 +36,7 @@
             v2))))
 
 (def mstore (store/make-store))
-(def worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
+(def stop-worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
 
 ;; note that in cljs, this returns a promise
 (def res (w/with-env {:store mstore}

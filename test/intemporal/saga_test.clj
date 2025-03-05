@@ -54,8 +54,8 @@
         (store/clear-events store)
         (store/clear-tasks store)
 
-        (let [spied-impl    (pspy/spy ProtocolActivity example-impl)
-              cancel-worker (w/start-worker! store {:protocols {`ProtocolActivity spied-impl}})]
+        (let [spied-impl  (pspy/spy ProtocolActivity example-impl)
+              stop-worker (w/start-worker! store {:protocols {`ProtocolActivity spied-impl}})]
           (try
             (testing "workflow run"
               (is (= ::failed (w/with-env {:store store}
@@ -74,4 +74,4 @@
                            calls))))))
 
             (finally
-              (cancel-worker))))))))
+              (stop-worker))))))))

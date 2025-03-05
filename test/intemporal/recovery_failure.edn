@@ -1,10 +1,10 @@
-{:tasks {"elegant-robinson" {:args [1], :ref nil, :type :workflow, :state :pending, :sym intemporal.recovery-failure-test/my-workflow-,
-                             :root nil, :owner "intemporal", :id "elegant-robinson", :runtime {:timeout-ms 900000}, :order 1, :lease-end nil}},
- :history {"elegant-robinson"
-           [{:ref "elegant-robinson", :root "elegant-robinson", :type :intemporal.workflow/invoke, :sym intemporal.recovery-failure-test/my-workflow-, :args [1], :error nil, :result nil, :id 1}]
+{:tasks    {"elegant-robinson" {:args [1], :ref nil, :type :workflow, :state :pending, :sym intemporal.recovery-failure-test/my-workflow-,
+                                :root nil, :owner "intemporal", :id "elegant-robinson", :runtime {:timeout-ms 900000}, :order 1, :lease-end nil}},
+ :history  {"elegant-robinson"
+            [{:ref "elegant-robinson", :root "elegant-robinson", :type :intemporal.workflow/invoke, :sym intemporal.recovery-failure-test/my-workflow-, :args [1], :error nil, :result nil, :id 1}]
 
-           "elegant-robinson-1"
-           [{:ref "elegant-robinson-1", :root "elegant-robinson", :type :intemporal.activity/failure, :sym intemporal.recovery-failure-test/activity-fn, :args (1), :error nil, :result nil, :id 2}]}
- :counter 2,
+            "elegant-robinson-1"
+            [{:ref "elegant-robinson-1", :root "elegant-robinson", :type :intemporal.activity/failure, :sym intemporal.recovery-failure-test/activity-fn, :args (1), :error nil, :result nil, :id 2}]}
+ :counter  2,
  :pcounter 1,
  :ecounter 0}

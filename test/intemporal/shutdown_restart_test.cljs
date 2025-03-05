@@ -57,20 +57,19 @@
             (is (match? {:type :intemporal.protocol/invoke :sym 'intemporal.shutdown-restart-test/foo} e2))
             (is (nil? e3))))))))
 
-#_
-(deftest executor-shutdown-resume-test
-  (testing "workflow resumes"
-    (let [stop-worker (w/start-worker mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
-                                              :polling-ms 10})]
-      (store/reenqueue-pending-tasks mstore (constantly nil))
-      (with-result [_ (p/delay 2000)]
+#_(deftest executor-shutdown-resume-test
+    (testing "workflow resumes"
+      (let [stop-worker (w/start-worker mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
+                                                :polling-ms 10})]
+        (store/reenqueue-pending-tasks mstore (constantly nil))
+        (with-result [_ (p/delay 2000)]
 
-        (tu/print-tables mstore)
+          (tu/print-tables mstore)
 
-        (testing "workflow succeeded"
-          (let [[w1] (store/list-tasks mstore)]
-            (is (match? {:type :workflow :sym 'intemporal.shutdown-restart-test/my-workflow- :state :success} w1))))
+          (testing "workflow succeeded"
+            (let [[w1] (store/list-tasks mstore)]
+              (is (match? {:type :workflow :sym 'intemporal.shutdown-restart-test/my-workflow- :state :success} w1))))
 
-        (stop-worker)))))
+          (stop-worker)))))
 
 ;(cljs.test/run-tests *ns*)

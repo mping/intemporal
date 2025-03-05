@@ -24,20 +24,20 @@
     ;; TODO type hint Closeable?
     `(with-open [db# ~database]
        (ftr/run db#
-         (fn [~tx-sym] (do ~@body))))))
+                (fn [~tx-sym] (do ~@body))))))
 
 (defn make-store
   ([]
    (make-store nil))
   ([{:keys [owner cluster-file-path]
-     :or {owner store/default-owner}}]
-   (let [^FDB fdb (cfdb/select-api-version fdb-api-version)
-         open-db  #(if cluster-file-path
-                     (cfdb/open fdb cluster-file-path)
-                     (cfdb/open fdb))
-         subspace-tasks (fsub/create ["tasks"])
+     :or   {owner store/default-owner}}]
+   (let [^FDB fdb             (cfdb/select-api-version fdb-api-version)
+         open-db              #(if cluster-file-path
+                                 (cfdb/open fdb cluster-file-path)
+                                 (cfdb/open fdb))
+         subspace-tasks       (fsub/create ["tasks"])
          subspace-owned-tasks (fsub/create [(str owner "_tasks")])
-         subspace-history (fsub/create ["history"])]
+         subspace-history     (fsub/create ["history"])]
      (reify
        store/InternalVarStore
        (register [this sym var])
@@ -76,9 +76,9 @@
          (let [owned (-> (with-tx [tx (open-db)]
                            (fc/get-range tx subspace-owned-tasks {:valfn (comp resolve-fvar deserialize)}))
                          (vals))
-               free (-> (with-tx [tx (open-db)]
-                          (fc/get-range tx subspace-tasks {:valfn (comp resolve-fvar deserialize)}))
-                        (vals))]
+               free  (-> (with-tx [tx (open-db)]
+                           (fc/get-range tx subspace-tasks {:valfn (comp resolve-fvar deserialize)}))
+                         (vals))]
            (into owned free)))
 
        (task<-panic [this task-id error]
@@ -219,21 +219,21 @@
                                nil
                                (ftr/get-range tx (fsub/range subspace-owned-tasks))))]
 
-              ;; if we cant find any task that we own,
-              ;; try the tasks that were released
-              (if found?
-                found?
-                (with-tx [tx (open-db)]
-                  (reduce
-                    (fn [_ ^KeyValue kv]
-                      (let [task (-> kv .getValue deserialize resolve-fvar)]
-                        (when (dequeuable? task)
-                          (let [updated-task (update-task task)]
-                            (fc/clear tx subspace-tasks (:id task))
-                            (fc/set tx subspace-owned-tasks [(:id task)] (serialize (dissoc updated-task :fvar)))
-                            (reduced updated-task)))))
-                    nil
-                    (ftr/get-range tx (fsub/range subspace-tasks)))))))
+           ;; if we cant find any task that we own,
+           ;; try the tasks that were released
+           (if found?
+             found?
+             (with-tx [tx (open-db)]
+               (reduce
+                 (fn [_ ^KeyValue kv]
+                   (let [task (-> kv .getValue deserialize resolve-fvar)]
+                     (when (dequeuable? task)
+                       (let [updated-task (update-task task)]
+                         (fc/clear tx subspace-tasks (:id task))
+                         (fc/set tx subspace-owned-tasks [(:id task)] (serialize (dissoc updated-task :fvar)))
+                         (reduced updated-task)))))
+                 nil
+                 (ftr/get-range tx (fsub/range subspace-tasks)))))))
 
        (clear-tasks [this]
          (with-tx [tx (open-db)]
@@ -251,4 +251,4 @@
   (store/enqueue-task s t)
   (store/dequeue-task s))
 
-  ;(store/watch-task s 1 (partial println ">>>"))
+;(store/watch-task s 1 (partial println ">>>"))

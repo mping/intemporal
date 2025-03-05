@@ -70,7 +70,7 @@
 
 
 (def mstore (s/make-store))
-(def worker (w/start-worker! mstore {:protocols {`TripBookingActivities example-impl}}))
+(def stop-worker (w/start-worker! mstore {:protocols {`TripBookingActivities example-impl}}))
 
 ;; note that in cljs, this returns a promise
 (def res (try

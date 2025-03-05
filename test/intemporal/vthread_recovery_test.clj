@@ -22,7 +22,7 @@
     id))
 
 (defn-workflow my-workflow []
-  (let [pr   (stub-protocol ThreadActivity {})
+  (let [pr    (stub-protocol ThreadActivity {})
         proms (for [i (range 10)]
                 (vthread
                   (with-thread pr i)))]
@@ -34,8 +34,8 @@
   ;; make a backup of the db to allow replay
   (io/copy (io/file "./test/intemporal/vthread-recovery.edn")
            (io/file "/tmp/intemporal-vthread-recovery.edn"))
-  (let [mstore  (store/make-store {:file "/tmp/intemporal-vthread-recovery.edn"})
-        stop-fn (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})]
+  (let [mstore      (store/make-store {:file "/tmp/intemporal-vthread-recovery.edn"})
+        stop-worker (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})]
 
     (store/reenqueue-pending-tasks mstore println)
 
@@ -52,4 +52,4 @@
             (is (= (into [] (range 10))
                    (-> evts last :result)))))))
 
-    (stop-fn)))
+    (stop-worker)))

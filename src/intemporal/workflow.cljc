@@ -62,12 +62,12 @@
   "Executes a given protocol, activity or workflow `task`"
   [store protocols {:keys [type id root] :as task} task-counter shutting-down?]
   (let [runtime      (:runtime task)
-        base-env     {:store   store
-                      :type    type
-                      :ref     id
-                      :id      id
-                      :root    (or root id)
-                      :protos  protocols
+        base-env     {:store     store
+                      :type      type
+                      :ref       id
+                      :id        id
+                      :root      (or root id)
+                      :protos    protocols
                       ;; TODO use uuid
                       :next-id   (fn [] (str (or root id) "-" (swap! task-counter inc)))
                       :shutdown? shutting-down?}

@@ -53,8 +53,8 @@
 
 (deftest workflow-happy-path-test
   (testing "workflow"
-    (let [mstore       (store/make-store)
-          stop-worker  (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
+    (let [mstore      (store/make-store)
+          stop-worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
 
       (with-result [v (w/with-env {:store mstore}
                         (my-workflow 1))]
@@ -101,6 +101,6 @@
 
         (stop-worker)))))
 
-#_ :clj-kondo/ignore
+#_:clj-kondo/ignore
 (comment
   (cljs.test/run-tests *ns*))

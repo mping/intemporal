@@ -72,7 +72,7 @@
    (let [start (now)]
      #_:clj-kondo/ignore
      @(p/loop [task (store/find-task store id)]
-        (when (not (#{:failure :success } (:state task)))
+        (when (not (#{:failure :success} (:state task)))
           (let [elapsed (- (now) start)]
             (when (> elapsed timeout)
               (throw (ex-info (str "More than " timeout " ms (" elapsed " ms) elapsed while waiting for task " id " to finish") {:task task})))
@@ -134,4 +134,4 @@
 
 (def with-trace-logging
   #?(:cljs {:before setup-telemere}
-     :clj (fn with-trace-logging [f] (setup-telemere) (f))))
+     :clj  (fn with-trace-logging [f] (setup-telemere) (f))))

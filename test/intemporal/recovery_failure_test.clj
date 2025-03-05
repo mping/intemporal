@@ -41,9 +41,9 @@
   (io/copy (io/file "./test/intemporal/recovery_failure.edn")
            (io/file "/tmp/recovery_failure.edn"))
   (testing "workflow"
-    (let [mstore       (store/make-store {:file "/tmp/recovery_failure.edn"})
-          [task]       (store/list-tasks mstore)
-          stop-worker  (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
+    (let [mstore      (store/make-store {:file "/tmp/recovery_failure.edn"})
+          [task] (store/list-tasks mstore)
+          stop-worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
 
       (try
         (store/reenqueue-pending-tasks mstore println)
@@ -51,8 +51,8 @@
 
         (testing "workflow failed with unexpected transition"
           (let [[task] (store/list-tasks mstore)
-                [_ _ crash-ev last-ev]   (->> (store/list-events mstore)
-                                              (sort-by :id))]
+                [_ _ crash-ev last-ev] (->> (store/list-events mstore)
+                                            (sort-by :id))]
 
             (is (= :failure (:state task)))
             (is (= :intemporal.workflow.internal/failure (:type crash-ev)))

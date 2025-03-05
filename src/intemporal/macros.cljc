@@ -68,13 +68,13 @@
          ;; (with-env {:store ..}
          ;;   (my-workflow ...
          ;; TODO: fixme: task id generator must be deterministic for a given workflow
-         (let [ref#   (:ref i/*env*)
-               root#  (:root i/*env*)
+         (let [ref#  (:ref i/*env*)
+               root# (:root i/*env*)
                ;; id can be passed by env if we're dequeuing a task from store
-               id#    (or (:id i/*env*) (i/random-id))
-               fvar#  #'~wname
-               task#  (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv id#)]
-           (t/log! {:level :debug :_data {:env i/*env* :task task#}}  ["Invoking task with id" (:id task#)])
+               id#   (or (:id i/*env*) (i/random-id))
+               fvar# #'~wname
+               task# (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv id#)]
+           (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" (:id task#)])
            (w/enqueue-and-wait i/*env* task#))))))
 
 (defmacro stub-function
@@ -91,16 +91,16 @@
        (let [store#  (:store i/*env*)
              protos# (:protos i/*env*)
              id#     ((:next-id i/*env*))
-             ref#    nil ;; no enqueued task => no ref
+             ref#    nil                                    ;; no enqueued task => no ref
              task#   (i/create-activity-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) argv# id#)]
 
          ;; an embedded workflow engine doesn't need to have a task per invocation
-         (t/log! {:level :debug :_data {:env i/*env* :task task#}}  ["Invoking task with id " id#])
+         (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id " id#])
          (let [res# (i/resume-task i/*env* store# protos# task#)]
            (macros/case
              :cljs res#
              :clj (deref res#)))))))
-         ;(w/enqueue-and-wait i/*env* task#)))))
+;(w/enqueue-and-wait i/*env* task#)))))
 
 (defmacro stub-protocol
   "Stub a protocol definition. Opts are currently unused.
@@ -137,7 +137,7 @@
                     (let [store#  (:store i/*env*)
                           protos# (:protos i/*env*)
                           id#     ((:next-id i/*env*))
-                          ref#    nil ;; no task => no ref
+                          ref#    nil                       ;; no task => no ref
                           task#   (i/create-proto-activity-task
                                     (symbol ~pname)
                                     ref#
@@ -150,9 +150,9 @@
                                     [~@args]
                                     id#)]
 
-                      (t/log! {:level :debug :_data {:env i/*env* :task task#}}  ["Invoking task with id" id#])
+                      (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" id#])
                       (i/resume-task i/*env* store# protos# task#))))))))
-                      ;(w/enqueue-and-wait i/*env* task#))))))))
+    ;(w/enqueue-and-wait i/*env* task#))))))))
 
     :clj
     #_{:clj-kondo/ignore [:unresolved-symbol]}
@@ -183,7 +183,7 @@
                   (let [store#  (:store i/*env*)
                         protos# (:protos i/*env*)
                         id#     ((:next-id i/*env*))
-                        ref#    nil ;; no task => no ref
+                        ref#    nil                         ;; no task => no ref
                         task#   (i/create-proto-activity-task
                                   (-> ~proto :var symbol)
                                   ref#
@@ -193,9 +193,9 @@
                                   [~@args]
                                   id#)]
 
-                    (t/log! {:level :debug :_data {:env i/*env* :task task#}}  ["Invoking task with id" id#])
+                    (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" id#])
                     @(i/resume-task i/*env* store# protos# task#)))))))))
-                    ;(w/enqueue-and-wait i/*env* task#)))))))))
+;(w/enqueue-and-wait i/*env* task#)))))))))
 
 (defmacro with-failure
   "Runs `fcall`, ensuring that if it fails, compensation will always run.
