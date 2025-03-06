@@ -31,7 +31,9 @@
   (find-task [this id]
     "Finds the task on the db by id")
   (reenqueue-pending-tasks [this callback]
-    "Marks all pending tasks as `new`")
+    "Marks all pending tasks belonging to the store's `owner` as `new`")
+  (release-pending-tasks [this]
+    "Disowns all tasks that are pending")
   (enqueue-task [this task]
     "Atomically enqueues a protocol, workflow or activity task execution")
   (dequeue-task [this] [this opts]
@@ -41,7 +43,7 @@
     Opts:
     * `lease-ms`- duration of lease for dequeue. After lease expires, the task is eligible for dequeueing again")
   (clear-tasks [this]
-    "Clears all tasks"))
+    "Deletes all tasks"))
 
 (defprotocol HistoryStore
   (list-events [this] "Lists all events")
@@ -55,8 +57,6 @@
 
 ;;;;
 ;; helpers
-
-;; TODO dont rely on js/window, nodejs doesnt have window
 
 #_:clj-kondo/ignore
 (defn now []
@@ -86,14 +86,17 @@
 
 ;;;;
 ;; main impl
+;;
+
+(def default-owner "intemporal")
 
 (defn make-store
   "Creates a new memory-based store"
   ([]
    (make-store nil))
-  ([{:keys [owner file readers validation-fail-rate]
-     :or   {owner        "intemporal"
-            validation-fail-rate 0}}]
+  ([{:keys [owner file readers failures]
+     :or   {owner    default-owner
+            failures {:validation 0}}}]
    ;; TODO use single atom?
    (let [tasks       (atom {})
          history     (atom {})
@@ -102,10 +105,10 @@
          ecounter    (atom 0)
          tcounter    (atom 0)
          vars        (atom {})
-         maybe-fail!  (fn []
-                        (when (< (rand-int 100)
-                                 (* 100 validation-fail-rate))
-                          (throw (ex-info "Forced error via failure rate" {:intemporal.workflow.internal/type :internal}))))
+         maybe-fail! (fn []
+                       (when (< (rand-int 100)
+                                (* 100 (get failures :validation)))
+                         (throw (ex-info "Forced error via failure rate" {:intemporal.workflow.internal/type :internal}))))
 
          ;;persistence
          persist!    (fn [k ref old new]
@@ -124,7 +127,7 @@
                        (when-let [w (find-task this id)]
                          (maybe-fail!)
                          (->> (apply assoc w kvs)
-                              (si/validate-task)
+                              (si/validate-task!)
                               (swap! tasks assoc id))))]
 
      ;; deser the db
@@ -158,7 +161,7 @@
          (apply concat (vals @history)))
        (save-event [this task-id event]
          (let [evt+id (assoc event :id (swap! counter inc))]
-           (si/validate-event evt+id)
+           (si/validate-event! evt+id)
            (swap! history (fn [v]
                             (assoc v task-id (-> (or (get v task-id) [])
                                                  (conj evt+id)))))
@@ -171,7 +174,9 @@
 
        TaskStore
        (list-tasks [this]
-         (vals @tasks))
+         (filter #(or (= owner (:owner %))
+                      (nil? (:owner %)))
+                 (vals @tasks)))
 
        (task<-panic [this task-id error]
          (update-task this task-id :result error))
@@ -227,7 +232,6 @@
 
        (await-task [this id {:keys [timeout-ms] :as opts}]
          (maybe-fail!)
-         ;; TODO use owner
          (let [task        (find-task this id)
                deferred    (p/deferred)
                wrap-result (fn [{:keys [result] :as task}]
@@ -252,39 +256,50 @@
                                (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
                                (wrap-result resolved)))))))))
 
+       (release-pending-tasks [this]
+         (swap! tasks
+                update-vals
+                (fn [{:keys [state] :as task}]
+                  (cond-> task
+                          (and (= :pending state)
+                               (= (:owner task) owner))
+                          (assoc :owner nil)))))
+
        (reenqueue-pending-tasks [this f]
          (let [task->run? (atom #{})]
            (swap! tasks
                   update-vals
                   (fn [{:keys [state] :as task}]
-                    #_:clj-kondo/ignore
-                    (cond-> task
-                            (= :pending state)
-                            (do
-                              ;; ensure we only run f once - swap! might run the fn multiple times
-                              (when-not (contains? @task->run? task)
-                                (f task)
-                                (swap! task->run? conj task))
-                              (assoc task :state :new)))))))
+                    (if (and (= :pending state)
+                             (or (= (:owner task) owner)
+                                 (nil? (:owner task))))
+                      (do
+                        ;; ensure we only run f once - swap! might run the fn multiple times
+                        (when-not (contains? @task->run? task)
+                          (f task)
+                          (swap! task->run? conj task))
+                        (assoc task :state :new :owner owner))
+                      ;; else
+                      task)))))
 
        (enqueue-task [this task]
-         ;; TODO use owner
          (maybe-fail!)
-         (si/validate-task task)
-         (swap! tasks assoc
-                (:id task) (assoc task :order (swap! tcounter inc)))
-         #?(:cljs (register this (:sym task) (:fvar task)))
-         task)
+         (let [task+owner (assoc task :owner owner :order (swap! tcounter inc))]
+           (si/validate-task! task+owner)
+           (swap! tasks assoc (:id task) task+owner)
+           #?(:cljs (register this (:sym task+owner) (:fvar task+owner)))
+           task+owner))
 
        (dequeue-task [this]
          (dequeue-task this {:lease-ms nil}))
 
        (dequeue-task [this {:keys [lease-ms]}]
-         ;; TODO check owner
          (let [first-new (fn [v] (->> (vals v)
-                                      (filter #(or (= :new (:state %))
-                                                   (some-> (:lease-end %)
-                                                           (< (now)))))
+                                      (filter #(and
+                                                 (or (= owner (:owner %)) (nil? (:owner %)))
+                                                 (or (= :new (:state %))
+                                                     (some-> (:lease-end %)
+                                                             (< (now))))))
                                       (sort-by :order)
                                       (first)))
                found?    (atom nil)]

@@ -50,3 +50,17 @@ Install earthly: https://earthly.dev
 ```
 earthly -P -i +test
 ```
+
+# Check FDB is working for your architecture
+
+```shell
+
+$ JAVA_OPTS="-DFDB_LIBRARY_PATH_FDB_C=/usr/local/lib/libfdb_c.dylib -DFDB_LIBRARY_PATH_FDB_JAVA=/usr/local/lib/libfdb_java.jnilib" clj -A:fdb:jdbc
+
+(import 'com.apple.foundationdb.JNIUtil)
+(let [method (.getDeclaredMethod com.apple.foundationdb.JNIUtil "loadLibrary" (into-array Class [String]))]
+  (.setAccessible method true)
+  (.invoke method com.apple.foundationdb.JNIUtil (object-array ["fdb_java"]))
+  (.invoke method com.apple.foundationdb.JNIUtil (object-array ["fdb_c"])))
+
+```

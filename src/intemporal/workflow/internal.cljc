@@ -206,8 +206,8 @@
   ;; because execution engine is supposed to be deterministic,
   ;; we can safely assume that if an identic task exists at this point
   ;; we are replaying some events
-  (assert (some? store) "store should exist")
-  (assert (some? task) "task should exist")
+  (assert (some? store) "Store should exist")
+  (assert (some? task) "Task should exist")
 
   (let [db-task (or (store/find-task store id)
                     (store/enqueue-task store task))

@@ -72,7 +72,7 @@
    (let [start (now)]
      #_:clj-kondo/ignore
      @(p/loop [task (store/find-task store id)]
-        (when (not (#{:failure :success } (:state task)))
+        (when (not (#{:failure :success} (:state task)))
           (let [elapsed (- (now) start)]
             (when (> elapsed timeout)
               (throw (ex-info (str "More than " timeout " ms (" elapsed " ms) elapsed while waiting for task " id " to finish") {:task task})))
@@ -95,7 +95,7 @@
   ```
   "
   [bindings & body]
-  (assert (vector? bindings) "first argument should be a binding of [res resbody]")
+  (assert (vector? bindings) "First argument should be a binding of [res resbody]")
   (let [[res resbody] bindings]
     (macros/case
       :clj
@@ -134,4 +134,4 @@
 
 (def with-trace-logging
   #?(:cljs {:before setup-telemere}
-     :clj (fn with-trace-logging [f] (setup-telemere) (f))))
+     :clj  (fn with-trace-logging [f] (setup-telemere) (f))))

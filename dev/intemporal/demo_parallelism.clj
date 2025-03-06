@@ -27,7 +27,7 @@
     @(p/all proms)))
 
 (def mstore (store/make-store))
-(def worker (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}}))
+(def stop-worker (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}}))
 
 ;; note that in cljs, this returns a promise
 (def res (w/with-env {:store mstore}

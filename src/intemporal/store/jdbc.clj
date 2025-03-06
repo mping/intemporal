@@ -1,7 +1,7 @@
 (ns intemporal.store.jdbc
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as i]
-            [intemporal.store.internal :as si :refer [serialize deserialize serializable? validate-task validate-event]]
+            [intemporal.store.internal :as si :refer [serialize deserialize]]
             [migratus.core :as migratus]
             [next.jdbc :as jdbc]
             [next.jdbc.sql.builder :as builder]
@@ -31,7 +31,7 @@
 (defn- db->kw [v]
   (when v (keyword v)))
 
-(defn- db->task [{:keys [id proto type ref root sym args result state lease_end runtime] :as task}]
+(defn- db->task [{:keys [id proto type ref root sym args result state lease_end runtime owner] :as task}]
   (let [dargs    (deserialize args)
         dresult  (deserialize result)
         druntime (deserialize runtime)
@@ -42,7 +42,8 @@
               "workflow" (i/create-workflow-task ref root ssym (resolve ssym) dargs id dresult kstate druntime)
               "activity" (i/create-activity-task ref root ssym (resolve ssym) dargs id dresult kstate druntime)
               "proto-activity" (i/create-proto-activity-task sproto ref root ssym (resolve ssym) dargs id dresult kstate druntime))
-            lease_end (assoc :lease-end lease_end))))
+            lease_end (assoc :lease-end lease_end)
+            owner (assoc :owner owner))))
 
 (defn- db->event [{:keys [id type ref root sym args result] :as event}]
   (let [dargs   (deserialize args)
@@ -61,7 +62,7 @@
 (defn make-store
   "Creates a new Postgres-based store."
   [{:keys [owner migration-dir migrate? watch-polling-ms]
-    :or   {owner "intemporal" migrate? true watch-polling-ms 100} :as opts}]
+    :or   {owner store/default-owner migrate? true watch-polling-ms 100} :as opts}]
   (let [db-spec      (dissoc opts :migration-dir :migrate? :watch-polling-ms)
         config       {:store         :database
                       :migration-dir migration-dir
@@ -84,9 +85,10 @@
              (map db->event)))
 
       (save-event [this task-id {:keys [type ref root sym args result] :as event}]
-        (assert (serializable? args) "Event args should be serializable")
-        (assert (serializable? result) "Event result should be serializable")
-        (validate-event (assoc event :id Integer/MAX_VALUE))
+        (si/validate-serializable! args "Event args should be serializable")
+        (si/validate-serializable! result "Event result should be serializable")
+        (si/validate-event! (assoc event :id Integer/MAX_VALUE))
+
         (let [args   (serialize args)
               result (serialize result)
               res    (jdbc/with-transaction [tx db-spec]
@@ -107,7 +109,7 @@
       store/TaskStore
       (list-tasks [this]
         (->> (jdbc/with-transaction [tx db-spec]
-               (jdbc/execute! tx ["select * from tasks"] default-opts))
+               (jdbc/execute! tx ["select * from tasks where (owner is null or owner=?)" owner] default-opts))
              (map db->task)))
 
       (task<-panic [this task-id error]
@@ -133,7 +135,7 @@
             (when-not id
               (store/save-event this task-id updated-evt))
             ;; cant really validate because its a partial task
-            ;(validate-task updated-task)
+            ;(validate-task! updated-task)
             (jdbc/execute-one! tx (builder/for-update "tasks" updated-task {:id task-id} default-opts))
             updated-evt)))
 
@@ -163,6 +165,7 @@
 
       (await-task [this id {:keys [timeout-ms] :as opts}]
         ;; TODO use owner
+        ;; TODO use promise if available
         (let [task        (store/find-task this id)
               deferred    (p/deferred)
               wrap-result (fn [{:keys [state result] :as task}]
@@ -186,40 +189,47 @@
                               (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
                               (wrap-result resolved)))))))))
 
+      (release-pending-tasks [this]
+        (jdbc/with-transaction [tx db-spec]
+          (jdbc/execute-one! tx ["update tasks set owner=null where owner=?" owner])))
+
       (reenqueue-pending-tasks [this f]
         (let [tasks? (jdbc/with-transaction [tx db-spec]
-                       (let [tasks (jdbc/execute! tx ["select * from tasks where state='pending'"] default-opts)]
-                         (jdbc/execute-one! tx ["update tasks set state='new' where id = ANY(?)" (into-array (mapv :id tasks))])
+                       (let [tasks (jdbc/execute! tx ["select * from tasks where state='pending' and (owner is null or owner=?)" owner] default-opts)]
+                         (jdbc/execute-one! tx ["update tasks set state='new', owner=? where id = ANY(?)" owner (into-array (mapv :id tasks))])
                          (doseq [row tasks]
                            (f (db->task row)))
                          tasks))]
           tasks?))
 
       (enqueue-task [this {:keys [id proto type ref root sym args result state lease-end runtime] :as task}]
-        (assert (serializable? args) "Task args should be serializable")
-        (assert (serializable? result) "Task result should be serializable")
-        (assert (serializable? runtime) "Task runtime should be serializable")
         (assert (or (nil? proto) (some? (:on proto)) "Task protocol not valid, missing :on attribute"))
-        (validate-task task)
-        (let [proto?  (cond (symbol? proto) (str proto)
-                            (some? (:on proto)) (str (:on proto))
-                            (string? proto) proto)
-              args    (serialize args)
-              result  (serialize result)
-              runtime (serialize runtime)]
-          (jdbc/with-transaction [tx db-spec]
-            ;; TODO use owner
-            (jdbc/execute! tx ["INSERT INTO tasks(id,proto,type,ref,root,sym,args,result,state,lease_end,runtime) values (?,?,?,?,?,?,?,?,?,?,?) RETURNING id"
-                               id proto? (kw->db type) (kw->db ref) (kw->db root) (str sym) args result (kw->db state) lease-end runtime])))
-        task)
+
+        (let [task+owner (assoc task :owner owner)]
+          (si/validate-serializable! args "Task args should be serializable")
+          (si/validate-serializable! result "Task result should be serializable")
+          (si/validate-serializable! runtime "Task runtime should be serializable")
+          (si/validate-task! task+owner)
+
+          (let [proto?  (cond (symbol? proto) (str proto)
+                              (some? (:on proto)) (str (:on proto))
+                              (string? proto) proto)
+                args    (serialize args)
+                result  (serialize result)
+                runtime (serialize runtime)]
+            (jdbc/with-transaction [tx db-spec]
+              (jdbc/execute! tx ["INSERT INTO tasks(id,owner,proto,type,ref,root,sym,args,result,state,lease_end,runtime) values (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id"
+                                 id owner proto? (kw->db type) (kw->db ref) (kw->db root) (str sym) args result (kw->db state) lease-end runtime])))
+          task+owner))
 
       (dequeue-task [this]
         (store/dequeue-task this {:lease-ms nil}))
 
       (dequeue-task [this {:keys [lease-ms]}]
         ;; TODO check owner
-        (let [found? (jdbc/with-transaction [tx db-spec]
-                       (when-let [task (some-> (jdbc/execute-one! tx ["select * from tasks where (state='new' or lease_end < now()) order by id asc limit 1"] default-opts)
+        (let [query  "select * from tasks where (owner=? or owner is null) and (state='new' or lease_end < now()) order by id asc limit 1"
+              found? (jdbc/with-transaction [tx db-spec]
+                       (when-let [task (some-> (jdbc/execute-one! tx [query owner] default-opts)
                                                (db->task))]
                          (let [lease-epoch (when lease-ms
                                              (* 1000 (+ (store/now) lease-ms)))

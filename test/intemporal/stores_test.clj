@@ -10,10 +10,10 @@
 
 (use-fixtures :once tu/with-trace-logging)
 
-(def stores  {:memory   (store/make-store)
-              :fdb      (fdb/make-store)
-              :postgres (jdbc/make-store {:jdbcUrl       "jdbc:postgresql://localhost:5432/root?user=root&password=root"
-                                          :migration-dir "migrations/postgres"})})
+(def stores {:memory   (store/make-store)
+             :fdb      (fdb/make-store {:cluster-file-path "docker/fdb.cluster"})
+             :postgres (jdbc/make-store {:jdbcUrl       "jdbc:postgresql://localhost:5432/root?user=root&password=root"
+                                         :migration-dir "migrations/postgres"})})
 
 (deftest stores-test
   (doseq [[label store] stores]
@@ -57,8 +57,10 @@
                                                     nil)]
 
             (testing "enqueue task"
-              (is (= task
-                     (store/enqueue-task store task))))
+              (is (=
+                    (assoc task :owner store/default-owner)
+                    (-> (store/enqueue-task store task)
+                        (dissoc :order)))))
 
             (testing "list tasks"
               (is (match? [(dissoc task :fvar)]

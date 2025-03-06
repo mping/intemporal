@@ -42,7 +42,7 @@
         ::failed))))
 
 (def stores {:memory   (store/make-store)
-             :fdb      (fdb/make-store)
+             :fdb      (fdb/make-store {:cluster-file-path "docker/fdb.cluster"})
              :postgres (jdbc/make-store {:jdbcUrl       "jdbc:postgresql://localhost:5432/root?user=root&password=root"
                                          :migration-dir "migrations/postgres"})})
 
@@ -54,8 +54,8 @@
         (store/clear-events store)
         (store/clear-tasks store)
 
-        (let [spied-impl    (pspy/spy ProtocolActivity example-impl)
-              cancel-worker (w/start-worker! store {:protocols {`ProtocolActivity spied-impl}})]
+        (let [spied-impl  (pspy/spy ProtocolActivity example-impl)
+              stop-worker (w/start-worker! store {:protocols {`ProtocolActivity spied-impl}})]
           (try
             (testing "workflow run"
               (is (= ::failed (w/with-env {:store store}
@@ -74,4 +74,4 @@
                            calls))))))
 
             (finally
-              (cancel-worker))))))))
+              (stop-worker))))))))

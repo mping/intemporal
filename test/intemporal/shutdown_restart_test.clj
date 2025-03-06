@@ -57,12 +57,12 @@
               (let [executor (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
                                                       :polling-ms 10})]
                 (store/reenqueue-pending-tasks mstore (constantly nil))
-                (with-result [_ (Thread/sleep 2000)]
+                (Thread/sleep 3000)
 
-                  (tu/print-tables mstore)
+                (tu/print-tables mstore)
 
-                  (testing "workflow succeeded"
-                    (let [[w1] (store/list-tasks mstore)]
-                      (is (match? {:type :workflow :sym 'intemporal.shutdown-restart-test/my-workflow- :state :success} w1))))
+                (testing "workflow succeeded"
+                  (let [[w1] (store/list-tasks mstore)]
+                    (is (match? {:type :workflow :sym 'intemporal.shutdown-restart-test/my-workflow- :state :success} w1))))
 
-                  (w/shutdown executor 0))))))))))
+                (w/shutdown executor 0)))))))))
