@@ -75,7 +75,7 @@
                   (is (= [[0 sleep-time] [1 sleep-time] [2 sleep-time] [3 sleep-time] [4 sleep-time] [5 sleep-time] [6 sleep-time] [7 sleep-time] [8 sleep-time] [9 sleep-time]]
                          aargs))))))
 
-          (w/shutdown executor 0)
+          (executor {:grace-ms 0})
 
           ;; debugging
           (let [tasks        (sort-by :order (store/list-tasks mstore))

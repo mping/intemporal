@@ -36,14 +36,14 @@
     (store/clear-tasks store)
 
     (testing (format "store: %s" label)
-      (let [executor (w/start-poller! store {:protocols  {`MyActivities (->MyActivitiesImpl)}
+      (let [shutdown (w/start-poller! store {:protocols  {`MyActivities (->MyActivitiesImpl)}
                                              :polling-ms 10})]
 
         (testing "shutdown of ongoing workflow"
           ;; give it some time so the poller can pick it up but just once
           (future
             (Thread/sleep 500)
-            (w/shutdown executor 0))
+            (shutdown))
 
           (with-result [res (w/with-env {:store store}
                               (my-workflow :ok))]

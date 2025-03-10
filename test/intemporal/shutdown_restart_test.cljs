@@ -35,7 +35,7 @@
 (def stop-worker (w/start-worker! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
                                           :polling-ms 10}))
 
-(deftest executor-shutdown-test
+(deftest executor-shutdown-cljs-test
   (testing "shutdown of ongoing workflow"
 
     (with-result [res (w/with-env {:store mstore}

@@ -26,14 +26,14 @@
 (deftest executor-shutdown-test
   (testing "failure: task validation fails"
     (let [mstore   (store/make-store {})
-          executor (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
+          shutdown (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
                                             :polling-ms 10})]
 
       (testing "shutdown of ongoing workflow"
         ;; give it some time so the poller can pick it up but just once
         (future
           (Thread/sleep 500)
-          (w/shutdown executor 0))
+          (shutdown))
 
         (with-result [res (w/with-env {:store mstore}
                             (my-workflow :ok))]
@@ -54,9 +54,9 @@
                     (is (nil? e3))))))
 
             (testing "workflow resumes"
-              (let [executor (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
+              (store/reenqueue-pending-tasks mstore (constantly nil))
+              (let [shutdown (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
                                                       :polling-ms 10})]
-                (store/reenqueue-pending-tasks mstore (constantly nil))
                 (Thread/sleep 3000)
 
                 (tu/print-tables mstore)
@@ -65,4 +65,4 @@
                   (let [[w1] (store/list-tasks mstore)]
                     (is (match? {:type :workflow :sym 'intemporal.shutdown-restart-test/my-workflow- :state :success} w1))))
 
-                (w/shutdown executor 0)))))))))
+                (shutdown)))))))))

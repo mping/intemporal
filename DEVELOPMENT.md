@@ -64,3 +64,11 @@ $ JAVA_OPTS="-DFDB_LIBRARY_PATH_FDB_C=/usr/local/lib/libfdb_c.dylib -DFDB_LIBRAR
   (.invoke method com.apple.foundationdb.JNIUtil (object-array ["fdb_c"])))
 
 ```
+
+# Aider
+
+```
+$ aider --dark-mode --model google/gemini-2.0-flash-thinking-exp-1219:free --no-auto-commits --no-dirty-commits --no-attribute-author --no-attribute-committer
+
+$ aider --dark-mode --model openrouter/anthropic/claude-3.7-sonnet --api-key openrouter=$OPENROUTER_API_KEY  --no-auto-commits --no-dirty-commits --no-attribute-author --no-attribute-committer
+```

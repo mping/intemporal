@@ -23,7 +23,7 @@ deps:
   COPY deps.edn tests.edn shadow-cljs.edn package.json /build
   CACHE ./node_modules
   CACHE ~/.m2
-  RUN clj -Stree
+  RUN clj -A:dev:fdb:jdbc:cljs:build:test -Stree
   RUN npm install
   #RUN wget https://github.com/apple/foundationdb/releases/download/7.3.63/foundationdb-clients_7.3.63-1_aarch64.deb
   #RUN dpkg -i foundationdb-clients_7.3.63-1_aarch64.deb

@@ -32,3 +32,5 @@ docker/fdb.cluster
 merged.info
 coverage/
 .store/
+.aider*
+.venv/

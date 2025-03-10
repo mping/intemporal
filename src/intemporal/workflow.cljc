@@ -27,7 +27,7 @@
 ;; worker
 (defprotocol ITaskExecutor
   (submit [this f] "Submits the function `f` for execution")
-  (shutdown [this grace-period-ms] "Shuts down the task executor")
+  (shutdown [this grace-period-ms] "Shuts down the task executor with the given grace period in milliseconds")
   (running? [this] "Indicates if the executor is running"))
 
 ;; make sure that any given executor service can implement ITaskExecutor
@@ -36,15 +36,14 @@
           (submit [executor f]
             (.submit ^ExecutorService executor ^Runnable f))
           (shutdown [executor grace-period-ms]
-            ;; todo: release tasks
             (.shutdown ^ExecutorService executor)
             (when-not (.awaitTermination ^ExecutorService executor grace-period-ms TimeUnit/MILLISECONDS)
               (.shutdownNow ^ExecutorService executor)))
           (running? [executor]
             (not (.isShutdown ^ExecutorService executor)))))
 
-(defn make-task-executor
-  "Creates an object that satisfies `ITaskExecutor`."
+(defn default-task-executor
+  "Creates the default task executor `ITaskExecutor`."
   []
   (let [run? (atom true)]
     #?(:cljs
@@ -96,16 +95,22 @@
 (defn start-poller!
   "Starts a poller that will submit tasks to the `task-executor`.
   Protocol implementations are resolved via a map of `:protocols {my.ns Impl}`
-  Returns an `ITaskExecutor` that can be shutdown.
-  For clj runtimes, task-executor should be `(Executors/newVirtualThreadPerTaskExecutor)`, as
-  each execution will be blocked while they await for a given task dependencie's execution."
+  Returns a shutdown function that accepts the following opts map:
+  - `:grace-ms`: grace period, default is 0
+  - `:release-pending`: release pending tasks on shutdown, default is true
+  For clj runtimes, `task-executor` can be an instance of `ExecutorService`."
   ([store {:keys [protocols polling-ms] :or {protocols {} polling-ms 100} :as opts}]
-   (start-poller! store (make-task-executor) opts))
+   (start-poller! store (default-task-executor) opts))
   ([store task-executor & {:keys [protocols polling-ms] :or {protocols {} polling-ms 100}}]
    (assert (satisfies? ITaskExecutor task-executor) "Supplied task executor does not satisfy ITaskExecutor")
-   (let [polling-fn (fn [] (worker-poll-fn store protocols task-executor polling-ms))]
+   (let [polling-fn (fn poller-runnable [] (worker-poll-fn store protocols task-executor polling-ms))]
      (submit task-executor polling-fn))
-   task-executor))
+   (fn shutdown-poller
+     ([] (shutdown-poller nil))
+     ([{:keys [grace-ms release-pending] :or {grace-ms 0 release-pending true}}]
+      (shutdown task-executor grace-ms)
+      (when release-pending
+        (store/release-pending-tasks store))))))
 
 (defn start-worker!
   "Starts a single worker thread that periodically polls for tasks and executes them in a
