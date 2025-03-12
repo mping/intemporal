@@ -44,7 +44,7 @@
   (let [sleep-time (+ 3000 (rand-int 500))]
     (testing "workflow"
       (let [mstore   (store/make-store)
-            executor (w/start-poller! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
+            shutdown (w/start-poller! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
 
             start    (store/now)]
 
@@ -75,7 +75,7 @@
                   (is (= [[0 sleep-time] [1 sleep-time] [2 sleep-time] [3 sleep-time] [4 sleep-time] [5 sleep-time] [6 sleep-time] [7 sleep-time] [8 sleep-time] [9 sleep-time]]
                          aargs))))))
 
-          (executor {:grace-ms 0})
+          (shutdown)
 
           ;; debugging
           (let [tasks        (sort-by :order (store/list-tasks mstore))

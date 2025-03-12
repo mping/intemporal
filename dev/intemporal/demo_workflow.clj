@@ -28,13 +28,13 @@
           (foo pr :X))))
 
 (def mstore (store/make-store))
-(def ex (w/start-poller! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
+(def stop-poller (w/start-poller! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
 
 (def res (w/with-env {:store mstore}
            (my-workflow 1)))
 
 ;; if we reach here, all tasks are finished
-(w/shutdown ex 1000)
+(stop-poller)
 
 ;;;;
 ;; show the results
