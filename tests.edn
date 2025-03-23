@@ -24,7 +24,16 @@
                   :nop?             false,
                   :codecov?         true}
  :bindings        {kaocha.type.cljs/*debug* true}
- :tests [{:id           :test
+ :tests [
+         ;; skip jdbc and fdb
+         {:id           :in-memory
+          :kaocha.filter/skip-meta [:integration]
+          :ns-patterns  ["-test$"]
+          :source-paths ["src"]
+          :test-paths   ["test"]}
+
+         ;; jvm based tests
+         {:id           :test
           :ns-patterns  ["-test$"]
           :source-paths ["src"]
           :test-paths   ["test"]}

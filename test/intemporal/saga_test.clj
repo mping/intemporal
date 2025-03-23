@@ -1,4 +1,4 @@
-(ns intemporal.saga-test
+(ns ^:integration ^:fdb ^:sql intemporal.saga-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [intemporal.store :as store]
             [intemporal.store.foundationdb :as fdb]
@@ -41,13 +41,13 @@
         (w/compensate)
         ::failed))))
 
-(def stores {:memory   (store/make-store)
-             :fdb      (fdb/make-store {:cluster-file-path "docker/fdb.cluster"})
-             :postgres (jdbc/make-store {:jdbcUrl       "jdbc:postgresql://localhost:5432/root?user=root&password=root"
-                                         :migration-dir "migrations/postgres"})})
+(def stores (delay {:memory   (store/make-store)
+                    :fdb      (fdb/make-store {:cluster-file-path "docker/fdb.cluster"})
+                    :postgres (jdbc/make-store {:jdbcUrl       "jdbc:postgresql://localhost:5432/root?user=root&password=root"
+                                                :migration-dir "migrations/postgres"})}))
 
 (deftest saga-test
-  (doseq [[label store] stores]
+  (doseq [[label store] @stores]
     (testing (format "store: %s" label)
 
       (testing "running a workflow"
