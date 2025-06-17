@@ -25,7 +25,6 @@
   (let [stub (stub-protocol MyActivities {})
         prr  (foo stub :pr)]
     ;; chain values: ensure tests work under cljs too
-    #_:clj-kondo/ignore
     (p/let [res prr]
       res)))
 

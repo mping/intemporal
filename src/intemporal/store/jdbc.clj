@@ -12,7 +12,7 @@
 
 (comment
   (let [cfg {:store            :database
-             :migration-dir    (str "migrations/postgres")
+             :migration-dir    "migrations/postgres"
              :watch-polling-ms 100
              :db               {:jdbcUrl "jdbc:postgresql://localhost:5432/root?user=root&password=root"}}]
     (migratus/rollback cfg)

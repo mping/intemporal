@@ -58,7 +58,6 @@
 ;;;;
 ;; helpers
 
-#_:clj-kondo/ignore
 (defn now []
   #?(:clj  (System/currentTimeMillis)
      :cljs (.getTime (js/Date.))))
