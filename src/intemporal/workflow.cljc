@@ -20,7 +20,9 @@
   [m & body]
   `(internal/with-env-internal ~m ~@body))
 
-(defn current-env []
+(defn current-env
+  "Returns the workflow execution environment for the current thread"
+  []
   internal/*env*)
 
 ;;;;

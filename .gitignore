@@ -32,3 +32,9 @@ docker/fdb.cluster
 merged.info
 coverage/
 .store/
+
+# ai
+.aider*
+.calva/
+.venv/
+memory-bank/

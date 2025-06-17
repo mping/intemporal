@@ -37,8 +37,7 @@
                       (sleep pr i sleep-time)))
                   (doall))]
     #?(:clj (Thread/sleep (long sleep-time)))
-    #?(:clj  (p/all proms)
-       :cljs (p/all proms))))
+    (p/all proms)))
 
 (deftest workflow-with-vthread-test
   (let [sleep-time (+ 3000 (rand-int 500))]
