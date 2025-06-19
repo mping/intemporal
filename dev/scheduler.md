@@ -38,8 +38,8 @@ Now it gets tricky. Assume some macro `async-thread` that allows you to run code
   (let [do-get (stub http-get)
         do-put (stub http-put)
         prom1  (async-thread (do-get "http://some/data.json")) ;; thread t1
-        prom2  (async-thread (do-put "http://some/other.json"))] ;; thread t2 (2)
-    ;; (1) lets assume a crash here
+        prom2  (async-thread (do-put "http://some/other.json"))] ;; thread t2 *2
+    ;; *1 lets assume a crash here
     ;; block and wait for all promises
     (deref (p/all [prom1 prom2]))))
 
@@ -58,8 +58,8 @@ The produced log can look like this:
 | ~6~ | ~simple-workflow/success~ | ~1~ |                          | ~[{:data "json"} :ok]~ |
 
 However, because the threaded code can run arbitrarily slow (eg slow http server response), how do we guarantee the replay
-is deterministic? More specifically, if the workflow crashed on `(1)` and we saved up to `num` `5`, when replaying the code
-there's a chance the second thread (2) finishes faster than the first one; in this scenario we would produce 
+is deterministic? More specifically, if the workflow crashed around `*1` and we saved events up to `num` `5`, when replaying the code
+there's a chance the second thread `*2` finishes faster than the first one; in this scenario we would produce 
 `http-put/success` first, and it wouldn't match the event log, making replay impossible.
 
 This stack overflow post has a nice explanation: https://stackoverflow.com/questions/71356668/how-does-multi-threading-works-in-cadence-temporal-workflow/71356669#71356669
