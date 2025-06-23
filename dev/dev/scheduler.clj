@@ -93,107 +93,144 @@
                     (println "task 1 finish"))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Scheduler Definition
+;; Scheduler Definition (Unchanged)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn make-scheduler
-  "Creates a scheduler that executes tasks in strict FIFO order."
   []
-  {:new-task-queue     (chan)
-   :yielded-task-queue (chan)
+  {:new-task-queue     (chan 1024)
+   :yielded-task-queue (chan 1024)
    :task-count         (atom 0)})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Task & Yield Macros - NOW AWARE OF THE TWO QUEUES
+;; Task & Yield Macros - NOW WITH `await!`
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defmacro yield! []
   `(do
-     ;; <<< CHANGE: When yielding, the task places its control channel
-     ;; onto the :yielded-task-queue.
      (>! (:yielded-task-queue ~'scheduler) ~'control-chan)
-
-     ;; Signal the scheduler on the return channel to unblock it.
      (>! @~'return-chan-atom :yielded)
-
-     ;; Park and wait for the next activation.
      (reset! ~'return-chan-atom (<! ~'control-chan))))
 
+;; <<< NEW: The `await!` macro for waiting on other tasks' results.
+(defmacro await! [result-chan]
+  `(do
+     (>! @~'return-chan-atom :awaiting)
+
+     ;; 2. Now it's safe to park and wait for the result.
+     (let [result# (<! ~result-chan)]
+
+       ;; 3. We have the result! Now, re-enter the scheduler's run-queue
+       ;;    to be scheduled for our next turn.
+       (>! (:yielded-task-queue ~'scheduler) ~'control-chan)
+
+       ;; 4. Park again, waiting for our next turn. The scheduler will eventually
+       ;;    pick us and send us a new return-chan.
+       (reset! ~'return-chan-atom (<! ~'control-chan))
+
+       ;; 5. Return the awaited result to the calling code.
+       result#)))
+
 (defmacro add-task! [scheduler & body]
-  `(let [control-chan#     (chan 1)
+  `(let [result-chan#      (chan 1)
+         control-chan#     (chan 1)
          return-chan-atom# (atom nil)
          scheduler#        ~scheduler]
 
-     ;; <<< CHANGE: A new task is always added to the :new-task-queue.
-     (go (>! (:new-task-queue scheduler#) control-chan#))
-     (swap! (:task-count scheduler#) inc)
+
+     ;(go (>! (:new-task-queue scheduler#) control-chan#))
+     ;(swap! (:task-count scheduler#) inc)
 
      (go
+       ;; signal a new task has been queued
+       (>! (:new-task-queue scheduler#) control-chan#)
+       ;; update counter
+       (swap! (:task-count scheduler#) inc)
+
+       ;; control chan:
+       ;; return-chan-atom:
        (let [~'control-chan control-chan#
              ~'return-chan-atom return-chan-atom#
-             ;; Make the scheduler available to yield!
              ~'scheduler scheduler#]
          (try
+           ;; get the chan for the return value
            (reset! ~'return-chan-atom (<! ~'control-chan))
-           ~@body
-           (>! @~'return-chan-atom :finished)
+           ;; run body
+           ;; push return
+           ;; indicate we are done
+           (let [return-value# (do ~@body)]
+             (>! result-chan# return-value#))
            (catch Exception e#
              (println "Task threw an exception:" (.getMessage e#))
-             (>! @~'return-chan-atom :finished)))))))
+             (>! result-chan# e#))
+           (finally
+             (>! @~'return-chan-atom :finished)))))
+     result-chan#))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Scheduler Execution - NOW WITH PRIORITY
+;; Scheduler Execution - NOW HANDLES `:awaiting` state
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn start-scheduler!
-  "Starts the scheduler's prioritized event loop."
+  "Starts the scheduler's event loop, now capable of handling tasks that await others."
   [{:keys [new-task-queue yielded-task-queue task-count] :as scheduler}]
   (go-loop []
     (if (pos? @task-count)
-      (do
-        ;; <<< CRITICAL CHANGE: Use alts! with :priority
-        ;; This will check new-task-queue first. Only if it's empty/blocked
-        ;; will it check yielded-task-queue.
-        (let [[task-control-chan source-chan] (alts! [new-task-queue yielded-task-queue] :priority true)
-              return-chan (chan 1)]
+      (let [[task-control-chan _] (alts! [new-task-queue yielded-task-queue] :priority true)
+            return-chan (chan 1)]
+        (>! task-control-chan return-chan)
+        (let [response (<! return-chan)]
+          (cond
+            ;; If finished, just decrement the count.
+            (= response :finished)
+            (swap! task-count dec)
 
-          ;; Activate the chosen task and wait for its response.
-          (>! task-control-chan return-chan)
-          (let [response (<! return-chan)]
-            (when (= response :finished)
-              (swap! task-count dec))))
+            ;; If yielded or awaiting, the task has already re-queued itself
+            ;; or will do so later. The scheduler's only job is to loop
+            ;; and run the next available task.
+            (= response :yielded) :noop
+            (= response :awaiting) :noop))
         (recur))
       (println "\nAll tasks completed. Scheduler shutting down."))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Example Usage - Demonstrating FIFO Order
+;; Example Usage - Using `await!`
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn -main [& args]
-  (println "Starting FIFO cooperative scheduler...")
+  (println "Starting scheduler with dynamic task creation and `await!`...")
 
-  (let [scheduler (make-scheduler)]
+  (let [scheduler             (make-scheduler)
 
-    (println "Adding Task A (will yield twice)")
-    (add-task! scheduler
-               (println "--> Task A: Starting first run.")
-               (yield!)
-               (println "--> Task A: Resumed for second run.")
-               (yield!)
-               (println "--> Task A: Resumed for final run, now finishing."))
+        parent-result-chan    (add-task! scheduler
+                                         (println "[Parent] Starting.")
+                                         (yield!)
+                                         (println "[Parent] Resumed. Spawning child to do a calculation...")
 
-    (println "Adding Task B (short, no yield)")
-    (add-task! scheduler
-               (println "--> Task B: Starting and finishing."))
+                                         (let [child-result-chan (add-task! scheduler
+                                                                            (println "  [Child] I have been created.")
+                                                                            (yield!)
+                                                                            (println "  [Child] Resumed. Calculating 40 + 2...")
+                                                                            (+ 40 2))]
 
-    (println "Adding Task C (will yield once)")
-    (add-task! scheduler
-               (println "--> Task C: Starting first run.")
-               (yield!)
-               (println "--> Task C: Resumed for final run, now finishing."))
+                                           (println "[Parent] About to `await!` my child's result...")
 
-    (let [done-chan (start-scheduler! scheduler)]
-      (<!! done-chan))
+                                           ;; <<< CHANGE: Use `await!` instead of a raw `<!`.
+                                           (let [child-result (await! child-result-chan)]
+                                             (println (str "[Parent] My child finished! It returned: " child-result))
+                                             (str "Parent task complete. Final value from child was " child-result)))
+                                         1)
 
-    (println "Example finished.")))
+        independent-task-chan (add-task! scheduler
+                                         (println "  [Independent] I'm starting now.")
+                                         (println "  [Independent] I'm done."))]
+
+    (start-scheduler! scheduler)
+
+    (println "\n--- Main thread is now waiting for the parent task to complete ---\n")
+    (let [final-result (<!! parent-result-chan)]
+      (println "\n--- Parent task completed ---")
+      (println "Final result received on main thread:" final-result))
+
+    (println "\nExample finished.")))
 (-main)
