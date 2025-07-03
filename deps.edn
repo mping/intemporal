@@ -10,6 +10,7 @@
            net.cgrand/macrovich     {:mvn/version "0.2.2"}
            funcool/promesa          {:mvn/version "11.0.678"}
            metosin/malli            {:mvn/version "0.16.4"}
+           missionary/missionary    {:mvn/version "b.46"}
            thedavidmeister/cljc-md5 {:mvn/version "0.0.2"}}
 
  :aliases {:dev  {:extra-paths ["dev" "test"]
