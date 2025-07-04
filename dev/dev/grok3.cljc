@@ -2,28 +2,60 @@
 
 (require '[missionary.core :as m])
 
-;; Define a simple secondary task that simulates some work and returns a value
-(defn secondary-task []
+(require '[missionary.core :as m])
+
+;; Helper function to simulate a subtask's work in steps
+(defn make-subtask [name total-steps sleep-ms]
+  (let [state (atom {:step 0 :total total-steps})]
+    (fn []
+      (m/sp
+        (let [current-step (:step @state)]
+          (if (< current-step (:total @state))
+            (do
+              (Thread/sleep sleep-ms) ; Simulate work
+              (println name "worked on step" (inc current-step) "of" (:total @state))
+              (swap! state update :step inc)
+              {:done false :value (inc current-step)})
+            {:done true :value current-step}))))))
+
+;; Define the main task that alternates between two subtasks
+(defn main-task []
   (m/sp
-    (Thread/sleep 1000) ; Simulate some work
-    42))
+    (println "Main task started")
+    (let [task1 (make-subtask "Subtask 1" 5 200) ; 5 steps, 200ms per step
+          task2 (make-subtask "Subtask 2" 3 300) ; 3 steps, 300ms per step
+          max-iterations 10] ; Safety limit for iterations
+      (println "Main task yielding to subtasks alternately")
+      (loop [active-task 1 ; Start with task 1
+             t1-done false
+             t2-done false
+             iteration 0
+             accumulated 0]
+        (if (or (and t1-done t2-done) (>= iteration max-iterations))
+          (do
+            (println "Main task finished alternating")
+            accumulated)
+          (let [current-task (if (= active-task 1) task1 task2)
+                result (m/? (current-task))
+                done (:done result)
+                value (:value result)
+                next-task (if (= active-task 1) 2 1) ; Alternate between tasks
+                next-t1-done (if (= active-task 1) done t1-done)
+                next-t2-done (if (= active-task 2) done t2-done)]
+            (recur next-task
+                   next-t1-done
+                   next-t2-done
+                   (inc iteration)
+                   (+ accumulated value))))))))
 
-;; Define the primary task that yields to the secondary task and resumes
-(defn primary-task []
-  (m/sp
-    (println "Primary task started")
-    (let [result (m/? (secondary-task))] ; Yield to secondary task and wait for result
-      (println "Primary task resumed with result:" result)
-      (+ result 10)))) ; Continue computation after resuming
+;; Use a single-threaded executor to ensure controlled execution
+(def executor (m/cpu)) ; CPU-bound executor provided by missionary
 
-;; Run the tasks with a single-threaded executor to ensure only one task runs at a time
-(def executor (m/cpu)) ; Use CPU-bound executor provided by missionary
-
-;; Wrap the primary task to execute via the executor
+;; Wrap the main task to execute via the executor
 (def run-task
   (m/via executor
-         (m/? (primary-task))))
+         (m/? (main-task))))
 
 ;; Execute the task and print the final result
 (def result (m/? run-task))
-(println "Final result:" result)
+(println "Final result (sum of steps):" result)

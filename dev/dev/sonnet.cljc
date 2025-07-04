@@ -1,55 +1,101 @@
 (ns dev.sonnet)
 (require '[missionary.core :as m])
 
-(defn task-c [input]
+;; A coordination mechanism to ensure only one task runs at a time
+(def task-semaphore (atom 0))
+
+(defn acquire-execution-slot []
   (m/sp
-    (println "Task C: Starting with input" input)
-    (Thread/sleep 600) ; Simulate work
-    (println "Task C: Finishing")
-    (* input 3)))
+    (loop []
+      (if (compare-and-set! task-semaphore 0 1)
+        (println "Execution slot acquired")
+        (do
+          (Thread/sleep 10) ; Small delay before retry
+          (recur))))))
 
-(defn task-b [input]
+(defn release-execution-slot []
+  (reset! task-semaphore 0)
+  (println "Execution slot released"))
+
+(defn worker-task [task-id work-duration result-value]
   (m/sp
-    (println "Task B: Starting with input" input)
-    (Thread/sleep 800) ; Simulate work
-    (println "Task B: About to yield to Task C")
+    ;; Acquire the execution slot (ensures only one task runs)
+    (m/? (acquire-execution-slot))
 
-    ;; Yield to Task C and wait for its result
-    (let [result-from-c (m/? (task-c (+ input 5)))]
-      (println "Task B: Received result from Task C:" result-from-c)
-      (println "Task B: Finishing")
-      (+ result-from-c 100))))
+    (println (str "Task " task-id ": Starting execution"))
+    (Thread/sleep work-duration)
+    (println (str "Task " task-id ": Work completed, result: " result-value))
 
-;; Define individual tasks that simulate work
-(defn task-a [input]
+    ;; Release the slot for the next task
+    (release-execution-slot)
+    result-value))
+
+(defn main-task []
   (m/sp
-    (println "Task A: Starting with input" input)
-    (Thread/sleep 1000) ; Simulate some work
-    (println "Task A: About to yield to Task B")
+    (println "Main: Creating two worker tasks")
 
-    ;; Yield to Task B and wait for its result
-    (let [result-from-b (m/? (task-b (+ input 10)))]
-      (println "Task A: Received result from Task B:" result-from-b)
-      (Thread/sleep 500) ; Do some more work
-      (println "Task A: Finishing")
-      (* result-from-b 2))))
+    ;; Create two tasks but don't wait for them yet
+    (let [task-a (worker-task "A" 1000 42)
+          task-b (worker-task "B" 800 100)]
 
+      (println "Main: Tasks created, now yielding to allow execution")
 
-;; Coordinator task that ensures sequential execution
-(defn coordinator []
-  (m/sp
-    (println "Coordinator: Starting cooperative execution")
+      ;; Yield control and wait for both tasks to complete
+      ;; They will execute sequentially due to the semaphore
+      (let [result-a (m/? task-a)
+            result-b (m/? task-b)]
 
-    ;; Execute tasks sequentially - each task yields control when needed
-    (let [final-result (m/? (task-a 5))]
-      (println "Coordinator: All tasks completed. Final result:" final-result)
-      final-result)))
+        (println "Main: Both tasks completed")
+        (println (str "Main: Task A result: " result-a))
+        (println (str "Main: Task B result: " result-b))
+        (println (str "Main: Combined result: " (+ result-a result-b)))
 
-;; Run the coordinator task
-(def result
-  (m/? (coordinator)))
+        {:task-a result-a
+         :task-b result-b
+         :total (+ result-a result-b)}))))
 
-;; Or run it and print the result
-(->> (coordinator)
-     (m/reduce (fn [x] x) nil)
-     (m/?))
+;; Alternative approach using missionary's fork/join pattern
+(m/? (m/sp
+       (println "Main: Starting with fork/join pattern")
+
+       ;; Use m/fork to spawn tasks that will coordinate themselves
+       (let [task-a-flow (m/?> ##Inf (m/seed [(worker-task "A" 1000 42)
+                                              (worker-task "B" 800 100)]))]
+
+         (println "Main: Tasks forked, yielding control")
+
+         ;; Wait for both tasks using m/join
+         (let [results (m/? (m/join vector task-a-flow))]
+           (println "Main: All forked tasks completed")
+           (println (str "Main: Results: " results))
+
+           {:results results
+            :total   (reduce + results)}))))
+
+(m/sp
+  (println "Main: Creating and sequencing two tasks")
+
+  ;; Create the tasks
+  (let [task-a (m/sp
+                 (println "Task A: Starting")
+                 (Thread/sleep 1000)
+                 (println "Task A: Finished")
+                 42)
+        task-b (m/sp
+                 (println "Task B: Starting")
+                 (Thread/sleep 800)
+                 (println "Task B: Finished")
+                 100)]
+
+    (println "Main: Yielding to execute Task A")
+    (let [result-a (m/? task-a)]
+      (println (str "Main: Task A completed with result: " result-a))
+
+      (println "Main: Yielding to execute Task B")
+      (let [result-b (m/? task-b)]
+        (println (str "Main: Task B completed with result: " result-b))
+
+        (println "Main: All tasks completed")
+        {:task-a result-a
+         :task-b result-b
+         :total  (+ result-a result-b)}))))
