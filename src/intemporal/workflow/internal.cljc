@@ -77,7 +77,16 @@
 (defn resume-fn-task
   "Resumes a generic fn call task"
   [{:keys [vthread? shutdown?] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
-  ;; TODO check if proto exists in protos
+  (when (and (= :proto-activity type)
+             (nil? (get protos proto)))
+    (throw (ex-info (str "Protocol implementation for "
+                         (pr-str proto)
+                         " not found; available protocols:"
+                         (pr-str protos)
+                         ". Make sure to pass `:protocols` key when starting poller or worker ")
+                    {::type :internal
+                     :protocols protos
+                     :required proto})))
   ;; do we have invocation and result events for this task?
   (t/log! {:level :debug :sym sym} ["Resuming task with id" id])
 
@@ -127,6 +136,7 @@
                                                                    (error/internal-error? e) (assoc :type ::failure)))))
                            (p/rejected e))
             retval       (cond
+                           ;; are we replaying a result?
                            (some? res?)
                            (let [success? (some? (:result res?))
                                  retval   (if success? (:result res?) (:error? res?))]
@@ -136,24 +146,30 @@
                                (p/resolved retval)
                                (p/rejected retval)))
 
+                           ;; no replay, lets do the actual call
                            (not res?)
-                           ;; the p/let is mostly to deal with the (apply...) call for js runtimes
-                           (-> (let [impl? (if (= :proto-activity type)
-                                             (get protos proto)
-                                             nil)
+                           (-> (let [;; if we're calling a prototype, we need to prepend the
+                                     ;; prot impl and then its args
                                      args' (if (= :proto-activity type)
-                                             (cons impl? args)
+                                             (cons (get protos proto) args)
                                              args)
+                                     ;; this is the result
                                      r     (binding [*env* (merge default-env env)]
                                              (t/log! {:level :debug :data {:sym sym :args args'}} ["Calling actual function for task" id])
+                                             ;; vthread calls are special because we only want to process its
+                                             ;; result when deref is called, to ensure determinism:
+                                             ;; - first we must save all events
+                                             ;; - then we can process the underlying impl call
                                              (if vthread?
-                                               ;; in cljs we dont need delay bc its single threaded
                                                (let [inner (p/create (fn [res rej]
                                                                        (-> (p/vthread
                                                                              (binding [*env* (dissoc env :vthread?)]
                                                                                (apply fvar args')))
                                                                            (p/then res)
                                                                            (p/catch rej))))]
+                                                 ;; in cljs we dont need delay bc its single threaded
+                                                 ;; in clj, the delayed value will be deref'd
+                                                 ;; but at this point we ensure that any other eg vthread calls have been saved in history
                                                  (#?(:cljs do :clj delay)
                                                    (-> inner
                                                        (p/then handle-ok)
