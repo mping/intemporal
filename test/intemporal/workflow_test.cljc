@@ -36,7 +36,9 @@
   MyActivities
   (foo [this a] [:proto a]))
 
-(defn-workflow my-workflow [i]
+(defn-workflow my-workflow [atm]
+  (reset! atm (w/workflow-id))
+
   (let [sf  (stub-function activity-fn)
         pr  (stub-protocol MyActivities {})
         sfr (sf 1)
@@ -54,10 +56,12 @@
 (deftest workflow-happy-path-test
   (testing "workflow"
     (let [mstore      (store/make-store)
-          stop-worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
+          stop-worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})
+          uuid-store  (atom nil)]
 
       (with-result [v (w/with-env {:store mstore}
-                        (my-workflow 1))]
+                        (my-workflow uuid-store))]
+
         (testing "workflow result"
           (is (= [:root [:sub :nested] [:proto :pr]]
                  v)))
@@ -72,8 +76,11 @@
 
             (tu/print-tables mstore)
 
+            (testing "workflow uuid"
+              (is (every? #(= @uuid-store %) (map :root evts))))
+
             (testing "workflow events"
-              (is (match? {:type :intemporal.workflow/invoke :sym 'intemporal.workflow-test/my-workflow- :args [1]} w1))
+              (is (match? {:type :intemporal.workflow/invoke :sym 'intemporal.workflow-test/my-workflow- :args [uuid-store]} w1))
               (is (match? {:type :intemporal.workflow/success :sym 'intemporal.workflow-test/my-workflow-} w2)))
 
             (testing "activity events"
@@ -92,12 +99,15 @@
           (let [tasks (store/list-tasks mstore)
                 ;; due to promises,
                 ;; the order of execution is not exactly the same between clj/cljs
-                #?(:clj  [w1 a1 n1 p1]
-                   :cljs [w1 a1 p1 n1]) tasks]
+                #?(:clj  [w1]
+                   :cljs [w1]) tasks]
             (tu/print-tables mstore)
 
             (testing "workflow task"
-              (is (match? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1)))))
+              (is (match? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1)))
+
+            (testing "workflow uuid"
+              (is (every? #(= @uuid-store %) (map :id tasks))))))
 
         (stop-worker)))))
 

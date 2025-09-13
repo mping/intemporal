@@ -8,6 +8,7 @@
   #?(:clj (:require [intemporal.store :as store]
                     [intemporal.workflow.internal :as in]
                     [promesa.core :as p]
+                    [taoensso.telemere :as t]
                     [taoensso.telemere :as telemere]
                     [net.cgrand.macrovich :as macros]
                     [clojure.pprint :as pprint]))

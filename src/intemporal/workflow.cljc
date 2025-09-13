@@ -12,6 +12,10 @@
 #?(:clj (set! *warn-on-reflection* true))
 
 ;;;;
+;; logging/tracing
+
+
+;;;;
 ;; runtime
 
 (defmacro with-env
@@ -23,7 +27,14 @@
 (defn current-env
   "Returns the workflow execution environment for the current thread"
   []
+  (assert (some? internal/*env*) "No workflow env detected, should only be called within a workflow function")
   internal/*env*)
+
+(defn workflow-id
+  "Returns the current workflow uuid"
+  []
+  (assert (some? internal/*env*) "No workflow env detected, should only be called within a workflow function")
+  (-> internal/*env* :root))
 
 ;;;;
 ;; worker

@@ -1,39 +1,42 @@
 {:paths      ["src" "target"]
  :test-paths ["test"]
 
- :deps    {org.clojure/clojure      {:mvn/version "1.11.4"}
-           thheller/shadow-cljs     {:mvn/version "2.28.11"}
-           com.taoensso/telemere    {:mvn/version "1.0.0-RC1"}
-           com.taoensso/nippy        {:mvn/version "3.4.2"}
-           ;;stuff
-           net.cgrand/macrovich     {:mvn/version "0.2.2"}
-           funcool/promesa          {:mvn/version "11.0.678"}
-           metosin/malli            {:mvn/version "0.16.4"}
-           thedavidmeister/cljc-md5 {:mvn/version "0.0.2"}}
+ :deps       {org.clojure/clojure                {:mvn/version "1.12.1"}
+              thheller/shadow-cljs               {:mvn/version "2.28.11"}
+              com.taoensso/telemere              {:mvn/version "1.1.0"}
+              com.taoensso/nippy                 {:mvn/version "3.6.0"}
+              io.opentelemetry/opentelemetry-api {:mvn/version "1.53.0"}
+              io.opentelemetry/opentelemetry-sdk {:mvn/version "1.53.0"}
+              ;;stuff
+              net.cgrand/macrovich               {:mvn/version "0.2.2"}
+              funcool/promesa                    {:mvn/version "11.0.678"}
+              metosin/malli                      {:mvn/version "0.19.1"}
+              thedavidmeister/cljc-md5           {:mvn/version "0.0.2"}
+              missionary/missionary              {:mvn/version "b.46"}}
 
- :aliases {:dev  {:extra-paths ["dev" "test"]
-                  :jvm-opts    ["-Djdk.attach.allowAttachSelf"]
-                  :extra-deps  {lambdaisland/kaocha                      {:mvn/version "1.91.1392"}
-                                lambdaisland/kaocha-cloverage            {:mvn/version "1.1.89"}
-                                lambdaisland/kaocha-junit-xml            {:mvn/version "1.17.101"}
-                                com.lambdaisland/kaocha-cljs             {:mvn/version "1.5.154"}
-                                ch.qos.logback/logback-classic           {:mvn/version "1.5.12"}
-                                tortue/spy                               {:mvn/version "2.15.0"}
-                                nubank/matcher-combinators               {:mvn/version "3.9.1"}
-                                com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.4.0"}}}
-           :fdb  {:extra-deps {org.foundationdb/fdb-java {:mvn/version "7.1.31"}
-                               me.vedang/clj-fdb         {:mvn/version "0.3.0"}}}
+ :aliases    {:dev   {:extra-paths ["dev" "test"]
+                      :jvm-opts    ["-Djdk.attach.allowAttachSelf"]
+                      :extra-deps  {lambdaisland/kaocha                      {:mvn/version "1.91.1392"}
+                                    lambdaisland/kaocha-cloverage            {:mvn/version "1.1.89"}
+                                    lambdaisland/kaocha-junit-xml            {:mvn/version "1.17.101"}
+                                    com.lambdaisland/kaocha-cljs             {:mvn/version "1.5.154"}
+                                    ch.qos.logback/logback-classic           {:mvn/version "1.5.18"}
+                                    tortue/spy                               {:mvn/version "2.15.0"}
+                                    nubank/matcher-combinators               {:mvn/version "3.9.2"}
+                                    com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.6.2"}}}
+              :fdb   {:extra-deps {org.foundationdb/fdb-java {:mvn/version "7.1.31"}
+                                   me.vedang/clj-fdb         {:mvn/version "0.3.0"}}}
 
-           :jdbc {:extra-deps {com.github.seancorfield/next.jdbc {:mvn/version "1.3.939"}
-                               org.postgresql/postgresql         {:mvn/version "42.7.3"}
-                               migratus/migratus                 {:mvn/version "1.5.6"}}}
-           :doc  {:extra-paths ["doc"]}
-           :cljs {:extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}
-                               thheller/shadow-cljs      {:mvn/version "2.28.12"}
-                               hiccups/hiccups           {:mvn/version "0.3.0"}}}
+              :jdbc  {:extra-deps {com.github.seancorfield/next.jdbc {:mvn/version "1.3.1048"}
+                                   org.postgresql/postgresql         {:mvn/version "42.7.7"}
+                                   migratus/migratus                 {:mvn/version "1.6.4"}}}
+              :doc   {:extra-paths ["doc"]}
+              :cljs  {:extra-deps {org.clojure/clojurescript {:mvn/version "1.12.42"}
+                                   thheller/shadow-cljs      {:mvn/version "3.2.0"}
+                                   hiccups/hiccups           {:mvn/version "0.3.0"}}}
 
-           :build {:extra-paths ["build"]
-                   :deps {io.github.clojure/tools.build {:mvn/version "0.10.4"}}
-                   :ns-default build}
+              :build {:extra-paths ["build"]
+                      :deps        {io.github.clojure/tools.build {:mvn/version "0.10.10"}}
+                      :ns-default  build}
 
-           :test {:main-opts ["-m" "kaocha.runner"]}}}
+              :test  {:main-opts ["-m" "kaocha.runner"]}}}
