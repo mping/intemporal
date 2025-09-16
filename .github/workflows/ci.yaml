@@ -33,6 +33,17 @@ jobs:
           cli: 1.11.1.1165
           clj-kondo: 2025.07.28
 
+      - name: Setup docker compose
+        id: compose
+        uses: hoverkraft-tech/compose-action@v2.2.0
+        with:
+          compose-file: |
+            docker-compose.yaml
+            docker-compose.override.yaml
+          up-flags: "--no-build -d --pull=missing --quiet-pull"
+          down-flags: "--volumes"
+          compose-version: "2.36.0"
+
       - name: Lint with clj-kondo
         run: clj-kondo --lint deps.edn src resources test
 
@@ -40,4 +51,12 @@ jobs:
         run: ./bin/kaocha test
 
       - name: Run clj tests
-        run: //bin/kaocha test-cljs
+        run: ./bin/kaocha test-cljs
+
+      - name: Test Reports
+        uses: mikepenz/action-junit-report@v5
+        if: failure()
+        with:
+          #check_name: "report for ${{ matrix.module }}"
+          include_passed: true
+          report_paths: 'modules/*/target/test-reports/*.xml'
