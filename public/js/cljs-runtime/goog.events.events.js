@@ -27,8 +27,7 @@ goog.events.listen = function(src, type, listener, opt_options, opt_handler) {
     return goog.events.listenOnce(src, type, listener, opt_options, opt_handler);
   }
   if (Array.isArray(type)) {
-    var i = 0;
-    for (; i < type.length; i++) {
+    for (var i = 0; i < type.length; i++) {
       goog.events.listen(src, type[i], listener, opt_options, opt_handler);
     }
     return null;
@@ -86,8 +85,7 @@ goog.events.getProxy = function() {
 };
 goog.events.listenOnce = function(src, type, listener, opt_options, opt_handler) {
   if (Array.isArray(type)) {
-    var i = 0;
-    for (; i < type.length; i++) {
+    for (var i = 0; i < type.length; i++) {
       goog.events.listenOnce(src, type[i], listener, opt_options, opt_handler);
     }
     return null;
@@ -105,8 +103,7 @@ goog.events.listenWithWrapper = function(src, wrapper, listener, opt_capt, opt_h
 };
 goog.events.unlisten = function(src, type, listener, opt_options, opt_handler) {
   if (Array.isArray(type)) {
-    var i = 0;
-    for (; i < type.length; i++) {
+    for (var i = 0; i < type.length; i++) {
       goog.events.unlisten(src, type[i], listener, opt_options, opt_handler);
     }
     return null;
@@ -178,12 +175,10 @@ goog.events.removeAll = function(obj, opt_type) {
   }
   var count = 0;
   var typeStr = opt_type && opt_type.toString();
-  var type;
-  for (type in listenerMap.listeners) {
+  for (var type in listenerMap.listeners) {
     if (!typeStr || type == typeStr) {
       var listeners = listenerMap.listeners[type].concat();
-      var i = 0;
-      for (; i < listeners.length; ++i) {
+      for (var i = 0; i < listeners.length; ++i) {
         if (goog.events.unlistenByKey(listeners[i])) {
           ++count;
         }
@@ -228,8 +223,7 @@ goog.events.hasListener = function(obj, opt_type, opt_capture) {
 };
 goog.events.expose = function(e) {
   var str = [];
-  var key;
-  for (key in e) {
+  for (var key in e) {
     if (e[key] && e[key].id) {
       str.push(key + " \x3d " + e[key] + " (" + e[key].id + ")");
     } else {
@@ -257,8 +251,7 @@ goog.events.fireListeners_ = function(obj, type, capture, eventObject) {
     var listenerArray = listenerMap.listeners[type.toString()];
     if (listenerArray) {
       listenerArray = listenerArray.concat();
-      var i = 0;
-      for (; i < listenerArray.length; i++) {
+      for (var i = 0; i < listenerArray.length; i++) {
         var listener = listenerArray[i];
         if (listener && listener.capture == capture && !listener.removed) {
           var result = goog.events.fireListener(listener, eventObject);

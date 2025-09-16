@@ -34,7 +34,7 @@ goog.dom.safe.isInnerHtmlCleanupRecursive_ = goog.functions.cacheReturnValue(fun
 });
 goog.dom.safe.unsafeSetInnerHtmlDoNotUseOrElse = function(elem, html) {
   if (goog.dom.safe.isInnerHtmlCleanupRecursive_()) {
-    for (; elem.lastChild;) {
+    while (elem.lastChild) {
       elem.removeChild(elem.lastChild);
     }
   }

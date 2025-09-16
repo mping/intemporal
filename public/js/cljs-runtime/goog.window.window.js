@@ -42,8 +42,7 @@ goog.window.open = function(linkRef, opt_options, opt_parentWin) {
   }
   var target = opt_options.target || linkRef.target;
   var sb = [];
-  var option;
-  for (option in opt_options) {
+  for (var option in opt_options) {
     switch(option) {
       case "width":
       case "height":

@@ -1,4 +1,10 @@
 goog.loadModule(function(exports) {
+  "use strict";
+  goog.module("goog.labs.userAgent.util");
+  goog.module.declareLegacyNamespace();
+  const {caseInsensitiveContains, contains} = goog.require("goog.string.internal");
+  const {useClientHints} = goog.require("goog.labs.userAgent");
+  const ASSUME_CLIENT_HINTS_SUPPORT = false;
   function getNativeUserAgentString() {
     const navigator = getNavigator();
     if (navigator) {
@@ -19,6 +25,8 @@ goog.loadModule(function(exports) {
   function getNavigator() {
     return goog.global.navigator;
   }
+  let userAgentInternal = null;
+  let userAgentDataInternal = getNativeUserAgentData();
   function setUserAgent(userAgent = undefined) {
     userAgentInternal = typeof userAgent === "string" ? userAgent : getNativeUserAgentString();
   }
@@ -42,9 +50,7 @@ goog.loadModule(function(exports) {
     if (!data) {
       return false;
     }
-    return data.brands.some(({brand}) => {
-      return brand && contains(brand, str);
-    });
+    return data.brands.some(({brand}) => brand && contains(brand, str));
   }
   function matchUserAgent(str) {
     const userAgent = getUserAgent();
@@ -58,20 +64,12 @@ goog.loadModule(function(exports) {
     const versionRegExp = new RegExp("([A-Z][\\w ]+)" + "/" + "([^\\s]+)" + "\\s*" + "(?:\\((.*?)\\))?", "g");
     const data = [];
     let match;
-    for (; match = versionRegExp.exec(userAgent);) {
+    while (match = versionRegExp.exec(userAgent)) {
       data.push([match[1], match[2], match[3] || undefined]);
     }
     return data;
   }
-  "use strict";
-  goog.module("goog.labs.userAgent.util");
-  goog.module.declareLegacyNamespace();
-  const {caseInsensitiveContains, contains} = goog.require("goog.string.internal");
-  const {useClientHints} = goog.require("goog.labs.userAgent");
-  const ASSUME_CLIENT_HINTS_SUPPORT = false;
-  let userAgentInternal = null;
-  let userAgentDataInternal = getNativeUserAgentData();
-  exports = {ASSUME_CLIENT_HINTS_SUPPORT, extractVersionTuples, getNativeUserAgentString, getUserAgent, getUserAgentData, matchUserAgent, matchUserAgentDataBrand, matchUserAgentIgnoreCase, resetUserAgentData, setUserAgent, setUserAgentData};
+  exports = {ASSUME_CLIENT_HINTS_SUPPORT, extractVersionTuples, getNativeUserAgentString, getUserAgent, getUserAgentData, matchUserAgent, matchUserAgentDataBrand, matchUserAgentIgnoreCase, resetUserAgentData, setUserAgent, setUserAgentData,};
   return exports;
 });
 

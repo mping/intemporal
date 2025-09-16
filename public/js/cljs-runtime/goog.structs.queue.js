@@ -40,13 +40,11 @@ goog.structs.Queue.prototype.remove = function(obj) {
 };
 goog.structs.Queue.prototype.getValues = function() {
   var res = [];
-  var i = this.front_.length - 1;
-  for (; i >= 0; --i) {
+  for (var i = this.front_.length - 1; i >= 0; --i) {
     res.push(this.front_[i]);
   }
   var len = this.back_.length;
-  i = 0;
-  for (; i < len; ++i) {
+  for (var i = 0; i < len; ++i) {
     res.push(this.back_[i]);
   }
   return res;

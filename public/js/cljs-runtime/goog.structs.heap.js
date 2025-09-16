@@ -18,8 +18,7 @@ goog.loadModule(function(exports) {
       this.moveUp_(nodes.length - 1);
     }
     insertAll(heap) {
-      let keys;
-      let values;
+      let keys, values;
       if (heap instanceof Heap) {
         keys = heap.getKeys();
         values = heap.getValues();
@@ -66,7 +65,7 @@ goog.loadModule(function(exports) {
       const nodes = this.nodes_;
       const count = nodes.length;
       const node = nodes[index];
-      for (; index < count >> 1;) {
+      while (index < count >> 1) {
         const leftChildIndex = this.getLeftChildIndex_(index);
         const rightChildIndex = this.getRightChildIndex_(index);
         const smallerChildIndex = rightChildIndex < count && nodes[rightChildIndex].getKey() < nodes[leftChildIndex].getKey() ? rightChildIndex : leftChildIndex;
@@ -81,7 +80,7 @@ goog.loadModule(function(exports) {
     moveUp_(index) {
       const nodes = this.nodes_;
       const node = nodes[index];
-      for (; index > 0;) {
+      while (index > 0) {
         const parentIndex = this.getParentIndex_(index);
         if (nodes[parentIndex].getKey() > node.getKey()) {
           nodes[index] = nodes[parentIndex];
@@ -120,14 +119,10 @@ goog.loadModule(function(exports) {
       return rv;
     }
     containsValue(val) {
-      return this.nodes_.some(node => {
-        return node.getValue() == val;
-      });
+      return this.nodes_.some(node => node.getValue() == val);
     }
     containsKey(key) {
-      return this.nodes_.some(node => {
-        return node.getKey() == key;
-      });
+      return this.nodes_.some(node => node.getKey() == key);
     }
     clone() {
       return new Heap(this);

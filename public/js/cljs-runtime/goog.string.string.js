@@ -16,8 +16,8 @@ goog.string.subs = function(str, var_args) {
   const splitParts = str.split("%s");
   let returnString = "";
   const subsArguments = Array.prototype.slice.call(arguments, 1);
-  for (; subsArguments.length && splitParts.length > 1;) {
-    returnString = returnString + (splitParts.shift() + subsArguments.shift());
+  while (subsArguments.length && splitParts.length > 1) {
+    returnString += splitParts.shift() + subsArguments.shift();
   }
   return returnString + splitParts.join("%s");
 };
@@ -235,7 +235,7 @@ goog.string.truncateMiddle = function(str, chars, opt_protectEscapedCharacters, 
   } else if (str.length > chars) {
     let half = Math.floor(chars / 2);
     const endPos = str.length - half;
-    half = half + chars % 2;
+    half += chars % 2;
     str = str.substring(0, half) + "..." + str.substring(endPos);
   }
   if (opt_protectEscapedCharacters) {
@@ -278,15 +278,15 @@ goog.string.escapeChar = function(c) {
     if (cc < 256) {
       rv = "\\x";
       if (cc < 16 || cc > 256) {
-        rv = rv + "0";
+        rv += "0";
       }
     } else {
       rv = "\\u";
       if (cc < 4096) {
-        rv = rv + "0";
+        rv += "0";
       }
     }
-    rv = rv + cc.toString(16).toUpperCase();
+    rv += cc.toString(16).toUpperCase();
   }
   return goog.string.jsEscapeCache_[c] = rv;
 };
@@ -399,7 +399,7 @@ goog.string.parseInt = function(value) {
 goog.string.splitLimit = function(str, separator, limit) {
   const parts = str.split(separator);
   const returnVal = [];
-  for (; limit > 0 && parts.length;) {
+  while (limit > 0 && parts.length) {
     returnVal.push(parts.shift());
     limit--;
   }

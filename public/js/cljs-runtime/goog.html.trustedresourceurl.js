@@ -8,7 +8,10 @@ goog.require("goog.string.Const");
 goog.require("goog.string.TypedString");
 goog.html.TrustedResourceUrl = class {
   constructor(value, token) {
-    this.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue_ = token === goog.html.TrustedResourceUrl.CONSTRUCTOR_TOKEN_PRIVATE_ ? value : "";
+    if (goog.DEBUG && token !== goog.html.TrustedResourceUrl.CONSTRUCTOR_TOKEN_PRIVATE_) {
+      throw Error("TrustedResourceUrl is not meant to be built directly");
+    }
+    this.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue_ = value;
   }
   toString() {
     return this.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue_ + "";
@@ -33,7 +36,7 @@ goog.html.TrustedResourceUrl.unwrapTrustedScriptURL = function(trustedResourceUr
   if (trustedResourceUrl instanceof goog.html.TrustedResourceUrl && trustedResourceUrl.constructor === goog.html.TrustedResourceUrl) {
     return trustedResourceUrl.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue_;
   } else {
-    goog.asserts.fail("expected object of type TrustedResourceUrl, got '" + trustedResourceUrl + "' of type " + goog.typeOf(trustedResourceUrl));
+    goog.asserts.fail("expected object of type TrustedResourceUrl, got '%s' of type %s", trustedResourceUrl, goog.typeOf(trustedResourceUrl));
     return "type_error:TrustedResourceUrl";
   }
 };
@@ -67,9 +70,8 @@ goog.html.TrustedResourceUrl.fromConstant = function(url) {
 };
 goog.html.TrustedResourceUrl.fromConstants = function(parts) {
   var unwrapped = "";
-  var i = 0;
-  for (; i < parts.length; i++) {
-    unwrapped = unwrapped + goog.string.Const.unwrap(parts[i]);
+  for (var i = 0; i < parts.length; i++) {
+    unwrapped += goog.string.Const.unwrap(parts[i]);
   }
   return goog.html.TrustedResourceUrl.createTrustedResourceUrlSecurityPrivateDoNotAccessOrElse(unwrapped);
 };
@@ -92,19 +94,17 @@ goog.html.TrustedResourceUrl.stringifyParams_ = function(prefix, currentString, 
   if (typeof params === "string") {
     return params ? prefix + encodeURIComponent(params) : "";
   }
-  var key;
-  for (key in params) {
+  for (var key in params) {
     if (Object.prototype.hasOwnProperty.call(params, key)) {
       var value = params[key];
       var outputValues = Array.isArray(value) ? value : [value];
-      var i = 0;
-      for (; i < outputValues.length; i++) {
+      for (var i = 0; i < outputValues.length; i++) {
         var outputValue = outputValues[i];
         if (outputValue != null) {
           if (!currentString) {
             currentString = prefix;
           }
-          currentString = currentString + ((currentString.length > prefix.length ? "\x26" : "") + encodeURIComponent(key) + "\x3d" + encodeURIComponent(String(outputValue)));
+          currentString += (currentString.length > prefix.length ? "\x26" : "") + encodeURIComponent(key) + "\x3d" + encodeURIComponent(String(outputValue));
         }
       }
     }

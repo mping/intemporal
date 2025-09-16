@@ -1,4 +1,7 @@
 goog.loadModule(function(exports) {
+  "use strict";
+  goog.module("goog.debug.Error");
+  goog.module.declareLegacyNamespace();
   function DebugError(msg = undefined, cause = undefined) {
     if (Error.captureStackTrace) {
       Error.captureStackTrace(this, DebugError);
@@ -16,9 +19,6 @@ goog.loadModule(function(exports) {
     }
     this.reportErrorToServer = true;
   }
-  "use strict";
-  goog.module("goog.debug.Error");
-  goog.module.declareLegacyNamespace();
   goog.inherits(DebugError, Error);
   DebugError.prototype.name = "CustomError";
   exports = DebugError;

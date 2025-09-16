@@ -32,7 +32,7 @@ goog.structs.PriorityPool.prototype.getObject = function(opt_callback, opt_prior
 };
 goog.structs.PriorityPool.prototype.handleQueueRequests_ = function() {
   var requestQueue = this.requestQueue_;
-  for (; requestQueue.getCount() > 0;) {
+  while (requestQueue.getCount() > 0) {
     var obj = this.getObject();
     if (!obj) {
       return;

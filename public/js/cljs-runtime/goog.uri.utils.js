@@ -9,26 +9,26 @@ goog.uri.utils.CharCode_ = {AMPERSAND:38, EQUAL:61, HASH:35, QUESTION:63};
 goog.uri.utils.buildFromEncodedParts = function(opt_scheme, opt_userInfo, opt_domain, opt_port, opt_path, opt_queryData, opt_fragment) {
   var out = "";
   if (opt_scheme) {
-    out = out + (opt_scheme + ":");
+    out += opt_scheme + ":";
   }
   if (opt_domain) {
-    out = out + "//";
+    out += "//";
     if (opt_userInfo) {
-      out = out + (opt_userInfo + "@");
+      out += opt_userInfo + "@";
     }
-    out = out + opt_domain;
+    out += opt_domain;
     if (opt_port) {
-      out = out + (":" + opt_port);
+      out += ":" + opt_port;
     }
   }
   if (opt_path) {
-    out = out + opt_path;
+    out += opt_path;
   }
   if (opt_queryData) {
-    out = out + ("?" + opt_queryData);
+    out += "?" + opt_queryData;
   }
   if (opt_fragment) {
-    out = out + ("#" + opt_fragment);
+    out += "#" + opt_fragment;
   }
   return out;
 };
@@ -130,8 +130,7 @@ goog.uri.utils.parseQueryData = function(encodedQuery, callback) {
     return;
   }
   var pairs = encodedQuery.split("\x26");
-  var i = 0;
-  for (; i < pairs.length; i++) {
+  for (var i = 0; i < pairs.length; i++) {
     var indexOfEquals = pairs[i].indexOf("\x3d");
     var name = null;
     var value = null;
@@ -180,8 +179,7 @@ goog.uri.utils.appendKeyValuePairs_ = function(key, value, pairs) {
   goog.asserts.assertString(key);
   if (Array.isArray(value)) {
     goog.asserts.assertArray(value);
-    var j = 0;
-    for (; j < value.length; j++) {
+    for (var j = 0; j < value.length; j++) {
       goog.uri.utils.appendKeyValuePairs_(key, String(value[j]), pairs);
     }
   } else if (value != null) {
@@ -191,8 +189,7 @@ goog.uri.utils.appendKeyValuePairs_ = function(key, value, pairs) {
 goog.uri.utils.buildQueryData = function(keysAndValues, opt_startIndex) {
   goog.asserts.assert(Math.max(keysAndValues.length - (opt_startIndex || 0), 0) % 2 == 0, "goog.uri.utils: Key/value lists must be even in length.");
   var params = [];
-  var i = opt_startIndex || 0;
-  for (; i < keysAndValues.length; i = i + 2) {
+  for (var i = opt_startIndex || 0; i < keysAndValues.length; i += 2) {
     var key = keysAndValues[i];
     goog.uri.utils.appendKeyValuePairs_(key, keysAndValues[i + 1], params);
   }
@@ -200,8 +197,7 @@ goog.uri.utils.buildQueryData = function(keysAndValues, opt_startIndex) {
 };
 goog.uri.utils.buildQueryDataFromMap = function(map) {
   var params = [];
-  var key;
-  for (key in map) {
+  for (var key in map) {
     goog.uri.utils.appendKeyValuePairs_(key, map[key], params);
   }
   return params.join("\x26");
@@ -221,7 +217,7 @@ goog.uri.utils.appendParam = function(uri, key, opt_value) {
 goog.uri.utils.findParam_ = function(uri, startIndex, keyEncoded, hashOrEndIndex) {
   var index = startIndex;
   var keyLength = keyEncoded.length;
-  for (; (index = uri.indexOf(keyEncoded, index)) >= 0 && index < hashOrEndIndex;) {
+  while ((index = uri.indexOf(keyEncoded, index)) >= 0 && index < hashOrEndIndex) {
     var precedingChar = uri.charCodeAt(index - 1);
     if (precedingChar == goog.uri.utils.CharCode_.AMPERSAND || precedingChar == goog.uri.utils.CharCode_.QUESTION) {
       var followingChar = uri.charCodeAt(index + keyLength);
@@ -229,7 +225,7 @@ goog.uri.utils.findParam_ = function(uri, startIndex, keyEncoded, hashOrEndIndex
         return index;
       }
     }
-    index = index + (keyLength + 1);
+    index += keyLength + 1;
   }
   return -1;
 };
@@ -247,7 +243,7 @@ goog.uri.utils.getParamValue = function(uri, keyEncoded) {
     if (endPosition < 0 || endPosition > hashOrEndIndex) {
       endPosition = hashOrEndIndex;
     }
-    foundIndex = foundIndex + (keyEncoded.length + 1);
+    foundIndex += keyEncoded.length + 1;
     return goog.string.urlDecode(uri.slice(foundIndex, endPosition !== -1 ? endPosition : 0));
   }
 };
@@ -256,12 +252,12 @@ goog.uri.utils.getParamValues = function(uri, keyEncoded) {
   var position = 0;
   var foundIndex;
   var result = [];
-  for (; (foundIndex = goog.uri.utils.findParam_(uri, position, keyEncoded, hashOrEndIndex)) >= 0;) {
+  while ((foundIndex = goog.uri.utils.findParam_(uri, position, keyEncoded, hashOrEndIndex)) >= 0) {
     position = uri.indexOf("\x26", foundIndex);
     if (position < 0 || position > hashOrEndIndex) {
       position = hashOrEndIndex;
     }
-    foundIndex = foundIndex + (keyEncoded.length + 1);
+    foundIndex += keyEncoded.length + 1;
     result.push(goog.string.urlDecode(uri.slice(foundIndex, Math.max(position, 0))));
   }
   return result;
@@ -272,7 +268,7 @@ goog.uri.utils.removeParam = function(uri, keyEncoded) {
   var position = 0;
   var foundIndex;
   var buffer = [];
-  for (; (foundIndex = goog.uri.utils.findParam_(uri, position, keyEncoded, hashOrEndIndex)) >= 0;) {
+  while ((foundIndex = goog.uri.utils.findParam_(uri, position, keyEncoded, hashOrEndIndex)) >= 0) {
     buffer.push(uri.substring(position, foundIndex));
     position = Math.min(uri.indexOf("\x26", foundIndex) + 1 || hashOrEndIndex, hashOrEndIndex);
   }

@@ -110,9 +110,7 @@ goog.dom.getElementsByTagNameAndClass_ = function(doc, opt_tag, opt_class, opt_e
     if (tagName) {
       var arrayLike = {};
       var len = 0;
-      var i = 0;
-      var el;
-      for (; el = els[i]; i++) {
+      for (var i = 0, el; el = els[i]; i++) {
         if (tagName == el.nodeName) {
           arrayLike[len++] = el;
         }
@@ -123,12 +121,11 @@ goog.dom.getElementsByTagNameAndClass_ = function(doc, opt_tag, opt_class, opt_e
       return els;
     }
   }
-  els = parent.getElementsByTagName(tagName || "*");
+  var els = parent.getElementsByTagName(tagName || "*");
   if (opt_class) {
-    arrayLike = {};
-    len = 0;
-    i = 0;
-    for (; el = els[i]; i++) {
+    var arrayLike = {};
+    var len = 0;
+    for (var i = 0, el; el = els[i]; i++) {
       var className = el.className;
       if (typeof className.split == "function" && goog.array.contains(className.split(/\s+/), opt_class)) {
         arrayLike[len++] = el;
@@ -273,8 +270,7 @@ goog.dom.append_ = function(doc, parent, args, startIndex) {
       parent.appendChild(typeof child === "string" ? doc.createTextNode(child) : child);
     }
   }
-  var i = startIndex;
-  for (; i < args.length; i++) {
+  for (var i = startIndex; i < args.length; i++) {
     var arg = args[i];
     if (goog.isArrayLike(arg) && !goog.dom.isNodeLike(arg)) {
       goog.array.forEach(goog.dom.isNodeList(arg) ? goog.array.toArray(arg) : arg, childHandler);
@@ -303,11 +299,9 @@ goog.dom.createTable = function(rows, columns, opt_fillWithNbsp) {
 goog.dom.createTable_ = function(doc, rows, columns, fillWithNbsp) {
   var table = goog.dom.createElement_(doc, goog.dom.TagName.TABLE);
   var tbody = table.appendChild(goog.dom.createElement_(doc, goog.dom.TagName.TBODY));
-  var i = 0;
-  for (; i < rows; i++) {
+  for (var i = 0; i < rows; i++) {
     var tr = goog.dom.createElement_(doc, goog.dom.TagName.TR);
-    var j = 0;
-    for (; j < columns; j++) {
+    for (var j = 0; j < columns; j++) {
       var td = goog.dom.createElement_(doc, goog.dom.TagName.TD);
       if (fillWithNbsp) {
         goog.dom.setTextContent(td, goog.string.Unicode.NBSP);
@@ -341,7 +335,7 @@ goog.dom.childrenToNode_ = function(doc, tempDiv) {
     return tempDiv.removeChild(goog.asserts.assert(tempDiv.firstChild));
   } else {
     var fragment = doc.createDocumentFragment();
-    for (; tempDiv.firstChild;) {
+    while (tempDiv.firstChild) {
       fragment.appendChild(tempDiv.firstChild);
     }
     return fragment;
@@ -399,7 +393,7 @@ goog.dom.append = function(parent, var_args) {
 };
 goog.dom.removeChildren = function(node) {
   var child;
-  for (; child = node.firstChild;) {
+  while (child = node.firstChild) {
     node.removeChild(child);
   }
 };
@@ -433,18 +427,17 @@ goog.dom.copyContents = function(target, source) {
   goog.asserts.assert(target != null && source != null, "goog.dom.copyContents expects non-null arguments");
   var childNodes = source.cloneNode(true).childNodes;
   goog.dom.removeChildren(target);
-  for (; childNodes.length;) {
+  while (childNodes.length) {
     target.appendChild(childNodes[0]);
   }
 };
 goog.dom.flattenElement = function(element) {
-  var child;
-  var parent = element.parentNode;
+  var child, parent = element.parentNode;
   if (parent && parent.nodeType != goog.dom.NodeType.DOCUMENT_FRAGMENT) {
     if (element.removeNode) {
       return element.removeNode(false);
     } else {
-      for (; child = element.firstChild;) {
+      while (child = element.firstChild) {
         parent.insertBefore(child, element);
       }
       return goog.dom.removeNode(element);
@@ -484,7 +477,7 @@ goog.dom.getPreviousElementSibling = function(node) {
   return goog.dom.getNextElementNode_(node.previousSibling, false);
 };
 goog.dom.getNextElementNode_ = function(node, forward) {
-  for (; node && node.nodeType != goog.dom.NodeType.ELEMENT;) {
+  while (node && node.nodeType != goog.dom.NodeType.ELEMENT) {
     node = forward ? node.nextSibling : node.previousSibling;
   }
   return node;
@@ -496,7 +489,7 @@ goog.dom.getNextNode = function(node) {
   if (node.firstChild) {
     return node.firstChild;
   }
-  for (; node && !node.nextSibling;) {
+  while (node && !node.nextSibling) {
     node = node.parentNode;
   }
   return node ? node.nextSibling : null;
@@ -509,7 +502,7 @@ goog.dom.getPreviousNode = function(node) {
     return node.parentNode;
   }
   node = node.previousSibling;
-  for (; node && node.lastChild;) {
+  while (node && node.lastChild) {
     node = node.lastChild;
   }
   return node;
@@ -544,7 +537,7 @@ goog.dom.contains = function(parent, descendant) {
   if (typeof parent.compareDocumentPosition != "undefined") {
     return parent == descendant || Boolean(parent.compareDocumentPosition(descendant) & 16);
   }
-  for (; descendant && parent != descendant;) {
+  while (descendant && parent != descendant) {
     descendant = descendant.parentNode;
   }
   return descendant == parent;
@@ -585,8 +578,7 @@ goog.dom.compareNodeOrder = function(node1, node2) {
     }
   }
   var doc = goog.dom.getOwnerDocument(node1);
-  var range1;
-  var range2;
+  var range1, range2;
   range1 = doc.createRange();
   range1.selectNode(node1);
   range1.collapse(true);
@@ -601,14 +593,14 @@ goog.dom.compareParentsDescendantNodeIe_ = function(textNode, node) {
     return -1;
   }
   var sibling = node;
-  for (; sibling.parentNode != parent;) {
+  while (sibling.parentNode != parent) {
     sibling = sibling.parentNode;
   }
   return goog.dom.compareSiblingOrder_(sibling, textNode);
 };
 goog.dom.compareSiblingOrder_ = function(node1, node2) {
   var s = node2;
-  for (; s = s.previousSibling;) {
+  while (s = s.previousSibling) {
     if (s == node1) {
       return -1;
     }
@@ -616,8 +608,7 @@ goog.dom.compareSiblingOrder_ = function(node1, node2) {
   return 1;
 };
 goog.dom.findCommonAncestor = function(var_args) {
-  var i;
-  var count = arguments.length;
+  var i, count = arguments.length;
   if (!count) {
     return null;
   } else if (count == 1) {
@@ -625,11 +616,10 @@ goog.dom.findCommonAncestor = function(var_args) {
   }
   var paths = [];
   var minLength = Infinity;
-  i = 0;
-  for (; i < count; i++) {
+  for (i = 0; i < count; i++) {
     var ancestors = [];
     var node = arguments[i];
-    for (; node;) {
+    while (node) {
       ancestors.unshift(node);
       node = node.parentNode;
     }
@@ -637,11 +627,9 @@ goog.dom.findCommonAncestor = function(var_args) {
     minLength = Math.min(minLength, ancestors.length);
   }
   var output = null;
-  i = 0;
-  for (; i < minLength; i++) {
+  for (i = 0; i < minLength; i++) {
     var first = paths[0][i];
-    var j = 1;
-    for (; j < count; j++) {
+    for (var j = 1; j < count; j++) {
       if (first != paths[j][i]) {
         return output;
       }
@@ -674,7 +662,7 @@ goog.dom.setTextContent = function(node, text) {
   } else if (node.nodeType == goog.dom.NodeType.TEXT) {
     node.data = String(text);
   } else if (node.firstChild && node.firstChild.nodeType == goog.dom.NodeType.TEXT) {
-    for (; node.lastChild != node.firstChild;) {
+    while (node.lastChild != node.firstChild) {
       node.removeChild(goog.asserts.assert(node.lastChild));
     }
     node.firstChild.data = String(text);
@@ -708,7 +696,7 @@ goog.dom.findNodes = function(root, p) {
 goog.dom.findNodes_ = function(root, p, rv, findOne) {
   if (root != null) {
     var child = root.firstChild;
-    for (; child;) {
+    while (child) {
       if (p(child)) {
         rv.push(child);
         if (findOne) {
@@ -725,28 +713,25 @@ goog.dom.findNodes_ = function(root, p, rv, findOne) {
 };
 goog.dom.findElement = function(root, pred) {
   var stack = goog.dom.getChildrenReverse_(root);
-  for (; stack.length > 0;) {
+  while (stack.length > 0) {
     var next = stack.pop();
     if (pred(next)) {
       return next;
     }
-    var c = next.lastElementChild;
-    for (; c; c = c.previousElementSibling) {
+    for (var c = next.lastElementChild; c; c = c.previousElementSibling) {
       stack.push(c);
     }
   }
   return null;
 };
 goog.dom.findElements = function(root, pred) {
-  var result = [];
-  var stack = goog.dom.getChildrenReverse_(root);
-  for (; stack.length > 0;) {
+  var result = [], stack = goog.dom.getChildrenReverse_(root);
+  while (stack.length > 0) {
     var next = stack.pop();
     if (pred(next)) {
       result.push(next);
     }
-    var c = next.lastElementChild;
-    for (; c; c = c.previousElementSibling) {
+    for (var c = next.lastElementChild; c; c = c.previousElementSibling) {
       stack.push(c);
     }
   }
@@ -757,8 +742,7 @@ goog.dom.getChildrenReverse_ = function(node) {
     return [node.documentElement];
   } else {
     var children = [];
-    var c = node.lastElementChild;
-    for (; c; c = c.previousElementSibling) {
+    for (var c = node.lastElementChild; c; c = c.previousElementSibling) {
       children.push(c);
     }
     return children;
@@ -835,7 +819,7 @@ goog.dom.getTextContent_ = function(node, buf, normalizeWhitespace) {
     buf.push(goog.dom.PREDEFINED_TAG_VALUES_[node.nodeName]);
   } else {
     var child = node.firstChild;
-    for (; child;) {
+    while (child) {
       goog.dom.getTextContent_(child, buf, normalizeWhitespace);
       child = child.nextSibling;
     }
@@ -847,9 +831,9 @@ goog.dom.getNodeTextLength = function(node) {
 goog.dom.getNodeTextOffset = function(node, opt_offsetParent) {
   var root = opt_offsetParent || goog.dom.getOwnerDocument(node).body;
   var buf = [];
-  for (; node && node != root;) {
+  while (node && node != root) {
     var cur = node;
-    for (; cur = cur.previousSibling;) {
+    while (cur = cur.previousSibling) {
       buf.unshift(goog.dom.getTextContent(cur));
     }
     node = node.parentNode;
@@ -857,20 +841,17 @@ goog.dom.getNodeTextOffset = function(node, opt_offsetParent) {
   return goog.string.trimLeft(buf.join("")).replace(/ +/g, " ").length;
 };
 goog.dom.getNodeAtOffset = function(parent, offset, opt_result) {
-  var stack = [parent];
-  var pos = 0;
-  var cur = null;
-  for (; stack.length > 0 && pos < offset;) {
+  var stack = [parent], pos = 0, cur = null;
+  while (stack.length > 0 && pos < offset) {
     cur = stack.pop();
     if (cur.nodeName in goog.dom.TAGS_TO_IGNORE_) {
     } else if (cur.nodeType == goog.dom.NodeType.TEXT) {
       var text = cur.nodeValue.replace(/(\r\n|\r|\n)/g, "").replace(/ +/g, " ");
-      pos = pos + text.length;
+      pos += text.length;
     } else if (cur.nodeName in goog.dom.PREDEFINED_TAG_VALUES_) {
-      pos = pos + goog.dom.PREDEFINED_TAG_VALUES_[cur.nodeName].length;
+      pos += goog.dom.PREDEFINED_TAG_VALUES_[cur.nodeName].length;
     } else {
-      var i = cur.childNodes.length - 1;
-      for (; i >= 0; i--) {
+      for (var i = cur.childNodes.length - 1; i >= 0; i--) {
         stack.push(cur.childNodes[i]);
       }
     }
@@ -908,7 +889,7 @@ goog.dom.getAncestor = function(element, matcher, opt_includeNode, opt_maxSearch
     element = element.parentNode;
   }
   var steps = 0;
-  for (; element && (opt_maxSearchSteps == null || steps <= opt_maxSearchSteps);) {
+  while (element && (opt_maxSearchSteps == null || steps <= opt_maxSearchSteps)) {
     goog.asserts.assert(element.name != "parentNode");
     if (matcher(element)) {
       return element;

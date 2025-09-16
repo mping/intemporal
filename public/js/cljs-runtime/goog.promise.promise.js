@@ -106,9 +106,7 @@ goog.Promise.race = function(promises) {
     if (!promises.length) {
       resolve(undefined);
     }
-    var i = 0;
-    var promise;
-    for (; i < promises.length; i++) {
+    for (var i = 0, promise; i < promises.length; i++) {
       promise = promises[i];
       goog.Promise.resolveThen_(promise, resolve, reject);
     }
@@ -132,9 +130,7 @@ goog.Promise.all = function(promises) {
     var onReject = function(reason) {
       reject(reason);
     };
-    var i = 0;
-    var promise;
-    for (; i < promises.length; i++) {
+    for (var i = 0, promise; i < promises.length; i++) {
       promise = promises[i];
       goog.Promise.resolveThen_(promise, goog.partial(onFulfill, i), onReject);
     }
@@ -155,9 +151,7 @@ goog.Promise.allSettled = function(promises) {
         resolve(results);
       }
     };
-    var i = 0;
-    var promise;
-    for (; i < promises.length; i++) {
+    for (var i = 0, promise; i < promises.length; i++) {
       promise = promises[i];
       goog.Promise.resolveThen_(promise, goog.partial(onSettled, i, true), goog.partial(onSettled, i, false));
     }
@@ -181,17 +175,14 @@ goog.Promise.firstFulfilled = function(promises) {
         reject(reasons);
       }
     };
-    var i = 0;
-    var promise;
-    for (; i < promises.length; i++) {
+    for (var i = 0, promise; i < promises.length; i++) {
       promise = promises[i];
       goog.Promise.resolveThen_(promise, onFulfill, goog.partial(onReject, i));
     }
   });
 };
 goog.Promise.withResolver = function() {
-  var resolve;
-  var reject;
+  var resolve, reject;
   var promise = new goog.Promise(function(rs, rj) {
     resolve = rs;
     reject = rj;
@@ -264,8 +255,7 @@ goog.Promise.prototype.cancelChild_ = function(childPromise, err) {
   var childCount = 0;
   var childEntry = null;
   var beforeChildEntry = null;
-  var entry = this.callbackEntries_;
-  for (; entry; entry = entry.next) {
+  for (var entry = this.callbackEntries_; entry; entry = entry.next) {
     if (!entry.always) {
       childCount++;
       if (entry.child == childPromise) {
@@ -450,7 +440,7 @@ goog.Promise.prototype.removeEntryAfter_ = function(previous) {
 };
 goog.Promise.prototype.executeCallbacks_ = function() {
   var entry = null;
-  for (; entry = this.popEntry_();) {
+  while (entry = this.popEntry_()) {
     if (goog.Promise.LONG_STACK_TRACES) {
       this.currentStep_++;
     }
@@ -485,17 +475,15 @@ goog.Promise.prototype.addStackTrace_ = function(err) {
   if (goog.Promise.LONG_STACK_TRACES && typeof err.stack === "string") {
     var trace = err.stack.split("\n", 4)[3];
     var message = err.message;
-    message = message + Array(11 - message.length).join(" ");
+    message += Array(11 - message.length).join(" ");
     this.stack_.push(message + trace);
   }
 };
 goog.Promise.prototype.appendLongStack_ = function(err) {
   if (goog.Promise.LONG_STACK_TRACES && err && typeof err.stack === "string" && this.stack_.length) {
     var longTrace = ["Promise trace:"];
-    var promise = this;
-    for (; promise; promise = promise.parent_) {
-      var i = this.currentStep_;
-      for (; i >= 0; i--) {
+    for (var promise = this; promise; promise = promise.parent_) {
+      for (var i = this.currentStep_; i >= 0; i--) {
         longTrace.push(promise.stack_[i]);
       }
       longTrace.push("Value: " + "[" + (promise.state_ == goog.Promise.State_.REJECTED ? "REJECTED" : "FULFILLED") + "] " + "\x3c" + String(promise.result_) + "\x3e");
@@ -505,14 +493,12 @@ goog.Promise.prototype.appendLongStack_ = function(err) {
 };
 goog.Promise.prototype.removeUnhandledRejection_ = function() {
   if (goog.Promise.UNHANDLED_REJECTION_DELAY > 0) {
-    var p = this;
-    for (; p && p.unhandledRejectionId_; p = p.parent_) {
+    for (var p = this; p && p.unhandledRejectionId_; p = p.parent_) {
       goog.global.clearTimeout(p.unhandledRejectionId_);
       p.unhandledRejectionId_ = 0;
     }
   } else if (goog.Promise.UNHANDLED_REJECTION_DELAY == 0) {
-    p = this;
-    for (; p && p.hadUnhandledRejection_; p = p.parent_) {
+    for (var p = this; p && p.hadUnhandledRejection_; p = p.parent_) {
       p.hadUnhandledRejection_ = false;
     }
   }

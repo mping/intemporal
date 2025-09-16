@@ -1,46 +1,14 @@
 goog.loadModule(function(exports) {
-  function AssertionError(messagePattern, messageArgs) {
-    DebugError.call(this, subs(messagePattern, messageArgs));
-    this.messagePattern = messagePattern;
-  }
-  function subs(pattern, subs) {
-    const splitParts = pattern.split("%s");
-    let returnString = "";
-    const subLast = splitParts.length - 1;
-    for (let i = 0; i < subLast; i++) {
-      const sub = i < subs.length ? subs[i] : "%s";
-      returnString = returnString + (splitParts[i] + sub);
-    }
-    return returnString + splitParts[subLast];
-  }
-  function doAssertFailure(defaultMessage, defaultArgs, givenMessage, givenArgs) {
-    let message = "Assertion failed";
-    let args;
-    if (givenMessage) {
-      message = message + (": " + givenMessage);
-      args = givenArgs;
-    } else if (defaultMessage) {
-      message = message + (": " + defaultMessage);
-      args = defaultArgs;
-    }
-    const e = new AssertionError("" + message, args || []);
-    errorHandler_(e);
-  }
-  function getType(value) {
-    if (value instanceof Function) {
-      return value.displayName || value.name || "unknown type name";
-    } else if (value instanceof Object) {
-      return value.constructor.displayName || value.constructor.name || Object.prototype.toString.call(value);
-    } else {
-      return value === null ? "null" : typeof value;
-    }
-  }
   "use strict";
   goog.module("goog.asserts");
   goog.module.declareLegacyNamespace();
   const DebugError = goog.require("goog.debug.Error");
   const NodeType = goog.require("goog.dom.NodeType");
   exports.ENABLE_ASSERTS = goog.define("goog.asserts.ENABLE_ASSERTS", goog.DEBUG);
+  function AssertionError(messagePattern, messageArgs) {
+    DebugError.call(this, subs(messagePattern, messageArgs));
+    this.messagePattern = messagePattern;
+  }
   goog.inherits(AssertionError, DebugError);
   exports.AssertionError = AssertionError;
   AssertionError.prototype.name = "AssertionError";
@@ -48,6 +16,29 @@ goog.loadModule(function(exports) {
     throw e;
   };
   let errorHandler_ = exports.DEFAULT_ERROR_HANDLER;
+  function subs(pattern, subs) {
+    const splitParts = pattern.split("%s");
+    let returnString = "";
+    const subLast = splitParts.length - 1;
+    for (let i = 0; i < subLast; i++) {
+      const sub = i < subs.length ? subs[i] : "%s";
+      returnString += splitParts[i] + sub;
+    }
+    return returnString + splitParts[subLast];
+  }
+  function doAssertFailure(defaultMessage, defaultArgs, givenMessage, givenArgs) {
+    let message = "Assertion failed";
+    let args;
+    if (givenMessage) {
+      message += ": " + givenMessage;
+      args = givenArgs;
+    } else if (defaultMessage) {
+      message += ": " + defaultMessage;
+      args = defaultArgs;
+    }
+    const e = new AssertionError("" + message, args || []);
+    errorHandler_(e);
+  }
   exports.setErrorHandler = function(errorHandler) {
     if (exports.ENABLE_ASSERTS) {
       errorHandler_ = errorHandler;
@@ -124,6 +115,15 @@ goog.loadModule(function(exports) {
     }
     return value;
   };
+  function getType(value) {
+    if (value instanceof Function) {
+      return value.displayName || value.name || "unknown type name";
+    } else if (value instanceof Object) {
+      return value.constructor.displayName || value.constructor.name || Object.prototype.toString.call(value);
+    } else {
+      return value === null ? "null" : typeof value;
+    }
+  }
   return exports;
 });
 

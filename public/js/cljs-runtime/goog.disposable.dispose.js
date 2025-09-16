@@ -1,12 +1,12 @@
 goog.loadModule(function(exports) {
+  "use strict";
+  goog.module("goog.dispose");
+  goog.module.declareLegacyNamespace();
   function dispose(obj) {
     if (obj && typeof obj.dispose == "function") {
       obj.dispose();
     }
   }
-  "use strict";
-  goog.module("goog.dispose");
-  goog.module.declareLegacyNamespace();
   exports = dispose;
   return exports;
 });

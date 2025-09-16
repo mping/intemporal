@@ -41,11 +41,7 @@ goog.loadModule(function(exports) {
     }
   }
   WorkQueue.DEFAULT_MAX_UNUSED = goog.define("goog.async.WorkQueue.DEFAULT_MAX_UNUSED", 100);
-  WorkQueue.freelist_ = new FreeList(() => {
-    return new WorkItem();
-  }, item => {
-    return item.reset();
-  }, WorkQueue.DEFAULT_MAX_UNUSED);
+  WorkQueue.freelist_ = new FreeList(() => new WorkItem(), item => item.reset(), WorkQueue.DEFAULT_MAX_UNUSED);
   class WorkItem {
     constructor() {
       this.fn = null;

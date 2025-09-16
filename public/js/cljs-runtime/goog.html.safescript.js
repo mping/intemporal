@@ -9,7 +9,10 @@ goog.loadModule(function(exports) {
   const CONSTRUCTOR_TOKEN_PRIVATE = {};
   class SafeScript {
     constructor(value, token) {
-      this.privateDoNotAccessOrElseSafeScriptWrappedValue_ = token === CONSTRUCTOR_TOKEN_PRIVATE ? value : "";
+      if (goog.DEBUG && token !== CONSTRUCTOR_TOKEN_PRIVATE) {
+        throw Error("SafeScript is not meant to be built directly");
+      }
+      this.privateDoNotAccessOrElseSafeScriptWrappedValue_ = value;
       this.implementsGoogStringTypedString = true;
     }
     toString() {
@@ -52,7 +55,7 @@ goog.loadModule(function(exports) {
   }
   SafeScript.EMPTY = {valueOf:function() {
     return SafeScript.createSafeScriptSecurityPrivateDoNotAccessOrElse("");
-  }}.valueOf();
+  },}.valueOf();
   exports = SafeScript;
   return exports;
 });

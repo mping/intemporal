@@ -19,8 +19,7 @@ goog.style.setStyle = function(element, style, opt_value) {
   if (typeof style === "string") {
     goog.style.setStyle_(element, opt_value, style);
   } else {
-    var key;
-    for (key in style) {
+    for (var key in style) {
       goog.style.setStyle_(element, style[key], key);
     }
   }
@@ -109,8 +108,7 @@ goog.style.getComputedTransform = function(element) {
   return goog.style.getStyle_(element, property) || goog.style.getStyle_(element, "transform");
 };
 goog.style.setPosition = function(el, arg1, opt_arg2) {
-  var x;
-  var y;
+  var x, y;
   if (arg1 instanceof goog.math.Coordinate) {
     x = arg1.x;
     y = arg1.y;
@@ -158,8 +156,7 @@ goog.style.getOffsetParent = function(element) {
   var doc = goog.dom.getOwnerDocument(element);
   var positionStyle = goog.style.getStyle_(element, "position");
   var skipStatic = positionStyle == "fixed" || positionStyle == "absolute";
-  var parent = element.parentNode;
-  for (; parent && parent != doc; parent = parent.parentNode) {
+  for (var parent = element.parentNode; parent && parent != doc; parent = parent.parentNode) {
     if (parent.nodeType == goog.dom.NodeType.DOCUMENT_FRAGMENT && parent.host) {
       parent = parent.host;
     }
@@ -177,8 +174,7 @@ goog.style.getVisibleRectForElement = function(element) {
   var body = dom.getDocument().body;
   var documentElement = dom.getDocument().documentElement;
   var scrollEl = dom.getDocumentScrollElement();
-  var el = element;
-  for (; el = goog.style.getOffsetParent(el);) {
+  for (var el = element; el = goog.style.getOffsetParent(el);) {
     if ((!goog.userAgent.IE || el.clientWidth != 0) && (!goog.userAgent.WEBKIT || el.clientHeight != 0 || el != body) && (el != body && el != documentElement && goog.style.getStyle_(el, "overflow") != "visible")) {
       var pos = goog.style.getPageOffset(el);
       var client = goog.style.getClientLeftTop(el);
@@ -190,8 +186,7 @@ goog.style.getVisibleRectForElement = function(element) {
       visibleRect.left = Math.max(visibleRect.left, pos.x);
     }
   }
-  var scrollX = scrollEl.scrollLeft;
-  var scrollY = scrollEl.scrollTop;
+  var scrollX = scrollEl.scrollLeft, scrollY = scrollEl.scrollTop;
   visibleRect.left = Math.max(visibleRect.left, scrollX);
   visibleRect.top = Math.max(visibleRect.top, scrollY);
   var winSize = dom.getViewportSize();
@@ -208,12 +203,12 @@ goog.style.getContainerOffsetToScrollInto = function(element, opt_container, opt
     var relX = elementPos.x - container.scrollLeft;
     var relY = elementPos.y - container.scrollTop;
     if (goog.userAgent.IE && !goog.userAgent.isDocumentModeOrHigher(10)) {
-      relX = relX + containerBorder.left;
-      relY = relY + containerBorder.top;
+      relX += containerBorder.left;
+      relY += containerBorder.top;
     }
   } else {
-    relX = elementPos.x - containerPos.x - containerBorder.left;
-    relY = elementPos.y - containerPos.y - containerBorder.top;
+    var relX = elementPos.x - containerPos.x - containerBorder.left;
+    var relY = elementPos.y - containerPos.y - containerBorder.top;
   }
   var elementSize = goog.style.getSizeWithDisplay_(element);
   var spaceX = container.clientWidth - elementSize.width;
@@ -221,11 +216,11 @@ goog.style.getContainerOffsetToScrollInto = function(element, opt_container, opt
   var scrollLeft = container.scrollLeft;
   var scrollTop = container.scrollTop;
   if (opt_center) {
-    scrollLeft = scrollLeft + (relX - spaceX / 2);
-    scrollTop = scrollTop + (relY - spaceY / 2);
+    scrollLeft += relX - spaceX / 2;
+    scrollTop += relY - spaceY / 2;
   } else {
-    scrollLeft = scrollLeft + Math.min(relX, Math.max(relX - spaceX, 0));
-    scrollTop = scrollTop + Math.min(relY, Math.max(relY - spaceY, 0));
+    scrollLeft += Math.min(relX, Math.max(relX - spaceX, 0));
+    scrollTop += Math.min(relY, Math.max(relY - spaceY, 0));
   }
   return new goog.math.Coordinate(scrollLeft, scrollTop);
 };
@@ -512,20 +507,17 @@ goog.style.setUnselectable = function(el, unselectable, opt_noRecurse) {
       el.style[name] = value;
     }
     if (descendants) {
-      var i = 0;
-      var descendant;
-      for (; descendant = descendants[i]; i++) {
+      for (var i = 0, descendant; descendant = descendants[i]; i++) {
         if (descendant.style) {
           descendant.style[name] = value;
         }
       }
     }
   } else if (goog.userAgent.IE) {
-    value = unselectable ? "on" : "";
+    var value = unselectable ? "on" : "";
     el.setAttribute("unselectable", value);
     if (descendants) {
-      i = 0;
-      for (; descendant = descendants[i]; i++) {
+      for (var i = 0, descendant; descendant = descendants[i]; i++) {
         descendant.setAttribute("unselectable", value);
       }
     }
@@ -592,10 +584,10 @@ goog.style.getBox_ = function(element, stylePrefix) {
     var bottom = goog.style.getIePixelDistance_(element, stylePrefix + "Bottom");
     return new goog.math.Box(top, right, bottom, left);
   } else {
-    left = goog.style.getComputedStyle(element, stylePrefix + "Left");
-    right = goog.style.getComputedStyle(element, stylePrefix + "Right");
-    top = goog.style.getComputedStyle(element, stylePrefix + "Top");
-    bottom = goog.style.getComputedStyle(element, stylePrefix + "Bottom");
+    var left = goog.style.getComputedStyle(element, stylePrefix + "Left");
+    var right = goog.style.getComputedStyle(element, stylePrefix + "Right");
+    var top = goog.style.getComputedStyle(element, stylePrefix + "Top");
+    var bottom = goog.style.getComputedStyle(element, stylePrefix + "Bottom");
     return new goog.math.Box(parseFloat(top), parseFloat(right), parseFloat(bottom), parseFloat(left));
   }
 };
@@ -624,10 +616,10 @@ goog.style.getBorderBox = function(element) {
     var bottom = goog.style.getIePixelBorder_(element, "borderBottom");
     return new goog.math.Box(top, right, bottom, left);
   } else {
-    left = goog.style.getComputedStyle(element, "borderLeftWidth");
-    right = goog.style.getComputedStyle(element, "borderRightWidth");
-    top = goog.style.getComputedStyle(element, "borderTopWidth");
-    bottom = goog.style.getComputedStyle(element, "borderBottomWidth");
+    var left = goog.style.getComputedStyle(element, "borderLeftWidth");
+    var right = goog.style.getComputedStyle(element, "borderRightWidth");
+    var top = goog.style.getComputedStyle(element, "borderTopWidth");
+    var bottom = goog.style.getComputedStyle(element, "borderBottomWidth");
     return new goog.math.Box(parseFloat(top), parseFloat(right), parseFloat(bottom), parseFloat(left));
   }
 };

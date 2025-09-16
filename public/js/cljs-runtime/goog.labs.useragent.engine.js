@@ -1,4 +1,10 @@
 goog.loadModule(function(exports) {
+  "use strict";
+  goog.module("goog.labs.userAgent.engine");
+  goog.module.declareLegacyNamespace();
+  const googArray = goog.require("goog.array");
+  const googString = goog.require("goog.string.internal");
+  const util = goog.require("goog.labs.userAgent.util");
   function isPresto() {
     return util.matchUserAgent("Presto");
   }
@@ -56,13 +62,7 @@ goog.loadModule(function(exports) {
     });
     return pair && pair[1] || "";
   }
-  "use strict";
-  goog.module("goog.labs.userAgent.engine");
-  goog.module.declareLegacyNamespace();
-  const googArray = goog.require("goog.array");
-  const googString = goog.require("goog.string.internal");
-  const util = goog.require("goog.labs.userAgent.util");
-  exports = {getVersion, isEdge, isGecko, isPresto, isTrident, isVersionOrHigher, isWebKit};
+  exports = {getVersion, isEdge, isGecko, isPresto, isTrident, isVersionOrHigher, isWebKit,};
   return exports;
 });
 

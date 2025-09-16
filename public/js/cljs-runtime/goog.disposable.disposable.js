@@ -19,8 +19,7 @@ goog.Disposable.INCLUDE_STACK_ON_CREATION = goog.define("goog.Disposable.INCLUDE
 goog.Disposable.instances_ = {};
 goog.Disposable.getUndisposedObjects = function() {
   var ret = [];
-  var id;
-  for (id in goog.Disposable.instances_) {
+  for (var id in goog.Disposable.instances_) {
     if (goog.Disposable.instances_.hasOwnProperty(id)) {
       ret.push(goog.Disposable.instances_[Number(id)]);
     }
@@ -67,7 +66,7 @@ goog.Disposable.prototype.addOnDisposeCallback = function(callback, opt_scope) {
 };
 goog.Disposable.prototype.disposeInternal = function() {
   if (this.onDisposeCallbacks_) {
-    for (; this.onDisposeCallbacks_.length;) {
+    while (this.onDisposeCallbacks_.length) {
       this.onDisposeCallbacks_.shift()();
     }
   }

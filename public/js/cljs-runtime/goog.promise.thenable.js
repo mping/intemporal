@@ -1,10 +1,10 @@
 goog.loadModule(function(exports) {
-  function Thenable() {
-  }
   "use strict";
   goog.module("goog.Thenable");
   goog.module.declareLegacyNamespace();
   const GoogPromise = goog.requireType("goog.Promise");
+  function Thenable() {
+  }
   Thenable.prototype.then = function(opt_onFulfilled, opt_onRejected, opt_context) {
   };
   Thenable.IMPLEMENTED_BY_PROP = "$goog_Thenable";

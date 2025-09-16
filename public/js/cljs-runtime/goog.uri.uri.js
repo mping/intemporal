@@ -328,8 +328,7 @@ goog.Uri.removeDotSegments = function(path) {
     var leadingSlash = goog.string.startsWith(path, "/");
     var segments = path.split("/");
     var out = [];
-    var pos = 0;
-    for (; pos < segments.length;) {
+    for (var pos = 0; pos < segments.length;) {
       var segment = segments[pos++];
       if (segment == ".") {
         if (leadingSlash && pos == segments.length) {
@@ -408,8 +407,7 @@ goog.Uri.QueryData.createFromMap = function(map, opt_ignoreCase) {
   }
   var queryData = new goog.Uri.QueryData(null, opt_ignoreCase);
   var values = goog.structs.getValues(map);
-  var i = 0;
-  for (; i < keys.length; i++) {
+  for (var i = 0; i < keys.length; i++) {
     var key = keys[i];
     var value = values[i];
     if (!Array.isArray(value)) {
@@ -425,8 +423,7 @@ goog.Uri.QueryData.createFromKeysValues = function(keys, values, opt_ignoreCase)
     throw new Error("Mismatched lengths for keys/values");
   }
   var queryData = new goog.Uri.QueryData(null, opt_ignoreCase);
-  var i = 0;
-  for (; i < keys.length; i++) {
+  for (var i = 0; i < keys.length; i++) {
     queryData.add(keys[i], values[i]);
   }
   return queryData;
@@ -546,16 +543,14 @@ goog.Uri.QueryData.prototype.toString = function() {
   }
   const sb = [];
   const keys = Array.from(this.keyMap_.keys());
-  var i = 0;
-  for (; i < keys.length; i++) {
+  for (var i = 0; i < keys.length; i++) {
     const key = keys[i];
     const encodedKey = goog.string.urlEncode(key);
     const val = this.getValues(key);
-    var j = 0;
-    for (; j < val.length; j++) {
+    for (var j = 0; j < val.length; j++) {
       var param = encodedKey;
       if (val[j] !== "") {
-        param = param + ("\x3d" + goog.string.urlEncode(val[j]));
+        param += "\x3d" + goog.string.urlEncode(val[j]);
       }
       sb.push(param);
     }
@@ -609,8 +604,7 @@ goog.Uri.QueryData.prototype.setIgnoreCase = function(ignoreCase) {
   this.ignoreCase_ = ignoreCase;
 };
 goog.Uri.QueryData.prototype.extend = function(var_args) {
-  var i = 0;
-  for (; i < arguments.length; i++) {
+  for (var i = 0; i < arguments.length; i++) {
     var data = arguments[i];
     goog.structs.forEach(data, function(value, key) {
       this.add(key, value);

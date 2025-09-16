@@ -42,8 +42,8 @@ return new cljs.core.PersistentVector(null, 2, 5, cljs.core.PersistentVector.EMP
 
 (shadow.remote.runtime.writer.LimitWriter.cljs$lang$ctorStr = "shadow.remote.runtime.writer/LimitWriter");
 
-(shadow.remote.runtime.writer.LimitWriter.cljs$lang$ctorPrWriter = (function (this__5287__auto__,writer__5288__auto__,opt__5289__auto__){
-return cljs.core._write(writer__5288__auto__,"shadow.remote.runtime.writer/LimitWriter");
+(shadow.remote.runtime.writer.LimitWriter.cljs$lang$ctorPrWriter = (function (this__5310__auto__,writer__5311__auto__,opt__5312__auto__){
+return cljs.core._write(writer__5311__auto__,"shadow.remote.runtime.writer/LimitWriter");
 }));
 
 /**
@@ -59,7 +59,7 @@ var writer = (new shadow.remote.runtime.writer.LimitWriter(sb,limit));
 try{cljs.core.pr_writer(obj,writer,cljs.core.pr_opts());
 
 return ["0,",cljs.core.str.cljs$core$IFn$_invoke$arity$1(sb.toString())].join('');
-}catch (e28755){var e = e28755;
+}catch (e30792){var e = e30792;
 if((!(cljs.core.keyword_identical_QMARK_(new cljs.core.Keyword("shadow.remote.runtime.writer","limit-reached","shadow.remote.runtime.writer/limit-reached",1304350996),new cljs.core.Keyword(null,"tag","tag",-1290361223).cljs$core$IFn$_invoke$arity$1(cljs.core.ex_data(e)))))){
 throw e;
 } else {

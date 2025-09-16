@@ -1,9 +1,4 @@
 goog.loadModule(function(exports) {
-  function getCachedIntValue_(value) {
-    return reflect.cache(IntCache_, value, function(val) {
-      return new Long(val, val < 0 ? -1 : 0);
-    });
-  }
   "use strict";
   goog.module("goog.math.Long");
   goog.module.declareLegacyNamespace();
@@ -80,8 +75,7 @@ goog.loadModule(function(exports) {
         }
       } else {
         var val = this.high_ != 0 ? this.high_ : this.low_;
-        var bit = 31;
-        for (; bit > 0; bit--) {
+        for (var bit = 31; bit > 0; bit--) {
           if ((val & 1 << bit) != 0) {
             break;
           }
@@ -143,21 +137,18 @@ goog.loadModule(function(exports) {
       var b32 = other.high_ & 65535;
       var b16 = other.low_ >>> 16;
       var b00 = other.low_ & 65535;
-      var c48 = 0;
-      var c32 = 0;
-      var c16 = 0;
-      var c00 = 0;
-      c00 = c00 + (a00 + b00);
-      c16 = c16 + (c00 >>> 16);
-      c00 = c00 & 65535;
-      c16 = c16 + (a16 + b16);
-      c32 = c32 + (c16 >>> 16);
-      c16 = c16 & 65535;
-      c32 = c32 + (a32 + b32);
-      c48 = c48 + (c32 >>> 16);
-      c32 = c32 & 65535;
-      c48 = c48 + (a48 + b48);
-      c48 = c48 & 65535;
+      var c48 = 0, c32 = 0, c16 = 0, c00 = 0;
+      c00 += a00 + b00;
+      c16 += c00 >>> 16;
+      c00 &= 65535;
+      c16 += a16 + b16;
+      c32 += c16 >>> 16;
+      c16 &= 65535;
+      c32 += a32 + b32;
+      c48 += c32 >>> 16;
+      c32 &= 65535;
+      c48 += a48 + b48;
+      c48 &= 65535;
       return Long.fromBits(c16 << 16 | c00, c48 << 16 | c32);
     }
     subtract(other) {
@@ -178,30 +169,27 @@ goog.loadModule(function(exports) {
       var b32 = other.high_ & 65535;
       var b16 = other.low_ >>> 16;
       var b00 = other.low_ & 65535;
-      var c48 = 0;
-      var c32 = 0;
-      var c16 = 0;
-      var c00 = 0;
-      c00 = c00 + a00 * b00;
-      c16 = c16 + (c00 >>> 16);
-      c00 = c00 & 65535;
-      c16 = c16 + a16 * b00;
-      c32 = c32 + (c16 >>> 16);
-      c16 = c16 & 65535;
-      c16 = c16 + a00 * b16;
-      c32 = c32 + (c16 >>> 16);
-      c16 = c16 & 65535;
-      c32 = c32 + a32 * b00;
-      c48 = c48 + (c32 >>> 16);
-      c32 = c32 & 65535;
-      c32 = c32 + a16 * b16;
-      c48 = c48 + (c32 >>> 16);
-      c32 = c32 & 65535;
-      c32 = c32 + a00 * b32;
-      c48 = c48 + (c32 >>> 16);
-      c32 = c32 & 65535;
-      c48 = c48 + (a48 * b00 + a32 * b16 + a16 * b32 + a00 * b48);
-      c48 = c48 & 65535;
+      var c48 = 0, c32 = 0, c16 = 0, c00 = 0;
+      c00 += a00 * b00;
+      c16 += c00 >>> 16;
+      c00 &= 65535;
+      c16 += a16 * b00;
+      c32 += c16 >>> 16;
+      c16 &= 65535;
+      c16 += a00 * b16;
+      c32 += c16 >>> 16;
+      c16 &= 65535;
+      c32 += a32 * b00;
+      c48 += c32 >>> 16;
+      c32 &= 65535;
+      c32 += a16 * b16;
+      c48 += c32 >>> 16;
+      c32 &= 65535;
+      c32 += a00 * b32;
+      c48 += c32 >>> 16;
+      c32 &= 65535;
+      c48 += a48 * b00 + a32 * b16 + a16 * b32 + a00 * b48;
+      c48 &= 65535;
       return Long.fromBits(c16 << 16 | c00, c48 << 16 | c32);
     }
     div(other) {
@@ -240,15 +228,15 @@ goog.loadModule(function(exports) {
         return this.div(other.negate()).negate();
       }
       var res = Long.getZero();
-      rem = this;
-      for (; rem.greaterThanOrEqual(other);) {
-        approx = Math.max(1, Math.floor(rem.toNumber() / other.toNumber()));
+      var rem = this;
+      while (rem.greaterThanOrEqual(other)) {
+        var approx = Math.max(1, Math.floor(rem.toNumber() / other.toNumber()));
         var log2 = Math.ceil(Math.log(approx) / Math.LN2);
         var delta = log2 <= 48 ? 1 : Math.pow(2, log2 - 48);
         var approxRes = Long.fromNumber(approx);
         var approxRem = approxRes.multiply(other);
-        for (; approxRem.isNegative() || approxRem.greaterThan(rem);) {
-          approx = approx - delta;
+        while (approxRem.isNegative() || approxRem.greaterThan(rem)) {
+          approx -= delta;
           approxRes = Long.fromNumber(approx);
           approxRem = approxRes.multiply(other);
         }
@@ -276,7 +264,7 @@ goog.loadModule(function(exports) {
       return Long.fromBits(this.low_ ^ other.low_, this.high_ ^ other.high_);
     }
     shiftLeft(numBits) {
-      numBits = numBits & 63;
+      numBits &= 63;
       if (numBits == 0) {
         return this;
       } else {
@@ -290,7 +278,7 @@ goog.loadModule(function(exports) {
       }
     }
     shiftRight(numBits) {
-      numBits = numBits & 63;
+      numBits &= 63;
       if (numBits == 0) {
         return this;
       } else {
@@ -304,7 +292,7 @@ goog.loadModule(function(exports) {
       }
     }
     shiftRightUnsigned(numBits) {
-      numBits = numBits & 63;
+      numBits &= 63;
       if (numBits == 0) {
         return this;
       } else {
@@ -366,8 +354,7 @@ goog.loadModule(function(exports) {
       }
       var radixToPower = Long.fromNumber(Math.pow(radix, 8));
       var result = Long.getZero();
-      var i = 0;
-      for (; i < str.length; i = i + 8) {
+      for (var i = 0; i < str.length; i += 8) {
         var size = Math.min(8, str.length - i);
         var value = parseInt(str.substring(i, i + size), radix);
         if (size < 8) {
@@ -415,6 +402,11 @@ goog.loadModule(function(exports) {
   }
   exports = Long;
   const IntCache_ = {};
+  function getCachedIntValue_(value) {
+    return reflect.cache(IntCache_, value, function(val) {
+      return new Long(val, val < 0 ? -1 : 0);
+    });
+  }
   const MAX_VALUE_FOR_RADIX_ = ["", "", "111111111111111111111111111111111111111111111111111111111111111", "2021110011022210012102010021220101220221", "13333333333333333333333333333333", "1104332401304422434310311212", "1540241003031030222122211", "22341010611245052052300", "777777777777777777777", "67404283172107811827", "9223372036854775807", "1728002635214590697", "41a792678515120367", "10b269549075433c37", "4340724c6c71dc7a7", "160e2ad3246366807", "7fffffffffffffff", "33d3d8307b214008", "16agh595df825fa7", 
   "ba643dci0ffeehh", "5cbfjia3fh26ja7", "2heiciiie82dh97", "1adaibb21dckfa7", "i6k448cf4192c2", "acd772jnc9l0l7", "64ie1focnn5g77", "3igoecjbmca687", "27c48l5b37oaop", "1bk39f3ah3dmq7", "q1se8f0m04isb", "hajppbc1fc207", "bm03i95hia437", "7vvvvvvvvvvvv", "5hg4ck9jd4u37", "3tdtk1v8j6tpp", "2pijmikexrxp7", "1y2p0ij32e8e7"];
   const MIN_VALUE_FOR_RADIX_ = ["", "", "-1000000000000000000000000000000000000000000000000000000000000000", "-2021110011022210012102010021220101220222", "-20000000000000000000000000000000", "-1104332401304422434310311213", "-1540241003031030222122212", "-22341010611245052052301", "-1000000000000000000000", "-67404283172107811828", "-9223372036854775808", "-1728002635214590698", "-41a792678515120368", "-10b269549075433c38", "-4340724c6c71dc7a8", "-160e2ad3246366808", "-8000000000000000", "-33d3d8307b214009", 

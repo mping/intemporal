@@ -49,9 +49,8 @@ goog.dom.classlist.addAll = function(element, classesToAdd) {
     classMap[className] = true;
   });
   var newClassName = "";
-  var className;
-  for (className in classMap) {
-    newClassName = newClassName + (newClassName.length > 0 ? " " + className : className);
+  for (var className in classMap) {
+    newClassName += newClassName.length > 0 ? " " + className : className;
   }
   goog.dom.classlist.set(element, newClassName);
 };

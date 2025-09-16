@@ -1,17 +1,17 @@
 goog.loadModule(function(exports) {
-  function getIterator(iterable) {
-    return iterable[goog.global.Symbol.iterator]();
-  }
-  function forEach(iterator, f) {
-    let result;
-    for (; !(result = iterator.next()).done;) {
-      f(result.value);
-    }
-  }
   "use strict";
   goog.module("goog.collections.iters");
   goog.module.declareLegacyNamespace();
+  function getIterator(iterable) {
+    return iterable[goog.global.Symbol.iterator]();
+  }
   exports.getIterator = getIterator;
+  function forEach(iterator, f) {
+    let result;
+    while (!(result = iterator.next()).done) {
+      f(result.value);
+    }
+  }
   exports.forEach = forEach;
   class MapIterator {
     constructor(childIter, mapFn) {
@@ -23,7 +23,7 @@ goog.loadModule(function(exports) {
     }
     next() {
       const childResult = this.childIterator_.next();
-      return {value:childResult.done ? undefined : this.mapFn_.call(undefined, childResult.value), done:childResult.done};
+      return {value:childResult.done ? undefined : this.mapFn_.call(undefined, childResult.value), done:childResult.done,};
     }
   }
   exports.map = function(iterable, f) {
@@ -38,7 +38,7 @@ goog.loadModule(function(exports) {
       return this;
     }
     next() {
-      for (; true;) {
+      while (true) {
         const childResult = this.childIter_.next();
         if (childResult.done) {
           return {done:true, value:undefined};
@@ -62,7 +62,7 @@ goog.loadModule(function(exports) {
       return this;
     }
     next() {
-      for (; this.iterIndex_ < this.iterators_.length;) {
+      while (this.iterIndex_ < this.iterators_.length) {
         const result = this.iterators_[this.iterIndex_].next();
         if (!result.done) {
           return result;
@@ -77,9 +77,7 @@ goog.loadModule(function(exports) {
   };
   exports.toArray = function(iterator) {
     const arr = [];
-    forEach(iterator, e => {
-      return arr.push(e);
-    });
+    forEach(iterator, e => arr.push(e));
     return arr;
   };
   return exports;

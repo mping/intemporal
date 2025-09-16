@@ -24,16 +24,15 @@ goog.debug.expose = function(obj, opt_showFn) {
     return "NULL";
   }
   var str = [];
-  var x;
-  for (x in obj) {
+  for (var x in obj) {
     if (!opt_showFn && typeof obj[x] === "function") {
       continue;
     }
     var s = x + " \x3d ";
     try {
-      s = s + obj[x];
+      s += obj[x];
     } catch (e) {
-      s = s + ("*** " + e + " ***");
+      s += "*** " + e + " ***";
     }
     str.push(s);
   }
@@ -67,8 +66,7 @@ goog.debug.deepExpose = function(obj, opt_showFn) {
         } else {
           ancestorUids[uid] = true;
           str.push("{");
-          var x;
-          for (x in obj) {
+          for (var x in obj) {
             if (!opt_showFn && typeof obj[x] === "function") {
               continue;
             }
@@ -88,16 +86,14 @@ goog.debug.deepExpose = function(obj, opt_showFn) {
     }
   };
   helper(obj, "");
-  var i = 0;
-  for (; i < uidsToCleanup.length; i++) {
+  for (var i = 0; i < uidsToCleanup.length; i++) {
     goog.removeUid(uidsToCleanup[i]);
   }
   return str.join("");
 };
 goog.debug.exposeArray = function(arr) {
   var str = [];
-  var i = 0;
-  for (; i < arr.length; i++) {
+  for (var i = 0; i < arr.length; i++) {
     if (Array.isArray(arr[i])) {
       str.push(goog.debug.exposeArray(arr[i]));
     } else {
@@ -114,8 +110,7 @@ goog.debug.normalizeErrorObject = function(err) {
   if (typeof err === "string") {
     return {"message":err, "name":"Unknown error", "lineNumber":"Not available", "fileName":href, "stack":"Not available"};
   }
-  var lineNumber;
-  var fileName;
+  var lineNumber, fileName;
   var threwError = false;
   try {
     lineNumber = err.lineNumber || err.line || "Not available";
@@ -146,7 +141,7 @@ goog.debug.normalizeErrorObject = function(err) {
         message = "Unknown Error of unknown type";
       }
       if (typeof err.toString === "function" && Object.prototype.toString !== err.toString) {
-        message = message + (": " + err.toString());
+        message += ": " + err.toString();
       }
     }
     return {"message":message, "name":err.name || "UnknownError", "lineNumber":lineNumber, "fileName":fileName, "stack":stack || "Not available"};
@@ -162,11 +157,11 @@ goog.debug.serializeErrorStack_ = function(e, seen) {
   var stack = e["stack"] || "";
   var cause = e.cause;
   if (cause && !seen[goog.debug.serializeErrorAsKey_(cause)]) {
-    stack = stack + "\nCaused by: ";
+    stack += "\nCaused by: ";
     if (!cause.stack || cause.stack.indexOf(cause.toString()) != 0) {
-      stack = stack + (typeof cause === "string" ? cause : cause.message + "\n");
+      stack += typeof cause === "string" ? cause : cause.message + "\n";
     }
-    stack = stack + goog.debug.serializeErrorStack_(cause, seen);
+    stack += goog.debug.serializeErrorStack_(cause, seen);
   }
   return stack;
 };
@@ -192,7 +187,7 @@ goog.debug.enhanceError = function(err, opt_message) {
   }
   if (opt_message) {
     var x = 0;
-    for (; error["message" + x];) {
+    while (error["message" + x]) {
       ++x;
     }
     error["message" + x] = String(opt_message);
@@ -202,8 +197,7 @@ goog.debug.enhanceError = function(err, opt_message) {
 goog.debug.enhanceErrorWithContext = function(err, opt_context) {
   var error = goog.debug.enhanceError(err);
   if (opt_context) {
-    var key;
-    for (key in opt_context) {
+    for (var key in opt_context) {
       goog.debug.errorcontext.addErrorContext(error, key, opt_context[key]);
     }
   }
@@ -219,7 +213,7 @@ goog.debug.getStacktraceSimple = function(opt_depth) {
   var sb = [];
   var fn = arguments.callee.caller;
   var depth = 0;
-  for (; fn && (!opt_depth || depth < opt_depth);) {
+  while (fn && (!opt_depth || depth < opt_depth)) {
     sb.push(goog.debug.getFunctionName(fn));
     sb.push("()\n");
     try {
@@ -278,8 +272,7 @@ goog.debug.getStacktraceHelper_ = function(fn, visited) {
   } else if (fn && visited.length < goog.debug.MAX_STACK_DEPTH) {
     sb.push(goog.debug.getFunctionName(fn) + "(");
     var args = fn.arguments;
-    var i = 0;
-    for (; args && i < args.length; i++) {
+    for (var i = 0; args && i < args.length; i++) {
       if (i > 0) {
         sb.push(", ");
       }

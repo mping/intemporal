@@ -23,8 +23,7 @@ goog.structs.getValues = function(col) {
   if (goog.isArrayLike(col)) {
     var rv = [];
     var l = col.length;
-    var i = 0;
-    for (; i < l; i++) {
+    for (var i = 0; i < l; i++) {
       rv.push(col[i]);
     }
     return rv;
@@ -47,8 +46,7 @@ goog.structs.getKeys = function(col) {
   if (goog.isArrayLike(col) || typeof col === "string") {
     var rv = [];
     var l = col.length;
-    var i = 0;
-    for (; i < l; i++) {
+    for (var i = 0; i < l; i++) {
       rv.push(i);
     }
     return rv;
@@ -94,8 +92,7 @@ goog.structs.forEach = function(col, f, opt_obj) {
     var keys = goog.structs.getKeys(col);
     var values = goog.structs.getValues(col);
     var l = values.length;
-    var i = 0;
-    for (; i < l; i++) {
+    for (var i = 0; i < l; i++) {
       f.call(opt_obj, values[i], keys && keys[i], col);
     }
   }
@@ -113,16 +110,14 @@ goog.structs.filter = function(col, f, opt_obj) {
   var l = values.length;
   if (keys) {
     rv = {};
-    var i = 0;
-    for (; i < l; i++) {
+    for (var i = 0; i < l; i++) {
       if (f.call(opt_obj, values[i], keys[i], col)) {
         rv[keys[i]] = values[i];
       }
     }
   } else {
     rv = [];
-    i = 0;
-    for (; i < l; i++) {
+    for (var i = 0; i < l; i++) {
       if (f.call(opt_obj, values[i], undefined, col)) {
         rv.push(values[i]);
       }
@@ -143,14 +138,12 @@ goog.structs.map = function(col, f, opt_obj) {
   var l = values.length;
   if (keys) {
     rv = {};
-    var i = 0;
-    for (; i < l; i++) {
+    for (var i = 0; i < l; i++) {
       rv[keys[i]] = f.call(opt_obj, values[i], keys[i], col);
     }
   } else {
     rv = [];
-    i = 0;
-    for (; i < l; i++) {
+    for (var i = 0; i < l; i++) {
       rv[i] = f.call(opt_obj, values[i], undefined, col);
     }
   }
@@ -166,8 +159,7 @@ goog.structs.some = function(col, f, opt_obj) {
   var keys = goog.structs.getKeys(col);
   var values = goog.structs.getValues(col);
   var l = values.length;
-  var i = 0;
-  for (; i < l; i++) {
+  for (var i = 0; i < l; i++) {
     if (f.call(opt_obj, values[i], keys && keys[i], col)) {
       return true;
     }
@@ -184,8 +176,7 @@ goog.structs.every = function(col, f, opt_obj) {
   var keys = goog.structs.getKeys(col);
   var values = goog.structs.getValues(col);
   var l = values.length;
-  var i = 0;
-  for (; i < l; i++) {
+  for (var i = 0; i < l; i++) {
     if (!f.call(opt_obj, values[i], keys && keys[i], col)) {
       return false;
     }

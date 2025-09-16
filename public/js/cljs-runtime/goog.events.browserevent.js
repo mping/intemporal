@@ -36,7 +36,7 @@ goog.events.BrowserEvent = function(opt_e, opt_currentTarget) {
 };
 goog.inherits(goog.events.BrowserEvent, goog.events.Event);
 goog.events.BrowserEvent.USE_LAYER_XY_AS_OFFSET_XY = goog.define("goog.events.BrowserEvent.USE_LAYER_XY_AS_OFFSET_XY", false);
-goog.events.BrowserEvent.MouseButton = {LEFT:0, MIDDLE:1, RIGHT:2, BACK:3, FORWARD:4};
+goog.events.BrowserEvent.MouseButton = {LEFT:0, MIDDLE:1, RIGHT:2, BACK:3, FORWARD:4,};
 goog.events.BrowserEvent.PointerType = {MOUSE:"mouse", PEN:"pen", TOUCH:"touch"};
 goog.events.BrowserEvent.IEButtonMap = goog.debug.freeze([1, 4, 2]);
 goog.events.BrowserEvent.IE_BUTTON_MAP = goog.events.BrowserEvent.IEButtonMap;

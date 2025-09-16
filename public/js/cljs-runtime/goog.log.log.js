@@ -8,7 +8,7 @@ goog.require("goog.debug");
 goog.log.Loggable;
 goog.log.ENABLED = goog.define("goog.log.ENABLED", goog.debug.LOGGING_ENABLED);
 goog.log.ROOT_LOGGER_NAME = "";
-const goog$log$log$classdecl$var0 = class {
+goog.log.Level = class Level {
   constructor(name, value) {
     this.name = name;
     this.value = value;
@@ -17,7 +17,6 @@ const goog$log$log$classdecl$var0 = class {
     return this.name;
   }
 };
-goog.log.Level = goog$log$log$classdecl$var0;
 goog.log.Level.OFF = new goog.log.Level("OFF", Infinity);
 goog.log.Level.SHOUT = new goog.log.Level("SHOUT", 1200);
 goog.log.Level.SEVERE = new goog.log.Level("SEVERE", 1000);
@@ -58,13 +57,12 @@ goog.log.Level.getPredefinedLevelByValue = function(value) {
   }
   return null;
 };
-const goog$log$log$classdecl$var1 = class {
+goog.log.Logger = class Logger {
   getName() {
   }
 };
-goog.log.Logger = goog$log$log$classdecl$var1;
 goog.log.Logger.Level = goog.log.Level;
-const goog$log$log$classdecl$var2 = class {
+goog.log.LogBuffer = class LogBuffer {
   constructor(capacity) {
     this.capacity_ = typeof capacity === "number" ? capacity : goog.log.LogBuffer.CAPACITY;
     this.buffer_;
@@ -110,7 +108,6 @@ const goog$log$log$classdecl$var2 = class {
     this.isFull_ = false;
   }
 };
-goog.log.LogBuffer = goog$log$log$classdecl$var2;
 goog.log.LogBuffer.instance_;
 goog.log.LogBuffer.CAPACITY = goog.define("goog.debug.LogBuffer.CAPACITY", 0);
 goog.log.LogBuffer.getInstance = function() {
@@ -122,7 +119,7 @@ goog.log.LogBuffer.getInstance = function() {
 goog.log.LogBuffer.isBufferingEnabled = function() {
   return goog.log.LogBuffer.getInstance().isBufferingEnabled();
 };
-const goog$log$log$classdecl$var3 = class {
+goog.log.LogRecord = class LogRecord {
   constructor(level, msg, loggerName, time, sequenceNumber) {
     this.level_;
     this.loggerName_;
@@ -174,18 +171,15 @@ const goog$log$log$classdecl$var3 = class {
     return this.sequenceNumber_;
   }
 };
-goog.log.LogRecord = goog$log$log$classdecl$var3;
 goog.log.LogRecord.nextSequenceNumber_ = 0;
 goog.log.LogRecordHandler;
-const goog$log$log$classdecl$var4 = class {
+goog.log.LogRegistryEntry_ = class LogRegistryEntry_ {
   constructor(name, parent = null) {
     this.level = null;
     this.handlers = [];
     this.parent = parent || null;
     this.children = [];
-    this.logger = {getName:() => {
-      return name;
-    }};
+    this.logger = {getName:() => name};
   }
   getEffectiveLevel() {
     if (this.level) {
@@ -198,7 +192,7 @@ const goog$log$log$classdecl$var4 = class {
   }
   publish(logRecord) {
     let target = this;
-    for (; target;) {
+    while (target) {
       target.handlers.forEach(handler => {
         handler(logRecord);
       });
@@ -206,8 +200,7 @@ const goog$log$log$classdecl$var4 = class {
     }
   }
 };
-goog.log.LogRegistryEntry_ = goog$log$log$classdecl$var4;
-const goog$log$log$classdecl$var5 = class {
+goog.log.LogRegistry_ = class LogRegistry_ {
   constructor() {
     this.entries = {};
     const rootLogRegistryEntry = new goog.log.LogRegistryEntry_(goog.log.ROOT_LOGGER_NAME);
@@ -235,12 +228,9 @@ const goog$log$log$classdecl$var5 = class {
     }
   }
   getAllLoggers() {
-    return Object.keys(this.entries).map(loggerName => {
-      return this.entries[loggerName].logger;
-    });
+    return Object.keys(this.entries).map(loggerName => this.entries[loggerName].logger);
   }
 };
-goog.log.LogRegistry_ = goog$log$log$classdecl$var5;
 goog.log.LogRegistry_.getInstance = function() {
   if (!goog.log.LogRegistry_.instance_) {
     goog.log.LogRegistry_.instance_ = new goog.log.LogRegistry_();

@@ -7,7 +7,10 @@ goog.require("goog.string.TypedString");
 goog.require("goog.string.internal");
 goog.html.SafeUrl = class {
   constructor(value, token) {
-    this.privateDoNotAccessOrElseSafeUrlWrappedValue_ = token === goog.html.SafeUrl.CONSTRUCTOR_TOKEN_PRIVATE_ ? value : "";
+    if (goog.DEBUG && token !== goog.html.SafeUrl.CONSTRUCTOR_TOKEN_PRIVATE_) {
+      throw Error("SafeUrl is not meant to be built directly");
+    }
+    this.privateDoNotAccessOrElseSafeUrlWrappedValue_ = value;
   }
   toString() {
     return this.privateDoNotAccessOrElseSafeUrlWrappedValue_.toString();
@@ -27,7 +30,11 @@ goog.html.SafeUrl.unwrap = function(safeUrl) {
   }
 };
 goog.html.SafeUrl.fromConstant = function(url) {
-  return goog.html.SafeUrl.createSafeUrlSecurityPrivateDoNotAccessOrElse(goog.string.Const.unwrap(url));
+  const str = goog.string.Const.unwrap(url);
+  if (goog.DEBUG && goog.html.SafeUrl.extractScheme(str) === "javascript:") {
+    throw Error("Building a SafeUrl with a javascript scheme is not supported");
+  }
+  return goog.html.SafeUrl.createSafeUrlSecurityPrivateDoNotAccessOrElse(str);
 };
 goog.html.SAFE_MIME_TYPE_PATTERN_ = new RegExp("^(?:audio/(?:3gpp2|3gpp|aac|L16|midi|mp3|mp4|mpeg|oga|ogg|opus|x-m4a|x-matroska|x-wav|wav|webm)|" + "font/\\w+|" + "image/(?:bmp|gif|jpeg|jpg|png|tiff|webp|x-icon|heic|heif)|" + "video/(?:mpeg|mp4|ogg|webm|quicktime|x-matroska))" + '(?:;\\w+\x3d(?:\\w+|"[\\w;,\x3d ]+"))*$', "i");
 goog.html.SafeUrl.isSafeMimeType = function(mimeType) {
@@ -154,7 +161,6 @@ goog.html.SafeUrl.fromTrustedResourceUrl = function(trustedResourceUrl) {
   return goog.html.SafeUrl.createSafeUrlSecurityPrivateDoNotAccessOrElse(goog.html.TrustedResourceUrl.unwrap(trustedResourceUrl));
 };
 goog.html.SAFE_URL_PATTERN_ = /^(?:(?:https?|mailto|ftp):|[^:/?#]*(?:[/?#]|$))/i;
-goog.html.SafeUrl.SAFE_URL_PATTERN = goog.html.SAFE_URL_PATTERN_;
 goog.html.SafeUrl.trySanitize = function(url) {
   if (url instanceof goog.html.SafeUrl) {
     return url;

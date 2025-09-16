@@ -66,9 +66,8 @@
 
 
 (defn render-tables! [the-store]
-  (let [tasks  (vals @(::s/task-store the-store))
-        events (->> (vals @(::s/history-store the-store))
-                    (flatten)
+  (let [tasks (s/list-tasks mstore)
+        events (->> (s/list-events mstore)
                     (sort-by :id))]
     (render-table! "tasks" tasks)
     (render-table! "events" events)
@@ -86,7 +85,7 @@
         (p/then (fn [r]
                   (js/console.log "res" r)
                   (set-results! (prn-str r))
-                  (render-tables! @mstore)))
+                  (render-tables! mstore)))
 
         (p/catch (fn [r]
                    (js/console.error "error" r)

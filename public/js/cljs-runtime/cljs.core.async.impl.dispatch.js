@@ -8,16 +8,16 @@ cljs.core.async.impl.dispatch.process_messages = (function cljs$core$async$impl$
 
 (cljs.core.async.impl.dispatch.queued_QMARK_ = false);
 
-var count_28968 = (0);
+var count_30188 = (0);
 while(true){
-var m_28969 = cljs.core.async.impl.dispatch.tasks.pop();
-if((m_28969 == null)){
+var m_30189 = cljs.core.async.impl.dispatch.tasks.pop();
+if((m_30189 == null)){
 } else {
-(m_28969.cljs$core$IFn$_invoke$arity$0 ? m_28969.cljs$core$IFn$_invoke$arity$0() : m_28969.call(null, ));
+(m_30189.cljs$core$IFn$_invoke$arity$0 ? m_30189.cljs$core$IFn$_invoke$arity$0() : m_30189.call(null));
 
-if((count_28968 < cljs.core.async.impl.dispatch.TASK_BATCH_SIZE)){
-var G__28970 = (count_28968 + (1));
-count_28968 = G__28970;
+if((count_30188 < cljs.core.async.impl.dispatch.TASK_BATCH_SIZE)){
+var G__30190 = (count_30188 + (1));
+count_30188 = G__30190;
 continue;
 } else {
 }
@@ -28,7 +28,7 @@ break;
 (cljs.core.async.impl.dispatch.running_QMARK_ = false);
 
 if((cljs.core.async.impl.dispatch.tasks.length > (0))){
-return (cljs.core.async.impl.dispatch.queue_dispatcher.cljs$core$IFn$_invoke$arity$0 ? cljs.core.async.impl.dispatch.queue_dispatcher.cljs$core$IFn$_invoke$arity$0() : cljs.core.async.impl.dispatch.queue_dispatcher.call(null, ));
+return (cljs.core.async.impl.dispatch.queue_dispatcher.cljs$core$IFn$_invoke$arity$0 ? cljs.core.async.impl.dispatch.queue_dispatcher.cljs$core$IFn$_invoke$arity$0() : cljs.core.async.impl.dispatch.queue_dispatcher.call(null));
 } else {
 return null;
 }

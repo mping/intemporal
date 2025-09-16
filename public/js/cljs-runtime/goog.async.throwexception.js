@@ -1,12 +1,12 @@
 goog.loadModule(function(exports) {
+  "use strict";
+  goog.module("goog.async.throwException");
+  goog.module.declareLegacyNamespace();
   function throwException(exception) {
     goog.global.setTimeout(() => {
       throw exception;
     }, 0);
   }
-  "use strict";
-  goog.module("goog.async.throwException");
-  goog.module.declareLegacyNamespace();
   exports = throwException;
   return exports;
 });

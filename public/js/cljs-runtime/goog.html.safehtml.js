@@ -1,41 +1,4 @@
 goog.loadModule(function(exports) {
-  function getAttrNameAndValue(tagName, name, value) {
-    if (value instanceof Const) {
-      value = Const.unwrap(value);
-    } else if (name.toLowerCase() == "style") {
-      if (SafeHtml.SUPPORT_STYLE_ATTRIBUTE) {
-        value = getStyleValue(value);
-      } else {
-        throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? 'Attribute "style" not supported.' : "");
-      }
-    } else if (/^on/i.test(name)) {
-      throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? `Attribute "${name}` + '" requires goog.string.Const value, "' + value + '" given.' : "");
-    } else if (name.toLowerCase() in URL_ATTRIBUTES) {
-      if (value instanceof TrustedResourceUrl) {
-        value = TrustedResourceUrl.unwrap(value);
-      } else if (value instanceof SafeUrl) {
-        value = SafeUrl.unwrap(value);
-      } else if (typeof value === "string") {
-        value = SafeUrl.sanitize(value).getTypedStringValue();
-      } else {
-        throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? `Attribute "${name}" on tag "${tagName}` + '" requires goog.html.SafeUrl, goog.string.Const, or' + ' string, value "' + value + '" given.' : "");
-      }
-    }
-    if (value.implementsGoogStringTypedString) {
-      value = value.getTypedStringValue();
-    }
-    asserts.assert(typeof value === "string" || typeof value === "number", "String or number value expected, got " + typeof value + " with value: " + value);
-    return `${name}="` + internal.htmlEscape(String(value)) + '"';
-  }
-  function getStyleValue(value) {
-    if (!goog.isObject(value)) {
-      throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? 'The "style" attribute requires goog.html.SafeStyle or map ' + "of style properties, " + typeof value + " given: " + value : "");
-    }
-    if (!(value instanceof SafeStyle)) {
-      value = SafeStyle.create(value);
-    }
-    return SafeStyle.unwrap(value);
-  }
   "use strict";
   goog.module("goog.html.SafeHtml");
   goog.module.declareLegacyNamespace();
@@ -57,7 +20,10 @@ goog.loadModule(function(exports) {
   const CONSTRUCTOR_TOKEN_PRIVATE = {};
   class SafeHtml {
     constructor(value, token) {
-      this.privateDoNotAccessOrElseSafeHtmlWrappedValue_ = token === CONSTRUCTOR_TOKEN_PRIVATE ? value : "";
+      if (goog.DEBUG && token !== CONSTRUCTOR_TOKEN_PRIVATE) {
+        throw Error("SafeHtml is not meant to be built directly");
+      }
+      this.privateDoNotAccessOrElseSafeHtmlWrappedValue_ = value;
       this.implementsGoogStringTypedString = true;
     }
     getTypedStringValue() {
@@ -167,7 +133,7 @@ goog.loadModule(function(exports) {
       let content = "";
       script = googArray.concat(script);
       for (let i = 0; i < script.length; i++) {
-        content = content + SafeScript.unwrap(script[i]);
+        content += SafeScript.unwrap(script[i]);
       }
       const htmlContent = SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(content);
       return SafeHtml.createSafeHtmlTagSecurityPrivateDoNotAccessOrElse("script", attributes, htmlContent);
@@ -179,7 +145,7 @@ goog.loadModule(function(exports) {
       let content = "";
       styleSheet = googArray.concat(styleSheet);
       for (let i = 0; i < styleSheet.length; i++) {
-        content = content + SafeStyleSheet.unwrap(styleSheet[i]);
+        content += SafeStyleSheet.unwrap(styleSheet[i]);
       }
       const htmlContent = SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(content);
       return SafeHtml.createSafeHtmlTagSecurityPrivateDoNotAccessOrElse("style", combinedAttrs, htmlContent);
@@ -191,7 +157,7 @@ goog.loadModule(function(exports) {
           unwrappedUrl = "'" + unwrappedUrl.replace(/'/g, "%27") + "'";
         }
       }
-      const attributes = {"http-equiv":"refresh", "content":(secs || 0) + "; url\x3d" + unwrappedUrl};
+      const attributes = {"http-equiv":"refresh", "content":(secs || 0) + "; url\x3d" + unwrappedUrl,};
       return SafeHtml.createSafeHtmlTagSecurityPrivateDoNotAccessOrElse("meta", attributes);
     }
     static join(separator, parts) {
@@ -219,7 +185,7 @@ goog.loadModule(function(exports) {
     }
     static createSafeHtmlTagSecurityPrivateDoNotAccessOrElse(tagName, attributes = undefined, content = undefined) {
       let result = `<${tagName}`;
-      result = result + SafeHtml.stringifyAttributes(tagName, attributes);
+      result += SafeHtml.stringifyAttributes(tagName, attributes);
       if (content == null) {
         content = [];
       } else if (!Array.isArray(content)) {
@@ -227,10 +193,10 @@ goog.loadModule(function(exports) {
       }
       if (tags.isVoidTag(tagName.toLowerCase())) {
         asserts.assert(!content.length, `Void tag <${tagName}> does not allow content.`);
-        result = result + "\x3e";
+        result += "\x3e";
       } else {
         const html = SafeHtml.concat(content);
-        result = result + ("\x3e" + SafeHtml.unwrap(html) + "\x3c/" + tagName + "\x3e");
+        result += "\x3e" + SafeHtml.unwrap(html) + "\x3c/" + tagName + "\x3e";
       }
       return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse(result);
     }
@@ -246,7 +212,7 @@ goog.loadModule(function(exports) {
             if (value == null) {
               continue;
             }
-            result = result + (" " + getAttrNameAndValue(tagName, name, value));
+            result += " " + getAttrNameAndValue(tagName, name, value);
           }
         }
       }
@@ -291,13 +257,50 @@ goog.loadModule(function(exports) {
   const URL_ATTRIBUTES = googObject.createSet("action", "cite", "data", "formaction", "href", "manifest", "poster", "src");
   const NOT_ALLOWED_TAG_NAMES = googObject.createSet(TagName.APPLET, TagName.BASE, TagName.EMBED, TagName.IFRAME, TagName.LINK, TagName.MATH, TagName.META, TagName.OBJECT, TagName.SCRIPT, TagName.STYLE, TagName.SVG, TagName.TEMPLATE);
   SafeHtml.AttributeValue;
+  function getAttrNameAndValue(tagName, name, value) {
+    if (value instanceof Const) {
+      value = Const.unwrap(value);
+    } else if (name.toLowerCase() == "style") {
+      if (SafeHtml.SUPPORT_STYLE_ATTRIBUTE) {
+        value = getStyleValue(value);
+      } else {
+        throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? 'Attribute "style" not supported.' : "");
+      }
+    } else if (/^on/i.test(name)) {
+      throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? `Attribute "${name}` + '" requires goog.string.Const value, "' + value + '" given.' : "");
+    } else if (name.toLowerCase() in URL_ATTRIBUTES) {
+      if (value instanceof TrustedResourceUrl) {
+        value = TrustedResourceUrl.unwrap(value);
+      } else if (value instanceof SafeUrl) {
+        value = SafeUrl.unwrap(value);
+      } else if (typeof value === "string") {
+        value = SafeUrl.sanitize(value).getTypedStringValue();
+      } else {
+        throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? `Attribute "${name}" on tag "${tagName}` + '" requires goog.html.SafeUrl, goog.string.Const, or' + ' string, value "' + value + '" given.' : "");
+      }
+    }
+    if (value.implementsGoogStringTypedString) {
+      value = value.getTypedStringValue();
+    }
+    asserts.assert(typeof value === "string" || typeof value === "number", "String or number value expected, got " + typeof value + " with value: " + value);
+    return `${name}="` + internal.htmlEscape(String(value)) + '"';
+  }
+  function getStyleValue(value) {
+    if (!goog.isObject(value)) {
+      throw new Error(SafeHtml.ENABLE_ERROR_MESSAGES ? 'The "style" attribute requires goog.html.SafeStyle or map ' + "of style properties, " + typeof value + " given: " + value : "");
+    }
+    if (!(value instanceof SafeStyle)) {
+      value = SafeStyle.create(value);
+    }
+    return SafeStyle.unwrap(value);
+  }
   SafeHtml.DOCTYPE_HTML = {valueOf:function() {
     return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse("\x3c!DOCTYPE html\x3e");
-  }}.valueOf();
+  },}.valueOf();
   SafeHtml.EMPTY = new SafeHtml(goog.global.trustedTypes && goog.global.trustedTypes.emptyHTML || "", CONSTRUCTOR_TOKEN_PRIVATE);
   SafeHtml.BR = {valueOf:function() {
     return SafeHtml.createSafeHtmlSecurityPrivateDoNotAccessOrElse("\x3cbr\x3e");
-  }}.valueOf();
+  },}.valueOf();
   exports = SafeHtml;
   return exports;
 });

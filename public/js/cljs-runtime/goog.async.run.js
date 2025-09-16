@@ -52,7 +52,7 @@ goog.loadModule(function(exports) {
   }
   run.processWorkQueue = () => {
     let item = null;
-    for (; item = workQueue.remove();) {
+    while (item = workQueue.remove()) {
       try {
         item.fn.call(item.scope);
       } catch (e) {

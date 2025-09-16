@@ -13,8 +13,7 @@ goog.debug.entryPointRegistry.register = function(callback) {
   goog.debug.entryPointRegistry.refList_[goog.debug.entryPointRegistry.refList_.length] = callback;
   if (goog.debug.entryPointRegistry.monitorsMayExist_) {
     var monitors = goog.debug.entryPointRegistry.monitors_;
-    var i = 0;
-    for (; i < monitors.length; i++) {
+    for (var i = 0; i < monitors.length; i++) {
       callback(goog.bind(monitors[i].wrap, monitors[i]));
     }
   }
@@ -22,8 +21,7 @@ goog.debug.entryPointRegistry.register = function(callback) {
 goog.debug.entryPointRegistry.monitorAll = function(monitor) {
   goog.debug.entryPointRegistry.monitorsMayExist_ = true;
   var transformer = goog.bind(monitor.wrap, monitor);
-  var i = 0;
-  for (; i < goog.debug.entryPointRegistry.refList_.length; i++) {
+  for (var i = 0; i < goog.debug.entryPointRegistry.refList_.length; i++) {
     goog.debug.entryPointRegistry.refList_[i](transformer);
   }
   goog.debug.entryPointRegistry.monitors_.push(monitor);
@@ -32,8 +30,7 @@ goog.debug.entryPointRegistry.unmonitorAllIfPossible = function(monitor) {
   var monitors = goog.debug.entryPointRegistry.monitors_;
   goog.asserts.assert(monitor == monitors[monitors.length - 1], "Only the most recent monitor can be unwrapped.");
   var transformer = goog.bind(monitor.unwrap, monitor);
-  var i = 0;
-  for (; i < goog.debug.entryPointRegistry.refList_.length; i++) {
+  for (var i = 0; i < goog.debug.entryPointRegistry.refList_.length; i++) {
     goog.debug.entryPointRegistry.refList_[i](transformer);
   }
   monitors.length--;

@@ -14,10 +14,10 @@ goog.loadModule(function(exports) {
       passive = true;
     }});
     try {
-      goog.global.addEventListener("test", () => {
-      }, options);
-      goog.global.removeEventListener("test", () => {
-      }, options);
+      const nullFunction = () => {
+      };
+      goog.global.addEventListener("test", nullFunction, options);
+      goog.global.removeEventListener("test", nullFunction, options);
     } catch (e) {
     }
     return passive;

@@ -1,4 +1,18 @@
 goog.loadModule(function(exports) {
+  "use strict";
+  goog.module("goog.labs.userAgent.browser");
+  goog.module.declareLegacyNamespace();
+  const util = goog.require("goog.labs.userAgent.util");
+  const {AsyncValue, Version} = goog.require("goog.labs.userAgent.highEntropy.highEntropyValue");
+  const {ChromiumRebrand} = goog.require("goog.labs.userAgent.chromiumRebrands");
+  const {assert, assertExists} = goog.require("goog.asserts");
+  const {compareVersions} = goog.require("goog.string.internal");
+  const {fullVersionList} = goog.require("goog.labs.userAgent.highEntropy.highEntropyData");
+  const {useClientHints} = goog.require("goog.labs.userAgent");
+  const Brand = {ANDROID_BROWSER:"Android Browser", CHROMIUM:"Chromium", EDGE:"Microsoft Edge", FIREFOX:"Firefox", IE:"Internet Explorer", OPERA:"Opera", SAFARI:"Safari", SILK:"Silk",};
+  exports.Brand = Brand;
+  let AllBrandsInternal;
+  exports.AllBrands;
   function useUserAgentDataBrand(ignoreClientHintsFlag = false) {
     if (util.ASSUME_CLIENT_HINTS_SUPPORT) {
       return true;
@@ -66,9 +80,32 @@ goog.loadModule(function(exports) {
   function matchAndroidBrowser() {
     return util.matchUserAgent("Android") && !(isChrome() || isFirefox() || isOpera() || isSilk());
   }
+  const isOpera = matchOpera;
+  exports.isOpera = isOpera;
+  const isIE = matchIE;
+  exports.isIE = isIE;
+  const isEdge = matchEdgeHtml;
+  exports.isEdge = isEdge;
+  const isEdgeChromium = matchEdgeChromium;
+  exports.isEdgeChromium = isEdgeChromium;
+  const isOperaChromium = matchOperaChromium;
+  exports.isOperaChromium = isOperaChromium;
+  const isFirefox = matchFirefox;
+  exports.isFirefox = isFirefox;
+  const isSafari = matchSafari;
+  exports.isSafari = isSafari;
+  const isCoast = matchCoast;
+  exports.isCoast = isCoast;
+  const isIosWebview = matchIosWebview;
+  exports.isIosWebview = isIosWebview;
+  const isChrome = matchChrome;
+  exports.isChrome = isChrome;
+  const isAndroidBrowser = matchAndroidBrowser;
+  exports.isAndroidBrowser = isAndroidBrowser;
   function isSilk() {
     return util.matchUserAgent("Silk");
   }
+  exports.isSilk = isSilk;
   function createVersionMap(versionTuples) {
     const versionMap = {};
     versionTuples.forEach(tuple => {
@@ -76,11 +113,7 @@ goog.loadModule(function(exports) {
       const value = tuple[1];
       versionMap[key] = value;
     });
-    return keys => {
-      return versionMap[keys.find(key => {
-        return key in versionMap;
-      })] || "";
-    };
+    return keys => versionMap[keys.find(key => key in versionMap)] || "";
   }
   function getVersion() {
     const userAgentString = util.getUserAgent();
@@ -107,9 +140,11 @@ goog.loadModule(function(exports) {
     const tuple = versionTuples[2];
     return tuple && tuple[1] || "";
   }
+  exports.getVersion = getVersion;
   function isVersionOrHigher(version) {
     return compareVersions(getVersion(), version) >= 0;
   }
+  exports.isVersionOrHigher = isVersionOrHigher;
   function getIEVersion(userAgent) {
     const rv = /rv: *([\d\.]*)/.exec(userAgent);
     if (rv && rv[1]) {
@@ -182,9 +217,7 @@ goog.loadModule(function(exports) {
     let versionParts;
     if (useUserAgentDataBrand() && browser !== Brand.SILK) {
       const data = util.getUserAgentData();
-      const matchingBrand = data.brands.find(({brand}) => {
-        return brand === browser;
-      });
+      const matchingBrand = data.brands.find(({brand}) => brand === browser);
       if (!matchingBrand || !matchingBrand.version) {
         return NaN;
       }
@@ -206,91 +239,11 @@ goog.loadModule(function(exports) {
     assert(Math.floor(majorVersion) === majorVersion, "Major version must be an integer");
     return versionOf_(brand) >= majorVersion;
   }
+  exports.isAtLeast = isAtLeast;
   function isAtMost(brand, majorVersion) {
     assert(Math.floor(majorVersion) === majorVersion, "Major version must be an integer");
     return versionOf_(brand) <= majorVersion;
   }
-  async function loadFullVersions() {
-    if (useUserAgentDataBrand(true)) {
-      await fullVersionList.load();
-    }
-    preUachHasLoaded = true;
-  }
-  function fullVersionOf(browser) {
-    let fallbackVersionString = "";
-    if (!hasFullVersionList()) {
-      fallbackVersionString = getFullVersionFromUserAgentString(browser);
-    }
-    const useUach = browser !== Brand.SILK && useUserAgentDataBrand(true);
-    if (useUach) {
-      const data = util.getUserAgentData();
-      if (!data.brands.find(({brand}) => {
-        return brand === browser;
-      })) {
-        return undefined;
-      }
-    } else if (fallbackVersionString === "") {
-      return undefined;
-    }
-    return new HighEntropyBrandVersion(browser, useUach, fallbackVersionString);
-  }
-  function getVersionStringForLogging(browser) {
-    if (useUserAgentDataBrand(true)) {
-      const fullVersionObj = fullVersionOf(browser);
-      if (fullVersionObj) {
-        const fullVersion = fullVersionObj.getIfLoaded();
-        if (fullVersion) {
-          return fullVersion.toVersionStringForLogging();
-        }
-        const data = util.getUserAgentData();
-        const matchingBrand = data.brands.find(({brand}) => {
-          return brand === browser;
-        });
-        assertExists(matchingBrand);
-        return matchingBrand.version;
-      }
-      return "";
-    } else {
-      return getFullVersionFromUserAgentString(browser);
-    }
-  }
-  "use strict";
-  goog.module("goog.labs.userAgent.browser");
-  goog.module.declareLegacyNamespace();
-  const util = goog.require("goog.labs.userAgent.util");
-  const {AsyncValue, Version} = goog.require("goog.labs.userAgent.highEntropy.highEntropyValue");
-  const {assert, assertExists} = goog.require("goog.asserts");
-  const {compareVersions} = goog.require("goog.string.internal");
-  const {fullVersionList} = goog.require("goog.labs.userAgent.highEntropy.highEntropyData");
-  const {useClientHints} = goog.require("goog.labs.userAgent");
-  const Brand = {ANDROID_BROWSER:"Android Browser", CHROMIUM:"Chromium", EDGE:"Microsoft Edge", FIREFOX:"Firefox", IE:"Internet Explorer", OPERA:"Opera", SAFARI:"Safari", SILK:"Silk"};
-  exports.Brand = Brand;
-  const isOpera = matchOpera;
-  exports.isOpera = isOpera;
-  const isIE = matchIE;
-  exports.isIE = isIE;
-  const isEdge = matchEdgeHtml;
-  exports.isEdge = isEdge;
-  const isEdgeChromium = matchEdgeChromium;
-  exports.isEdgeChromium = isEdgeChromium;
-  const isOperaChromium = matchOperaChromium;
-  exports.isOperaChromium = isOperaChromium;
-  const isFirefox = matchFirefox;
-  exports.isFirefox = isFirefox;
-  const isSafari = matchSafari;
-  exports.isSafari = isSafari;
-  const isCoast = matchCoast;
-  exports.isCoast = isCoast;
-  const isIosWebview = matchIosWebview;
-  exports.isIosWebview = isIosWebview;
-  const isChrome = matchChrome;
-  exports.isChrome = isChrome;
-  const isAndroidBrowser = matchAndroidBrowser;
-  exports.isAndroidBrowser = isAndroidBrowser;
-  exports.isSilk = isSilk;
-  exports.getVersion = getVersion;
-  exports.isVersionOrHigher = isVersionOrHigher;
-  exports.isAtLeast = isAtLeast;
   exports.isAtMost = isAtMost;
   class HighEntropyBrandVersion {
     constructor(brand, useUach, fallbackVersion) {
@@ -302,9 +255,7 @@ goog.loadModule(function(exports) {
       if (this.useUach_) {
         const loadedVersionList = fullVersionList.getIfLoaded();
         if (loadedVersionList !== undefined) {
-          const matchingBrand = loadedVersionList.find(({brand}) => {
-            return this.brand_ === brand;
-          });
+          const matchingBrand = loadedVersionList.find(({brand}) => this.brand_ === brand);
           assertExists(matchingBrand);
           return new Version(matchingBrand.version);
         }
@@ -318,9 +269,7 @@ goog.loadModule(function(exports) {
       if (this.useUach_) {
         const loadedVersionList = await fullVersionList.load();
         if (loadedVersionList !== undefined) {
-          const matchingBrand = loadedVersionList.find(({brand}) => {
-            return this.brand_ === brand;
-          });
+          const matchingBrand = loadedVersionList.find(({brand}) => this.brand_ === brand);
           assertExists(matchingBrand);
           return new Version(matchingBrand.version);
         }
@@ -332,12 +281,52 @@ goog.loadModule(function(exports) {
     }
   }
   let preUachHasLoaded = false;
+  async function loadFullVersions() {
+    if (useUserAgentDataBrand(true)) {
+      await fullVersionList.load();
+    }
+    preUachHasLoaded = true;
+  }
   exports.loadFullVersions = loadFullVersions;
   exports.resetForTesting = () => {
     preUachHasLoaded = false;
     fullVersionList.resetForTesting();
   };
+  function fullVersionOf(browser) {
+    let fallbackVersionString = "";
+    if (!hasFullVersionList()) {
+      fallbackVersionString = getFullVersionFromUserAgentString(browser);
+    }
+    const useUach = browser !== Brand.SILK && useUserAgentDataBrand(true);
+    if (useUach) {
+      const data = util.getUserAgentData();
+      if (!data.brands.find(({brand}) => brand === browser)) {
+        return undefined;
+      }
+    } else if (fallbackVersionString === "") {
+      return undefined;
+    }
+    return new HighEntropyBrandVersion(browser, useUach, fallbackVersionString);
+  }
   exports.fullVersionOf = fullVersionOf;
+  function getVersionStringForLogging(browser) {
+    if (useUserAgentDataBrand(true)) {
+      const fullVersionObj = fullVersionOf(browser);
+      if (fullVersionObj) {
+        const fullVersion = fullVersionObj.getIfLoaded();
+        if (fullVersion) {
+          return fullVersion.toVersionStringForLogging();
+        }
+        const data = util.getUserAgentData();
+        const matchingBrand = data.brands.find(({brand}) => brand === browser);
+        assertExists(matchingBrand);
+        return matchingBrand.version;
+      }
+      return "";
+    } else {
+      return getFullVersionFromUserAgentString(browser);
+    }
+  }
   exports.getVersionStringForLogging = getVersionStringForLogging;
   return exports;
 });

@@ -15,17 +15,11 @@ goog.loadModule(function(exports) {
       if (iter instanceof ShimIterableImpl || iter instanceof ShimGoogIterator || iter instanceof ShimEs6Iterator) {
         return iter;
       } else if (typeof iter.next == "function") {
-        return new ShimIterableImpl(() => {
-          return iter;
-        });
+        return new ShimIterableImpl(() => iter);
       } else if (typeof iter[Symbol.iterator] == "function") {
-        return new ShimIterableImpl(() => {
-          return iter[Symbol.iterator]();
-        });
+        return new ShimIterableImpl(() => iter[Symbol.iterator]());
       } else if (typeof iter.__iterator__ == "function") {
-        return new ShimIterableImpl(() => {
-          return iter.__iterator__();
-        });
+        return new ShimIterableImpl(() => iter.__iterator__());
       }
       throw new Error("Not an iterator or iterable.");
     }
@@ -67,16 +61,14 @@ goog.loadModule(function(exports) {
   }
   class ShimEs6Iterator extends ShimIterableImpl {
     constructor(iter) {
-      super(() => {
-        return iter;
-      });
+      super(() => iter);
       this.iter_ = iter;
     }
     next() {
       return this.iter_.next();
     }
   }
-  exports = {ShimIterable, ShimEs6Iterator, ShimGoogIterator};
+  exports = {ShimIterable, ShimEs6Iterator, ShimGoogIterator,};
   return exports;
 });
 
