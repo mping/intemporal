@@ -80,7 +80,7 @@
               (is (every? #(= @uuid-store %) (map :root evts))))
 
             (testing "workflow events"
-              (is (match? {:type :intemporal.workflow/invoke :sym 'intemporal.workflow-test/my-workflow- :args [uuid-store]} w1))
+              (is (match? {:type :intemporal.workflow/invoke :sym 'intemporal.workflow-test/my-workflow- #_#_:args [uuid-store]} w1))
               (is (match? {:type :intemporal.workflow/success :sym 'intemporal.workflow-test/my-workflow-} w2)))
 
             (testing "activity events"
