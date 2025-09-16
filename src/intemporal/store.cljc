@@ -33,7 +33,7 @@
   (reenqueue-pending-tasks [this callback]
     "Marks all pending tasks belonging to the store's `owner` as `new`")
   (release-pending-tasks [this]
-    "Disowns all tasks that are pending")
+    "Disowns all tasks that are pending for the store's `owner`, making them available")
   (enqueue-task [this task]
     "Atomically enqueues a protocol, workflow or activity task execution")
   (dequeue-task [this] [this opts]

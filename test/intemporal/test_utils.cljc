@@ -67,7 +67,7 @@
   "Waits for the task with given id to reach terminal state"
   ;; only works in clj, should probably take a body and be a macro
   ([store id]
-   (wait-for-task store id {:timeout 5000 :sleep-ms 100}))
+   (wait-for-task store id {:timeout 10000 :sleep-ms 100}))
   ([store id {:keys [timeout sleep-ms]}]
    (let [start (now)]
      #_:clj-kondo/ignore

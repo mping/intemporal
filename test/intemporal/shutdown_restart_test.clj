@@ -51,18 +51,17 @@
                   (let [[e1 e2 e3] (store/list-events mstore)]
                     (is (match? {:type :intemporal.workflow/invoke :sym 'intemporal.shutdown-restart-test/my-workflow-} e1))
                     (is (match? {:type :intemporal.protocol/invoke :sym 'intemporal.shutdown-restart-test/foo} e2))
-                    (is (nil? e3))))))
+                    (is (nil? e3))))
 
-            (testing "workflow resumes"
-              (let [executor (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
-                                                      :polling-ms 10})]
-                (store/reenqueue-pending-tasks mstore (constantly nil))
-                (Thread/sleep 3000)
+                (testing "workflow resumes"
+                  (let [executor (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
+                                                          :polling-ms 10})]
+                    (store/reenqueue-pending-tasks mstore (constantly nil))
+                    (tu/wait-for-task mstore (:id w1))
+                    (tu/print-tables mstore)
 
-                (tu/print-tables mstore)
+                    (testing "workflow succeeded"
+                      (let [[w1] (store/list-tasks mstore)]
+                        (is (match? {:type :workflow :sym 'intemporal.shutdown-restart-test/my-workflow- :state :success} w1))))
 
-                (testing "workflow succeeded"
-                  (let [[w1] (store/list-tasks mstore)]
-                    (is (match? {:type :workflow :sym 'intemporal.shutdown-restart-test/my-workflow- :state :success} w1))))
-
-                (w/shutdown executor 0)))))))))
+                    (w/shutdown executor 0)))))))))))
