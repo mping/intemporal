@@ -69,8 +69,9 @@ jobs:
         run: |
           npx shadow-cljs compile node
 
+      # coverage section
       - name: Tentative coverage
-        #run: ./bin/kaocha test-cljs
+        id: coverage
         run: |
           sudo apt install -y lcov
           bin/run-coverage || true
@@ -81,4 +82,4 @@ jobs:
         with:
           #check_name: "report for ${{ matrix.module }}"
           include_passed: true
-          report_paths: 'modules/*/target/test-reports/*.xml'
+          report_paths: 'target/test-reports/*.xml'

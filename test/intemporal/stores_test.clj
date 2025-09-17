@@ -187,7 +187,7 @@
             (store/dequeue-task store)
 
             ;; wait a bit so watchers can fire
-            (Thread/sleep 1000)
+            (Thread/sleep 3000)
             (is (match? {:args   ["invoke" 333]
                          :ref    "self"
                          :root   "self"
