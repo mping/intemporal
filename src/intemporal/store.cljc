@@ -272,12 +272,15 @@
                     (if (and (= :pending state)
                              (or (= (:owner task) owner)
                                  (nil? (:owner task))))
-                      (do
+                      (try
                         ;; ensure we only run f once - swap! might run the fn multiple times
-                        (when-not (contains? @task->run? task)
-                          (f task)
-                          (swap! task->run? conj task))
-                        (assoc task :state :new :owner owner))
+                        (assoc task :state :new :owner owner)
+                        (finally
+                          (when-not (contains? @task->run? task)
+                            (try
+                              (f task)
+                              (finally
+                                (swap! task->run? conj task))))))
                       ;; else
                       task)))))
 

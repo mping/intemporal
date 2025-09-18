@@ -5,7 +5,8 @@
             [intemporal.store.jdbc :as jdbc]
             [intemporal.workflow :as w]
             [intemporal.macros :refer [stub-protocol defn-workflow]]
-            [intemporal.test-utils :as tu :refer [with-result]]))
+            [intemporal.test-utils :as tu :refer [with-result]])
+  (:import (java.util.concurrent CountDownLatch)))
 
 (use-fixtures :once tu/with-trace-logging)
 
@@ -14,13 +15,18 @@
                     :postgres (jdbc/make-store {:jdbcUrl       "jdbc:postgresql://localhost:5432/root?user=root&password=root"
                                                 :migration-dir "migrations/postgres"})}))
 
+(def activity-invoked? (CountDownLatch. 1))
+(def executor-shutdown? (CountDownLatch. 1))
+
 (defprotocol MyActivities
   (foo [this a]))
 
 (defrecord MyActivitiesImpl []
   MyActivities
   (foo [this a]
-    (Thread/sleep 1000) :foo))
+    (.countDown activity-invoked?)
+    (.await executor-shutdown?)
+    :foo))
 
 (defn-workflow my-workflow [k]
   (let [stub (stub-protocol MyActivities {})
@@ -37,18 +43,21 @@
 
     (testing (format "store: %s" label)
       (let [executor (w/start-poller! store {:protocols  {`MyActivities (->MyActivitiesImpl)}
-                                             :polling-ms 10})]
+                                             :polling-ms 500})]
 
         (testing "shutdown of ongoing workflow"
           ;; give it some time so the poller can pick it up but just once
           (future
-            (Thread/sleep 500)
-            (w/shutdown executor 0))
+            ;; ensure activity is inflight
+            (.await activity-invoked?)
+            (w/shutdown executor 0)
+            ;; proceed activity, it will fail
+            (.countDown executor-shutdown?)
+            (is (not (w/running? executor))))
 
           (with-result [res (w/with-env {:store store}
                               (my-workflow :ok))]
 
-            (prn res)
             (is (instance? Exception res))))
 
         (testing "Tasks are pending"

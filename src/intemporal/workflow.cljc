@@ -7,7 +7,8 @@
              #_:clj-kondo/ignore
              [intemporal.workflow.internal :refer [with-env-internal]]
              [intemporal.workflow :refer [with-env]]))
-  #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit])))
+  #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
+                   [java.lang AutoCloseable])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -42,6 +43,12 @@
   (submit [this f] "Submits the function `f` for execution")
   (shutdown [this grace-period-ms] "Shuts down the task executor")
   (running? [this] "Indicates if the executor is running"))
+
+;; allow expressions like (with-open [executor (w/start-poller ....
+
+#?(:clj #_:clj-kondo/ignore (extend-protocol ITaskExecutor
+                              AutoCloseable
+                              (close [this] (shutdown this 0))))
 
 ;; make sure that any given executor service can implement ITaskExecutor
 #?(:clj (extend-type ExecutorService
@@ -99,12 +106,15 @@
       (-> (p/delay polling-ms)
           (p/chain (fn [_]
                      (loop []
+                       (t/log! {:level :debug} ["Polling for tasks"])
                        (when-let [task (store/dequeue-task store)]
                          (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
-                         (submit task-executor (fn [] (worker-execute-fn store protocols task task-counter (fn [] (not (running? task-executor))))))
-                         (recur)))
-                     (when (running? task-executor)
-                       (p/recur))))))))
+                         (submit task-executor (fn [] (worker-execute-fn store protocols task task-counter (fn [] (not (running? task-executor))))))))))
+          (p/catch (fn [e]
+                     (t/log! {:level :warn :data {:exception e}} ["Caught error during task polling, continuing"])))
+          (p/finally (fn []
+                       (when (running? task-executor)
+                         (p/recur))))))))
 
 (defn start-poller!
   "Starts a poller that will submit tasks to the `task-executor`.
