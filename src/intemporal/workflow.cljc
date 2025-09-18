@@ -44,6 +44,12 @@
   (shutdown [this grace-period-ms] "Shuts down the task executor")
   (running? [this] "Indicates if the executor is running"))
 
+;; allow expressions like (with-open [executor (w/start-poller ....
+
+#?(:clj #_:clj-kondo/ignore (extend-protocol ITaskExecutor
+                              AutoCloseable
+                              (close [this] (shutdown this 0))))
+
 ;; make sure that any given executor service can implement ITaskExecutor
 #?(:clj (extend-type ExecutorService
           ITaskExecutor
@@ -56,12 +62,6 @@
               (.shutdownNow ^ExecutorService executor)))
           (running? [executor]
             (not (.isShutdown ^ExecutorService executor)))))
-
-;; allow expressions like (with-open [executor (w/start-poller ....
-#?(:clj (extend-protocol ITaskExecutor
-          AutoCloseable
-          (close [this] (shutdown this 0))))
-
 
 (defn make-task-executor
   "Creates an object that satisfies `ITaskExecutor`."
