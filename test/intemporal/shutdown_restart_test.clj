@@ -4,9 +4,13 @@
             [intemporal.workflow :as w]
             [matcher-combinators.test :refer [match?]]
             [intemporal.macros :refer [stub-protocol defn-workflow]]
-            [intemporal.test-utils :as tu :refer [with-result]]))
+            [intemporal.test-utils :as tu :refer [with-result]])
+  (:import (java.util.concurrent CountDownLatch)))
 
 (t/use-fixtures :once tu/with-trace-logging)
+
+(def activity-invoked? (CountDownLatch. 1))
+(def executor-shutdown? (CountDownLatch. 1))
 
 (defprotocol MyActivities
   (foo [this a]))
@@ -14,7 +18,9 @@
 (defrecord MyActivitiesImpl []
   MyActivities
   (foo [this a]
-    (Thread/sleep 1000) :foo))
+    (.countDown activity-invoked?)
+    (.await executor-shutdown?)
+    :foo))
 
 (defn-workflow my-workflow [k]
   (let [stub (stub-protocol MyActivities {})
@@ -30,10 +36,13 @@
                                             :polling-ms 10})]
 
       (testing "shutdown of ongoing workflow"
-        ;; give it some time so the poller can pick it up but just once
         (future
-          (Thread/sleep 500)
-          (w/shutdown executor 0))
+          ;; ensure activity is inflight
+          (.await activity-invoked?)
+          (w/shutdown executor 0)
+          ;; proceed activity, it will fail
+          (.countDown executor-shutdown?)
+          (is (not (w/running? executor))))
 
         (with-result [res (w/with-env {:store mstore}
                             (my-workflow :ok))]
@@ -54,14 +63,12 @@
                     (is (nil? e3))))
 
                 (testing "workflow resumes"
-                  (let [executor (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
-                                                          :polling-ms 10})]
+                  (with-open [_ (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
+                                                         :polling-ms 500})]
                     (store/reenqueue-pending-tasks mstore (constantly nil))
                     (tu/wait-for-task mstore (:id w1))
                     (tu/print-tables mstore)
 
                     (testing "workflow succeeded"
                       (let [[w1] (store/list-tasks mstore)]
-                        (is (match? {:type :workflow :sym 'intemporal.shutdown-restart-test/my-workflow- :state :success} w1))))
-
-                    (w/shutdown executor 0)))))))))))
+                        (is (match? {:type :workflow :sym 'intemporal.shutdown-restart-test/my-workflow- :state :success} w1))))))))))))))

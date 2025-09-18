@@ -123,6 +123,7 @@
 
 (defn setup-telemere []
   (telemere/set-min-level! :trace)
+
   #_#_
   (telemere/remove-handler! ::custom)
   (telemere/add-handler! ::custom
@@ -134,3 +135,4 @@
 (def with-trace-logging
   #?(:cljs {:before setup-telemere}
      :clj  (fn with-trace-logging [f] (setup-telemere) (f))))
+
