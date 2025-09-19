@@ -8,6 +8,21 @@
 #?(:clj (set! *warn-on-reflection* true))
 
 ;;;;
+;; utils
+
+(defmacro libthread
+  "Creates a thread for internal usage. Client code should not rely on this.
+   Returns a promise."
+  [label & body]
+  `(p/vthread ~@body))
+
+(defmacro uthread
+  "Creates a thread for running client code.
+   Returns a promise."
+  [& body]
+  `(p/vthread ~@body))
+
+;;;;
 ;; runtime
 
 (def ^:dynamic *env* nil)
@@ -162,7 +177,7 @@
                                              ;; - then we can process the underlying impl call
                                              (if vthread?
                                                (let [inner (p/create (fn [res rej]
-                                                                       (-> (p/vthread
+                                                                       (-> (uthread
                                                                              (binding [*env* (dissoc env :vthread?)]
                                                                                (apply fvar args')))
                                                                            (p/then res)

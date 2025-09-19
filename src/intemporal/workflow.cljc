@@ -7,7 +7,7 @@
              #_:clj-kondo/ignore
              [intemporal.workflow.internal :refer [with-env-internal]]
              [intemporal.workflow :refer [with-env]]))
-  #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
+  #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit ThreadFactory]
                    [java.lang AutoCloseable])))
 
 #?(:clj (set! *warn-on-reflection* true))
@@ -58,7 +58,9 @@
           (shutdown [executor grace-period-ms]
             ;; todo: release tasks
             (.shutdown ^ExecutorService executor)
+            (t/log! {:level :debug} ["Executor shutdown"])
             (when-not (.awaitTermination ^ExecutorService executor grace-period-ms TimeUnit/MILLISECONDS)
+              (t/log! {:level :debug} ["Executor shutdown grace period over, shutting down NOW"])
               (.shutdownNow ^ExecutorService executor)))
           (running? [executor]
             (not (.isShutdown ^ExecutorService executor)))))
@@ -73,10 +75,14 @@
            (when @run?
              (p/vthread (f))))
          (shutdown [_ grace-period-ms]
+           (t/log! {:level :debug} ["Executor shutdown"])
            (reset! run? false))
          (running? [_] @run?))
        :clj
-       (Executors/newVirtualThreadPerTaskExecutor))))
+       (let [factory (-> (Thread/ofVirtual)
+                         (.name "Task Thread")
+                         (.factory))]
+         (Executors/newThreadPerTaskExecutor factory)))));]))))
 
 (defn- worker-execute-fn
   "Executes a given protocol, activity or workflow `task`"
@@ -88,7 +94,6 @@
                       :id        id
                       :root      (or root id)
                       :protos    protocols
-                      ;; TODO use uuid
                       :next-id   (fn [] (str (or root id) "-" (swap! task-counter inc)))
                       :shutdown? shutting-down?}
         internal-env (merge internal/default-env base-env runtime)]
@@ -138,14 +143,14 @@
   ([store & {:keys [protocols polling-ms] :or {protocols {} polling-ms 100}}]
    (let [run?         (atom true)
          task-counter (atom 0)]
-     (p/vthread
+     (internal/libthread "Worker"
        #_{:clj-kondo/ignore [:loop-without-recur :invalid-arity]}
        (p/loop []
          (-> (p/delay polling-ms)
              (p/chain (fn [_]
                         (when-let [task (store/dequeue-task store)]
                           (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
-                          (p/vthread
+                          (internal/libthread (format "Worker-%s" (:id task))
                             (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))
                         (when @run?
                           (p/recur)))))))

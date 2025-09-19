@@ -120,7 +120,7 @@
 
        (watch-task [this id f]
          (let [watch? (atom true)]
-           (p/vthread
+           (i/libthread (format "Watcher-%s" id)
              (while @watch?
                @(with-tx [^FDBTransaction tx (open-db)]
                   (when (fc/get tx subspace-owned-tasks id)

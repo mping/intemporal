@@ -49,7 +49,7 @@
 
           (is (instance? Exception res))
 
-          (testing "Workflow is not in failed state"
+          (testing "workflow is not in failed state"
             (tu/print-tables mstore)
 
             (testing "workflow task"
