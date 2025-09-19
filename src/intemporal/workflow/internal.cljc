@@ -16,12 +16,6 @@
   [label & body]
   `(p/vthread ~@body))
 
-(defmacro uthread
-  "Creates a thread for running client code.
-   Returns a promise."
-  [& body]
-  `(p/vthread ~@body))
-
 ;;;;
 ;; runtime
 
@@ -132,6 +126,17 @@
             handle-ok    (fn [r]
                            ;; TODO assert r is serializable!
                            ;; we check for shutdown because in js runtime, there is no thread interruption
+                           (let [panic? (shutting-down?)]
+                             (try
+                               (if panic?
+                                 (store/task<-panic store id (error/panic "Worker shutting down during invocation result handling"))
+                                 (do (store/task<-event store id (assoc next-event :result r))
+                                     r))
+                               (finally
+                                 (if panic?
+                                   (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupted result" id])
+                                   (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id])))))
+                           #_
                            (if (shutting-down?)
                              (do
                                (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupting result" id])
@@ -177,7 +182,7 @@
                                              ;; - then we can process the underlying impl call
                                              (if vthread?
                                                (let [inner (p/create (fn [res rej]
-                                                                       (-> (uthread
+                                                                       (-> (p/vthread ;uthread
                                                                              (binding [*env* (dissoc env :vthread?)]
                                                                                (apply fvar args')))
                                                                            (p/then res)

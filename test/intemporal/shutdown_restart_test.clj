@@ -19,6 +19,7 @@
   MyActivities
   (foo [this a]
     (.countDown activity-invoked?)
+    (Thread/sleep 100)
     (.await executor-shutdown?)
     :foo))
 

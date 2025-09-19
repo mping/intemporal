@@ -123,8 +123,6 @@
 
 (defn setup-telemere []
   (telemere/set-min-level! :trace)
-
-  #_#_
   (telemere/remove-handler! ::custom)
   (telemere/add-handler! ::custom
                   (telemere/handler:console
