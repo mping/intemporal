@@ -3,12 +3,14 @@
                      [intemporal.workflow.internal :as in]
                      [promesa.core :as p]
                      [taoensso.telemere :as telemere]
+                     [taoensso.telemere.utils :as tutils]
                      [cljs.test :as t]
                      [cljs.pprint :as pprint]))
   #?(:clj (:require [intemporal.store :as store]
                     [intemporal.workflow.internal :as in]
                     [promesa.core :as p]
                     [taoensso.telemere :as telemere]
+                    [taoensso.telemere.utils :as tutils]
                     [net.cgrand.macrovich :as macros]
                     [clojure.pprint :as pprint]))
   #?(:cljs (:require-macros [net.cgrand.macrovich :as macros]
@@ -127,7 +129,7 @@
   (telemere/add-handler! ::custom
                   (telemere/handler:console
                     {:output-fn
-                     (taoensso.telemere.utils/format-signal-fn
+                     (tutils/format-signal-fn
                        {:content-fn (taoensso.telemere.utils/signal-content-fn {:incl-keys #{:thread}})})})))
 
 (def with-trace-logging

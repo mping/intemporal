@@ -7,7 +7,7 @@
              #_:clj-kondo/ignore
              [intemporal.workflow.internal :refer [with-env-internal]]
              [intemporal.workflow :refer [with-env]]))
-  #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit ThreadFactory]
+  #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
                    [java.lang AutoCloseable])))
 
 #?(:clj (set! *warn-on-reflection* true))
@@ -150,7 +150,7 @@
              (p/chain (fn [_]
                         (when-let [task (store/dequeue-task store)]
                           (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
-                          (internal/libthread (format "Worker-%s" (:id task))
+                          (internal/libthread (str "Worker-" (:id task))
                             (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))
                         (when @run?
                           (p/recur)))))))
