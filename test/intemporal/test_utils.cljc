@@ -11,6 +11,7 @@
                     [promesa.core :as p]
                     [taoensso.telemere :as telemere]
                     [taoensso.telemere.utils :as tutils]
+                    [taoensso.telemere.open-telemetry :as tot]
                     [net.cgrand.macrovich :as macros]
                     [clojure.pprint :as pprint]))
   #?(:cljs (:require-macros [net.cgrand.macrovich :as macros]
@@ -124,8 +125,10 @@
              0))))))
 
 (defn setup-telemere []
+  #?(:clj (clojure.pprint/pprint (telemere/check-interop)))
   (telemere/set-min-level! :trace)
   (telemere/remove-handler! ::custom)
+  #?(:clj (telemere/add-handler! :default/open-telemetry (tot/handler:open-telemetry)))
   (telemere/add-handler! ::custom
                   (telemere/handler:console
                     {:output-fn

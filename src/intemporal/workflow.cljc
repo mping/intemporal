@@ -8,7 +8,8 @@
              [intemporal.workflow.internal :refer [with-env-internal]]
              [intemporal.workflow :refer [with-env]]))
   #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
-                   [java.lang AutoCloseable])))
+                   [java.lang AutoCloseable]
+                   [io.opentelemetry.api.trace Span StatusCode])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -105,21 +106,31 @@
 (defn- worker-poll-fn
   "Continously polls for task while `task-executor` is active."
   [store protocols task-executor polling-ms]
-  (let [task-counter (atom 0)]
+  (let [task-counter (atom 0)
+        uid          (random-uuid)]
     #_{:clj-kondo/ignore [:loop-without-recur :invalid-arity]}
     (p/loop []
-      (-> (p/delay polling-ms)
-          (p/chain (fn [_]
-                     (loop []
-                       (t/log! {:level :debug} ["Polling for tasks"])
-                       (when-let [task (store/dequeue-task store)]
-                         (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
-                         (submit task-executor (fn [] (worker-execute-fn store protocols task task-counter (fn [] (not (running? task-executor))))))))))
-          (p/catch (fn [e]
-                     (t/log! {:level :warn :data {:exception e}} ["Caught error during task polling, continuing"])))
-          (p/finally (fn []
-                       (when (running? task-executor)
-                         (p/recur))))))))
+      (t/trace! {:id ::worker-poll-fn :uid uid :data {:polling-ms polling-ms}}
+        (let [tracing-ctx t/*ctx*]
+          ;; ensure t/trace is blocking to wait for the inner loop
+          @(-> (p/delay polling-ms)
+               (p/chain (fn [_]
+                          (loop []
+                            (t/log! {:level :debug} ["Polling for tasks"])
+                            (when-let [task (store/dequeue-task store)]
+                              (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
+                              (submit task-executor (fn []
+                                                      (t/with-ctx tracing-ctx
+                                                        (t/trace! {:id ::worker-execute-fn :data {:task-id (:id task)} :parent {:id ::worker-poll-fn :uid uid}}
+                                                          (worker-execute-fn store protocols task task-counter (fn [] (not (running? task-executor))))))))))))
+               (p/catch (fn [e]
+                          #?(:clj (-> (Span/current)
+                                      (.setStatus StatusCode/ERROR)
+                                      (.recordException e)))
+                          (t/log! {:level :warn :data {:exception e}} ["Caught error during task polling, continuing"])))
+               (p/finally (fn []
+                            (when (running? task-executor)
+                              (p/recur))))))))))
 
 (defn start-poller!
   "Starts a poller that will submit tasks to the `task-executor`.
