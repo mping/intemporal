@@ -23,7 +23,10 @@
 
 (defmacro with-env
   "Creates a new environment for workflow execution. Options:
-  - :timeout-ms "
+  - `:store`: the underlying store to persist workflow metadata
+  - `:id`: optional workflow id
+  - `:timeout-ms`: optional timeout for workflow execution
+  "
   [m & body]
   `(internal/with-env-internal ~m ~@body))
 

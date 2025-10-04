@@ -68,6 +68,7 @@
          ;; (with-env {:store ..}
          ;;   (my-workflow ...
          ;; TODO: fixme: task id generator must be deterministic for a given workflow
+         (assert (some? (:store i/*env*)) "Environment does not have a `:store`, did you call `\n(with-env {:store ..}\n\t(my-workflow ...` ?")
          (let [ref#  (:ref i/*env*)
                root# (:root i/*env*)
                ;; id can be passed by env if we're dequeuing a task from store

@@ -57,9 +57,11 @@
   (testing "workflow"
     (let [mstore      (store/make-store)
           stop-worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})
-          uuid-store  (atom nil)]
+          uuid-store  (atom nil)
+          workflow-id (str (random-uuid))]
 
-      (with-result [v (w/with-env {:store mstore}
+      (with-result [v (w/with-env {:store mstore
+                                   :id workflow-id}
                         (my-workflow uuid-store))]
 
         (testing "workflow result"
@@ -107,7 +109,8 @@
               (is (match? {:type :workflow :sym 'intemporal.workflow-test/my-workflow- :state :success} w1)))
 
             (testing "workflow uuid"
-              (is (every? #(= @uuid-store %) (map :id tasks))))))
+              (is (every? #(= @uuid-store %) (map :id tasks)))
+              (is (= @uuid-store workflow-id)))))
 
         (stop-worker)))))
 
