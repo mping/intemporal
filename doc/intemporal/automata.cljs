@@ -116,7 +116,7 @@
         (p/catch (fn [r]
                    (js/console.error "error" r)
                    (set-results! (prn-str r))))
-        (p/finally stop))))
+        (p/finally (fn [_ _] (stop))))))
 
 (comment
   (require '[shadow.cljs.devtools.api :as shadow])

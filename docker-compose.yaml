@@ -1,5 +1,32 @@
 version: '3.5'
+
+networks:
+  intemporal:
+
 services:
+
+  jaeger:
+    image: jaegertracing/jaeger:2.10.0
+    command: [ --set=receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317 ]
+    networks:
+      - intemporal
+    ports:
+      - 16686:16686
+      - 4317
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.135.0
+    command: [ --config=/etc/otel.yml ]
+    volumes:
+      - ./docker/otel.yml:/etc/otel.yml
+    networks:
+      - intemporal
+    ports:
+      - 4317:4317
+      - 4318:4318
+    depends_on:
+      - jaeger
+
   foundation:
     image: "foundationdb/foundationdb:7.1.60"
     environment:

@@ -19,6 +19,7 @@
   MyActivities
   (foo [this a]
     (.countDown activity-invoked?)
+    (Thread/sleep 100)
     (.await executor-shutdown?)
     :foo))
 
@@ -49,7 +50,7 @@
 
           (is (instance? Exception res))
 
-          (testing "Workflow is not in failed state"
+          (testing "workflow is not in failed state"
             (tu/print-tables mstore)
 
             (testing "workflow task"

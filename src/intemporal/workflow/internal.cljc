@@ -8,6 +8,15 @@
 #?(:clj (set! *warn-on-reflection* true))
 
 ;;;;
+;; utils
+
+(defmacro libthread
+  "Creates a thread for internal usage. Client code should not rely on this.
+   Returns a promise."
+  [label & body]
+  `(p/vthread ~@body))
+
+;;;;
 ;; runtime
 
 (def ^:dynamic *env* nil)
@@ -117,6 +126,17 @@
             handle-ok    (fn [r]
                            ;; TODO assert r is serializable!
                            ;; we check for shutdown because in js runtime, there is no thread interruption
+                           (let [panic? (shutting-down?)]
+                             (try
+                               (if panic?
+                                 (store/task<-panic store id (error/panic "Worker shutting down during invocation result handling"))
+                                 (do (store/task<-event store id (assoc next-event :result r))
+                                     r))
+                               (finally
+                                 (if panic?
+                                   (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupted result" id])
+                                   (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id])))))
+                           #_
                            (if (shutting-down?)
                              (do
                                (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupting result" id])
@@ -162,9 +182,10 @@
                                              ;; - then we can process the underlying impl call
                                              (if vthread?
                                                (let [inner (p/create (fn [res rej]
-                                                                       (-> (p/vthread
+                                                                       (-> (p/vthread ;uthread
                                                                              (binding [*env* (dissoc env :vthread?)]
-                                                                               (apply fvar args')))
+                                                                               (t/trace! {:id sym}
+                                                                                 (apply fvar args'))))
                                                                            (p/then res)
                                                                            (p/catch rej))))]
                                                  ;; in cljs we dont need delay bc its single threaded
@@ -178,7 +199,8 @@
                                                ;; exceptions
                                                (-> nil
                                                    (p/then (fn [_] (binding [*env* env]
-                                                                     (apply fvar args'))))
+                                                                     (t/trace! {:id sym}
+                                                                       (apply fvar args')))))
                                                    (p/then' handle-ok)
                                                    (p/catch handle-fail))))]
                                  ;; r can be a value or a promise

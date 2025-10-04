@@ -150,7 +150,7 @@
                                (jdbc/execute-one! tx ["select state from tasks where id=?" id] default-opts)))
               state        (query-state!)
               watch?       (atom true)]
-          (p/vthread
+          (i/libthread (format "Watcher-%s" id)
             (while (and @watch? state)
               (Thread/sleep (long watch-polling-ms))
               (when (not= state (query-state!))

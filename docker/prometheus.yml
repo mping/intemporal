@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 1s
+  scrape_timeout: 1s
+
+scrape_configs:
+  - job_name: intemporal
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          # the application lives on localhost:9999/metrics
+          - 'localhost:9999'
