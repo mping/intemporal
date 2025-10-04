@@ -6,7 +6,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  earthly:
+    name: Earthly ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: earthly/actions-setup@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: "latest" # or pin to an specific version, e.g. "0.8.1"
+      - uses: actions/checkout@v2
+      - name: Docker login # to avoid dockerhub rate-limiting
+        run: docker login --username "${{ secrets.DOCKERHUB_USERNAME }}" --password "${{ secrets.DOCKERHUB_PASSWORD }}"
+      - name: Check earthly version
+        run: earthly --version
+      - name: Run tests with earthly
+        run: earthly +build-all
+
   clojure:
+    if: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
