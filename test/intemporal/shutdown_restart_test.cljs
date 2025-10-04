@@ -39,6 +39,7 @@
 
     (with-result [res (w/with-env {:store mstore}
                         (my-workflow :ok))]
+      (stop-worker)
 
       (is (instance? js/Error res))
       (is (error/panic? res))
@@ -71,4 +72,4 @@
 
           (stop-worker)))))
 
-(cljs.test/run-tests *ns*)
+;(cljs.test/run-tests *ns*)
