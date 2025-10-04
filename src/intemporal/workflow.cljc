@@ -9,7 +9,8 @@
              [intemporal.workflow :refer [with-env]]))
   #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
                    [java.lang AutoCloseable]
-                   [io.opentelemetry.api.trace Span StatusCode])))
+                   [io.opentelemetry.api.trace Span StatusCode]
+                   [io.opentelemetry.context Context])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -83,7 +84,7 @@
        (let [factory (-> (Thread/ofVirtual)
                          (.name "Task Thread")
                          (.factory))]
-         (Executors/newThreadPerTaskExecutor factory)))));]))))
+         (Executors/newThreadPerTaskExecutor factory)))))   ;]))))
 
 (defn- worker-execute-fn
   "Executes a given protocol, activity or workflow `task`"
@@ -100,8 +101,8 @@
         internal-env (merge internal/default-env base-env runtime)]
     ;; root task: we only enqueue workflows
     (with-env internal-env
-      (t/log! {:level :debug :data {:sym (:sym task) :env internal-env}} ["Resuming task with id" (:id task)])
-      (internal/resume-task internal-env store protocols task))))
+              (t/log! {:level :debug :data {:sym (:sym task) :env internal-env}} ["Resuming task with id" (:id task)])
+              (internal/resume-task internal-env store protocols task))))
 
 (defn- worker-poll-fn
   "Continously polls for task while `task-executor` is active."
@@ -111,8 +112,9 @@
     #_{:clj-kondo/ignore [:loop-without-recur :invalid-arity]}
     (p/loop []
       (t/trace! {:id ::worker-poll-fn :uid uid :data {:polling-ms polling-ms}}
-        (let [tracing-ctx t/*ctx*]
-          ;; ensure t/trace is blocking to wait for the inner loop
+        ;; ensure t/trace is blocking to wait for the inner loop
+        (let [span-ctx     (Context/current)
+              ctx          {:id ::worker-poll-fn :uid uid}]
           @(-> (p/delay polling-ms)
                (p/chain (fn [_]
                           (loop []
@@ -120,15 +122,16 @@
                             (when-let [task (store/dequeue-task store)]
                               (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
                               (submit task-executor (fn []
-                                                      (t/with-ctx tracing-ctx
-                                                        (t/trace! {:id ::worker-execute-fn :data {:task-id (:id task)} :parent {:id ::worker-poll-fn :uid uid}}
-                                                          (worker-execute-fn store protocols task task-counter (fn [] (not (running? task-executor))))))))))))
+                                                      (t/with-ctx ctx
+                                                        (with-open [_ (.makeCurrent (Span/fromContext span-ctx))]
+                                                          (t/trace! {:id ::worker-execute-fn :parent {:id ::worker-poll-fn :uid uid} :data {:task-id (:id task)}}
+                                                            (t/catch->error! ::error
+                                                              (worker-execute-fn store protocols task task-counter (fn [] (not (running? task-executor))))))))))))))
                (p/catch (fn [e]
-                          #?(:clj (-> (Span/current)
-                                      (.setStatus StatusCode/ERROR)
-                                      (.recordException e)))
+                          (t/with-ctx ctx
+                            (t/error! {:id ::worker-poll-fn} e))
                           (t/log! {:level :warn :data {:exception e}} ["Caught error during task polling, continuing"])))
-               (p/finally (fn []
+               (p/finally (fn [_ _]
                             (when (running? task-executor)
                               (p/recur))))))))))
 
@@ -153,18 +156,27 @@
    (start-worker! store {}))
   ([store & {:keys [protocols polling-ms] :or {protocols {} polling-ms 100}}]
    (let [run?         (atom true)
-         task-counter (atom 0)]
+         task-counter (atom 0)
+         uid          (random-uuid)]
      (internal/libthread "Worker"
        #_{:clj-kondo/ignore [:loop-without-recur :invalid-arity]}
        (p/loop []
-         (-> (p/delay polling-ms)
-             (p/chain (fn [_]
-                        (when-let [task (store/dequeue-task store)]
-                          (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
-                          (internal/libthread (str "Worker-" (:id task))
-                            (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))
-                        (when @run?
-                          (p/recur)))))))
+         (t/trace! {:id ::worker :uid uid :data {:polling-ms polling-ms}}
+           ;; ensure t/trace is blocking to wait for the inner loop
+           (let [span-ctx     (Context/current)
+                 ctx          {:id ::worker :uid uid}]
+            (-> (p/delay polling-ms)
+                (p/chain (fn [_]
+                           (when-let [task (store/dequeue-task store)]
+                             (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
+                             (internal/libthread (str "Worker-" (:id task))
+                               (t/with-ctx ctx
+                                 (with-open [_ (.makeCurrent (Span/fromContext span-ctx))]
+                                   (t/trace! {:id ::worker-execute-fn :parent {:id ::worker :uid uid} :data {:task-id (:id task)}}
+                                     (t/catch->error! ::error
+                                       (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))))))
+                           (when @run?
+                             (p/recur)))))))))
      (fn [] (reset! run? false)))))
 
 (defn enqueue-and-wait
@@ -185,3 +197,24 @@
     (doseq [f @thunks]
       (swap! thunks pop)
       (f))))
+
+#_#_
+(defonce task-executor (Executors/newFixedThreadPool 10))
+(let [uid (random-uuid)]
+  (p/loop []
+    (t/trace! {:id ::ROOT :uid uid :data {:polling-ms 500}}
+              (let [span-ctx (Context/current)
+                    ctx      {:id ::ROOT :uid uid :span-ctx span-ctx}]
+                ;; ensure t/trace is blocking to wait for the inner loop
+                @(-> (p/delay 1000)
+                     (p/chain (fn [_]
+                                (.submit task-executor ^Callable (fn []
+                                                                   (t/with-ctx ctx
+                                                                     (with-open [_ (.makeCurrent (Span/fromContext span-ctx))]
+                                                                       (t/trace! {:id ::CHILD :parent {:id ::ROOT :uid uid}}
+                                                                         (+ 1 1))))))))
+                     (p/catch (fn [e]
+                                (t/with-ctx ctx
+                                  (t/error! {:id ::worker-poll-fn} e))))
+                     (p/finally (fn [_ _]
+                                  (p/recur))))))))

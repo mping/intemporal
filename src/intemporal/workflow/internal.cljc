@@ -184,7 +184,8 @@
                                                (let [inner (p/create (fn [res rej]
                                                                        (-> (p/vthread ;uthread
                                                                              (binding [*env* (dissoc env :vthread?)]
-                                                                               (apply fvar args')))
+                                                                               (t/trace! {:id sym}
+                                                                                 (apply fvar args'))))
                                                                            (p/then res)
                                                                            (p/catch rej))))]
                                                  ;; in cljs we dont need delay bc its single threaded
@@ -198,7 +199,8 @@
                                                ;; exceptions
                                                (-> nil
                                                    (p/then (fn [_] (binding [*env* env]
-                                                                     (apply fvar args'))))
+                                                                     (t/trace! {:id sym}
+                                                                       (apply fvar args')))))
                                                    (p/then' handle-ok)
                                                    (p/catch handle-fail))))]
                                  ;; r can be a value or a promise

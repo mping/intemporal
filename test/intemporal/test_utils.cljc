@@ -138,4 +138,3 @@
 (def with-trace-logging
   #?(:cljs {:before setup-telemere}
      :clj  (fn with-trace-logging [f] (setup-telemere) (f))))
-
