@@ -9,7 +9,7 @@
              [intemporal.workflow :refer [with-env]]))
   #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
                    [java.lang AutoCloseable]
-                   [io.opentelemetry.api.trace Span StatusCode]
+                   [io.opentelemetry.api.trace Span]
                    [io.opentelemetry.context Context])))
 
 #?(:clj (set! *warn-on-reflection* true))
