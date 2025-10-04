@@ -72,10 +72,11 @@ jobs:
           npx shadow-cljs compile node
 
       # coverage section
-      - name: Tentative coverage
-        id: coverage
+      - name: Install lcov
         run: |
           sudo apt install -y lcov
+      - name: Coverage
+        run: |
           bin/run-coverage
 
       - name: Test Reports
