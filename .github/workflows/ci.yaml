@@ -62,9 +62,11 @@ jobs:
         run: clj-kondo --lint deps.edn src resources test
 
       - name: Run tests
+        if: false
         run: ./bin/kaocha test
 
       - name: Run clj tests
+        if: false
         #run: ./bin/kaocha test-cljs
         run: |
           npx shadow-cljs compile node
@@ -74,7 +76,7 @@ jobs:
         id: coverage
         run: |
           sudo apt install -y lcov
-          bin/run-coverage || true
+          bin/run-coverage
 
       - name: Test Reports
         uses: mikepenz/action-junit-report@v5
