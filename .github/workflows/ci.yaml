@@ -14,13 +14,29 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           version: "latest" # or pin to an specific version, e.g. "0.8.1"
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Docker login # to avoid dockerhub rate-limiting
         run: docker login --username "${{ secrets.DOCKERHUB_USERNAME }}" --password "${{ secrets.DOCKERHUB_PASSWORD }}"
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Check earthly version
         run: earthly --version
       - name: Run tests with earthly
-        run: earthly +build-all
+        run: earthly +build-all --ci --remote-cache=ghcr.io/mping/intemporal:ci-cache
+      - name: Setup LCOV
+        uses: hrishikesh-kadam/setup-lcov@v1
+      - name: Report code coverage
+        uses: zgosalvez/github-actions-report-lcov@v4
+        with:
+          coverage-files: coverage/lcov.*.info
+          artifact-name: code-coverage-report
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: .
+          update-comment: true
 
   clojure:
     if: false
