@@ -17,7 +17,7 @@ CLOVERAGE_OUTPUT=target/coverage-cljs bin/kaocha test-cljs --reporter documentat
 
 printf "${BLUE}combining coverage reports...${NC}\n"
 lcov --add-tracefile target/coverage-clj/lcov.info  --add-tracefile target/coverage-cljs/lcov.info -o coverage/lcov.merged.info
-genhtml coverage/lcov.merged.info -o coverage
+genhtml coverage/lcov.info -o coverage
 
 printf "${BLUE}done! opening report${NC}\n"
 xdg-open coverage/index.html || open coverage/index.html ||  true
