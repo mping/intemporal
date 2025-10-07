@@ -16,7 +16,7 @@ printf "${BLUE}running cljs tests...${NC}\n"
 CLOVERAGE_OUTPUT=target/coverage-cljs bin/kaocha test-cljs --reporter documentation
 
 printf "${BLUE}combining coverage reports...${NC}\n"
-lcov --add-tracefile target/coverage-clj/lcov.info  --add-tracefile target/coverage-cljs/lcov.info -o coverage/lcov.merged.info
+lcov --add-tracefile target/coverage-clj/lcov.info  --add-tracefile target/coverage-cljs/lcov.info -o coverage/lcov.info
 genhtml coverage/lcov.info -o coverage
 
 printf "${BLUE}done! opening report${NC}\n"
