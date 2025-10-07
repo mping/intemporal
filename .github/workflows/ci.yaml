@@ -9,6 +9,7 @@ jobs:
   earthly:
     name: Earthly ci
     runs-on: ubuntu-latest
+    permissions: write-all
     steps:
       - uses: earthly/actions-setup@v1
         with:
