@@ -30,6 +30,11 @@ jobs:
         run: earthly -P +test --ci --remote-cache=ghcr.io/mping/intemporal:ci-cache
       - name: Setup LCOV
         uses: hrishikesh-kadam/setup-lcov@v1
+      - name: Report coverage
+        uses: ayushgaud/lcov-reporter-action@master
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          lcov-file: './coverage/lcov.info'
       - uses: kcjpop/coverage-comments@v2.2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
