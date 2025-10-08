@@ -39,8 +39,15 @@ clj -A:dev:doc:cljs
 bin/kaocha test
 bin/kaocha test-cljs
 
-;; or run everything
+# or run everything
 bin/run-coverage
+
+# focusing
+./bin/kaocha test --focus intemporal.shutdown-restart-test
+
+# cljs focus is a bit different
+./bin/kaocha test-cljs --focus 'cljs:intemporal.shutdown-restart-test'
+
 ```
 
 # CI runs

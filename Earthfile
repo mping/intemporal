@@ -6,7 +6,7 @@ DO github.com/earthly/lib+INSTALL_DIND
 # FROM earthly/dind:ubuntu-24.04-docker-27.3.1-1
 
 RUN apt update
-RUN apt install -y rlwrap curl unzip wget lcov
+RUN apt -qq install -y rlwrap curl unzip wget lcov
 
 ### nodejs
 RUN curl -sL https://deb.nodesource.com/setup_20.x  | bash - && apt-get install -y nodejs
@@ -27,7 +27,7 @@ deps:
   RUN npm install
   #RUN wget https://github.com/apple/foundationdb/releases/download/7.3.63/foundationdb-clients_7.3.63-1_aarch64.deb
   #RUN dpkg -i foundationdb-clients_7.3.63-1_aarch64.deb
-  RUN wget https://github.com/apple/foundationdb/releases/download/7.1.31/foundationdb-clients_7.1.31-1_amd64.deb
+  RUN wget -q https://github.com/apple/foundationdb/releases/download/7.1.31/foundationdb-clients_7.1.31-1_amd64.deb
   RUN dpkg -i foundationdb-clients_7.1.31-1_amd64.deb
   RUN echo "docker:docker@127.0.0.1:4500" > /etc/foundationdb/fdb.cluster
 
@@ -64,8 +64,8 @@ test:
   FROM +build-base
   #DO github.com/earthly/lib+INSTALL_DIND
   COPY docker ./docker
-  COPY docker-compose.yml ./
-  WITH DOCKER --compose docker-compose.yml
+  COPY docker-compose.yaml ./
+  WITH DOCKER --compose docker-compose.yaml
     RUN bin/run-coverage
   END
   SAVE ARTIFACT ./coverage AS LOCAL ./coverage

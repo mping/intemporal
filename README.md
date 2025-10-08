@@ -56,7 +56,7 @@ Examples:
           (foo pr :X))))
 
 (def mstore (store/make-memstore))
-(def stop-worker (w/start-worker! mstore {`MyActivities (->MyActivitiesImpl)}))
+(def executor (w/start-poller! mstore {`MyActivities (->MyActivitiesImpl)}))
 
 ;; note that in cljs, this returns a promise
 (def res (w/with-env {:store mstore}
