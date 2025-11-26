@@ -5,8 +5,9 @@
             [taoensso.telemere :as t])
   #?(:cljs (:require-macros
              #_:clj-kondo/ignore
-             [intemporal.workflow.internal :refer [with-env-internal]]
+             [intemporal.workflow.internal :refer [with-env-internal trace!]]
              [intemporal.workflow :refer [with-env]]))
+  #?(:clj (:require [intemporal.workflow.internal :refer [trace!]]))
   #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
                    [java.lang AutoCloseable]
                    [io.opentelemetry.api.trace Span]
@@ -155,7 +156,7 @@
        @(p/loop []
           (-> (p/delay polling-ms)
               (p/chain (fn [_]
-                         (when-let [task  (store/dequeue-task store)]
+                         (when-let [task (store/dequeue-task store)]
                            (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
                            (internal/libthread (str "Worker-" (:id task))
                              (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))
@@ -167,6 +168,8 @@
        (reset! run? false)))))
 
 (defn enqueue-and-wait
+  "Adds the task to the internal queue, awaits for its execution.
+  Task might be fulfilled by other threads"
   [{:keys [store] :as opts} task]
   (t/log! {:level :debug :data {:sym (:sym task)}} ["Enqueuing task with id" (:id task)])
   (internal/enqueue-and-wait opts task))
@@ -181,6 +184,7 @@
   "Runs compensation in program order. A failure of the compensation action will stop running other compensations."
   []
   (let [thunks (-> internal/*env* :compensations)]
-    (doseq [f @thunks]
-      (swap! thunks pop)
-      (f))))
+    (trace! {:name "compensations" :attributes {:fn-count (count @thunks)}}
+      (doseq [f @thunks]
+        (swap! thunks pop)
+        (f)))))

@@ -5,31 +5,17 @@
             [promesa.core :as p]
             [taoensso.telemere :as t])
   #?(:clj (:require [steffan-westcott.clj-otel.context :as otctx]
-                    [net.cgrand.macrovich :as macros]))
+                    [net.cgrand.macrovich :as macros]
+                    [steffan-westcott.clj-otel.api.trace.span :as otspan]))
   #?(:cljs (:require-macros
              [net.cgrand.macrovich :as macros]
+             [intemporal.workflow.internal :refer [trace!]]
              #_:clj-kondo/ignore)))
 
 #?(:clj (set! *warn-on-reflection* true))
 
 ;;;;
 ;; utils
-
-;; why not telemere/trace!
-;; it doesnt understand async contexts
-;; see
-;; - https://github.com/taoensso/telemere/issues/59
-;; - https://app.slack.com/client/T03RZGPFR/C06ALA6EEUA/1747130277.615319
-(defmacro trace!
-  "Wraps body in a tracing context. "
-  [attrs & body]
-  (macros/case
-    ;; cljs: no telemetry
-    :cljs `(do ~@body)
-    :clj `(let [attrs# (do ~attrs)]
-            (otspan/with-span! attrs#
-                               (do ~@body)))))
-
 
 (defmacro libthread
   "Creates a thread for internal usage. Client code should not rely on this.
@@ -67,6 +53,46 @@
   [m & body]
   `(binding [*env* (merge default-env ~m)]
      (do ~@body)))
+
+;;;;
+;; telemetry
+
+(defn ->telemetry-context []
+  #?(:clj (otctx/->headers)
+     :cljs {}))
+
+(defmacro trace!
+  "Wraps body in a tracing context. "
+  [{:keys [name attributes] :as attrs} & body]
+  (macros/case
+    ;; cljs: no telemetry
+    :cljs `(do ~@body)
+    :clj `(let [attrs# (do ~attrs)]
+            (otspan/with-span! attrs#
+              (with-env-internal (merge *env* {:telemetry-context (->telemetry-context)})
+                (let [res# (do ~@body)]
+                  res#))))))
+
+(defmacro trace-async!
+  "Wraps body in a tracing context. "
+  [{:keys [name attributes] :as attrs} & body]
+  (macros/case
+    ;; cljs: no telemetry
+    :cljs `(do ~@body)
+    :clj `(let [attrs# (do ~attrs)]
+            (otspan/async-bound-cf-span attrs#
+              (with-env-internal (merge *env* {:telemetry-context (->telemetry-context)})
+                (let [res# (do ~@body)]
+                  res#))))))
+
+(defn trace-event!
+  ([task ename]
+   (trace-event! task ename {}))
+  ([task ename attrs]
+   #?(:clj (when-let [ctx (-> task :runtime :telemetry-context)]
+             (otspan/add-span-data! {:event {:name       (str ename)
+                                             :attributes attrs}
+                                     :context (otctx/headers->merged-context ctx)})))))
 
 ;;;;
 ;; task definitions
@@ -203,10 +229,13 @@
                                              (if vthread?
                                                (let [inner (p/create (fn [res rej]
                                                                        (-> (p/vthread ;TODO: user thread
+                                                                             (with-env-internal (-> env
+                                                                                                    (dissoc :vhtread?)
+                                                                                                    (assoc :telemetry-context (->telemetry-context))))
                                                                              (binding [*env* (dissoc env :vthread?)]
                                                                                ;(trace! {:id sym})
                                                                                #?(:clj (otctx/bind-context! (otctx/headers->merged-context (:telemetry-context env))
-                                                                                         (apply fvar bound-fn* args'))
+                                                                                         (apply fvar args'))
                                                                                   :cljs (apply fvar args'))))
                                                                            (p/then res)
                                                                            (p/catch rej))))]
