@@ -5,8 +5,11 @@
             [md5.core :as md5]
             [promesa.core :as p]
             [taoensso.telemere :as t])
-  #?(:clj  (:require [net.cgrand.macrovich :as macros])
+  #?(:clj  (:require [net.cgrand.macrovich :as macros]
+                     [intemporal.telemetry :refer [trace!]]
+                     [steffan-westcott.clj-otel.context :as otctx])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
+                            [intemporal.telemetry :refer [trace!]]
                             [intemporal.macros :refer [env-let defn-workflow stub-function stub-protocol]])))
 
 (def cljs-available?
@@ -69,14 +72,21 @@
          ;;   (my-workflow ...
          ;; TODO: fixme: task id generator must be deterministic for a given workflow
          (assert (some? (:store i/*env*)) "Environment does not have a `:store`, did you call `\n(with-env {:store ..}\n\t(my-workflow ...` ?")
-         (let [ref#  (:ref i/*env*)
-               root# (:root i/*env*)
-               ;; id can be passed by env if we're dequeuing a task from store
-               id#   (or (:id i/*env*) (i/random-id))
+         (let [id#   (or (:id i/*env*) (i/random-id))
                fvar# #'~wname
-               task# (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv id#)]
-           (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" (:id task#)])
-           (w/enqueue-and-wait i/*env* task#))))))
+               orig# (subs (str fvar#) 2 (dec (count (str fvar#))))]
+           (trace! {:name (format "workflow: %s" orig#) :attributes {:id id#}}
+             (let [ref#  (:ref i/*env*)
+                   root# (:root i/*env*)
+                   ;; id can be passed by env if we're dequeuing a task from store
+                   ctx#   (otctx/->headers)]
+               (let [task# (i/with-env-internal (merge i/*env* {:telemetry-context ctx#})
+                             (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv id#))]
+                 (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" (:id task#)])
+
+                 (i/with-env-internal (merge i/*env* {:telemetry-context ctx#})
+                   (w/enqueue-and-wait i/*env* task#))))))))))
+
 
 (defmacro stub-function
   "Stubs `f`, wrapping it in an activity-aware function."
@@ -97,10 +107,11 @@
 
          ;; an embedded workflow engine doesn't need to have a task per invocation
          (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id " id#])
-         (let [res# (i/resume-task i/*env* store# protos# task#)]
-           (macros/case
-             :cljs res#
-             :clj (deref res#)))))))
+         (trace! {:name (format "activity: %s" (symbol fvar#)) :attributes {:id id#}}
+           (let [res# (i/resume-task i/*env* store# protos# task#)]
+             (macros/case
+               :cljs res#
+               :clj (deref res#))))))))
 ;(w/enqueue-and-wait i/*env* task#)))))
 
 (defmacro stub-protocol
@@ -195,7 +206,8 @@
                                   id#)]
 
                     (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" id#])
-                    @(i/resume-task i/*env* store# protos# task#)))))))))
+                    (trace! {:name (format "activity: %s" aid#) :attributes {:id id#}}
+                      @(i/resume-task i/*env* store# protos# task#))))))))))
 ;(w/enqueue-and-wait i/*env* task#)))))))))
 
 (defmacro with-failure

@@ -3,12 +3,33 @@
   (:require [intemporal.store :as store]
             [intemporal.error :as error]
             [promesa.core :as p]
-            [taoensso.telemere :as t]))
+            [taoensso.telemere :as t])
+  #?(:clj (:require [steffan-westcott.clj-otel.context :as otctx]
+                    [net.cgrand.macrovich :as macros]))
+  #?(:cljs (:require-macros
+             [net.cgrand.macrovich :as macros]
+             #_:clj-kondo/ignore)))
 
 #?(:clj (set! *warn-on-reflection* true))
 
 ;;;;
 ;; utils
+
+;; why not telemere/trace!
+;; it doesnt understand async contexts
+;; see
+;; - https://github.com/taoensso/telemere/issues/59
+;; - https://app.slack.com/client/T03RZGPFR/C06ALA6EEUA/1747130277.615319
+(defmacro trace!
+  "Wraps body in a tracing context. "
+  [attrs & body]
+  (macros/case
+    ;; cljs: no telemetry
+    :cljs `(do ~@body)
+    :clj `(let [attrs# (do ~attrs)]
+            (otspan/with-span! attrs#
+                               (do ~@body)))))
+
 
 (defmacro libthread
   "Creates a thread for internal usage. Client code should not rely on this.
@@ -26,7 +47,7 @@
 (defn- env->runtime
   "Derives the `runtime` attrs from the current env."
   []
-  (select-keys *env* [:timeout-ms]))
+  (select-keys *env* [:timeout-ms :telemetry-context]))
 
 (defn random-id
   "Generates a random id. if env var `DEV` is defined, generates a two-word human-readable id."
@@ -101,7 +122,8 @@
 
   (try
     (let [shutting-down? (fn [] (and (ifn? shutdown?) (shutdown?))) ;; TODO fix this hack
-          [inv? res?] (store/all-events store id)]
+          [inv? res?] #_(trace! {:id ::store/all-events})
+                      (store/all-events store id)]
 
       ;; mark invoke/replay
       (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
@@ -113,6 +135,7 @@
         (cond
           ;; do we have an invocation event? if not, save this one
           (not inv?)
+          ;(trace! {:id ::store/task<-event})
           (store/task<-event store id next-event)
 
           ;; we do have an invocation event, is it a match of the above?
@@ -129,29 +152,25 @@
                            (let [panic? (shutting-down?)]
                              (try
                                (if panic?
+                                 ;(trace! {:id ::store/task<-panic})
                                  (store/task<-panic store id (error/panic "Worker shutting down during invocation result handling"))
-                                 (do (store/task<-event store id (assoc next-event :result r))
-                                     r))
+                                 ;(trace! {:id ::store/task<-event})
+                                 (do
+                                   (store/task<-event store id (assoc next-event :result r))
+                                   r))
                                (finally
                                  (if panic?
                                    (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupted result" id])
-                                   (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id])))))
-                           #_
-                           (if (shutting-down?)
-                             (do
-                               (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupting result" id])
-                               (store/task<-panic store id (error/panic "Worker shutting down during invocation result handling")))
-                             (do
-                               (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id])
-                               (store/task<-event store id (assoc next-event :result r))
-                               r)))
+                                   (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id]))))))
             handle-fail  (fn [e]
                            (if (shutting-down?)
                              (do
                                (t/log! {:level :warn :data {:exception e}} ["Exception caught during shutdown, panicking task"])
+                               ;(trace! {:id ::store/task<-panic})
                                (store/task<-panic store id (error/panic "Worker shutting down during invocation failure handling")))
                              (do
                                (t/log! {:level :debug :data {:sym sym :exception e}} ["Exception caught during actual function invocation for task" id])
+                               ;(trace! {:id ::store/task<-event})
                                (store/task<-event store id (cond-> (assoc next-failure :error e)
                                                                    (error/internal-error? e) (assoc :type ::failure)))))
                            (p/rejected e))
@@ -161,6 +180,7 @@
                            (let [success? (some? (:result res?))
                                  retval   (if success? (:result res?) (:error? res?))]
                              ;etype    (if success? :result :error)]
+                             ;(trace! {:id ::store/task<-event})
                              (store/task<-event store id res?)
                              (if success?
                                (p/resolved retval)
@@ -182,10 +202,12 @@
                                              ;; - then we can process the underlying impl call
                                              (if vthread?
                                                (let [inner (p/create (fn [res rej]
-                                                                       (-> (p/vthread ;uthread
+                                                                       (-> (p/vthread ;TODO: user thread
                                                                              (binding [*env* (dissoc env :vthread?)]
-                                                                               (t/trace! {:id sym}
-                                                                                 (apply fvar args'))))
+                                                                               ;(trace! {:id sym})
+                                                                               #?(:clj (otctx/bind-context! (otctx/headers->merged-context (:telemetry-context env))
+                                                                                         (apply fvar bound-fn* args'))
+                                                                                  :cljs (apply fvar args'))))
                                                                            (p/then res)
                                                                            (p/catch rej))))]
                                                  ;; in cljs we dont need delay bc its single threaded
@@ -199,8 +221,10 @@
                                                ;; exceptions
                                                (-> nil
                                                    (p/then (fn [_] (binding [*env* env]
-                                                                     (t/trace! {:id sym}
-                                                                       (apply fvar args')))))
+                                                                     ;(trace! {:id sym})
+                                                                     #?(:clj (otctx/bind-context! (otctx/headers->merged-context (:telemetry-context env))
+                                                                               (apply fvar args'))
+                                                                        :cljs (apply fvar args')))))
                                                    (p/then' handle-ok)
                                                    (p/catch handle-fail))))]
                                  ;; r can be a value or a promise
@@ -215,6 +239,7 @@
     ;; ensure we terminate the fn call, even if the next event wouldnt be the expected type
     (catch #?(:clj Exception :cljs js/Error) e
       (let [wrapped (ex-info "Internal error while resuming execution" {::type :internal} e)]
+        ;(trace! {:id ::store/task<-event})
         (store/task<-event store id {:ref id :root (or root id) :type ::failure :sym sym :error wrapped}))
       (p/rejected e))))
 
@@ -247,6 +272,7 @@
   (assert (some? store) "Store should exist")
   (assert (some? task) "Task should exist")
 
+  ;; TODO trace
   (let [db-task (or (store/find-task store id)
                     (store/enqueue-task store task))
 

@@ -56,7 +56,8 @@
 
 (def ^:private RuntimeConfig
   [:map {:closed false}
-   [:timeout-ms {:optional true} :int]])
+   [:timeout-ms {:optional true} :int]
+   [:telemetry-context {:optional true} [:maybe :map]]])
 
 (def ^:private Task
   [:map {:closed true}

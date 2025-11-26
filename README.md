@@ -85,5 +85,7 @@ Examples:
 - [x] Convert to `.cljc` 
 - [x] workers + queues
 - [x] saga
-- [ ] retries
-- [ ] signals
+- [ ] Workflow cancellation
+- [ ] Optional fine grained tracing
+- [ ] Retries
+- [ ] Signals

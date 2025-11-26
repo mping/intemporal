@@ -15,10 +15,6 @@
 #?(:clj (set! *warn-on-reflection* true))
 
 ;;;;
-;; logging/tracing
-
-
-;;;;
 ;; runtime
 
 (defmacro with-env
@@ -110,38 +106,26 @@
 (defn- worker-poll-fn
   "Continously polls for task while `task-executor` is active."
   [store protocols task-executor polling-ms]
-  (let [task-counter (atom 0)
-        uid          (random-uuid)]
+  (let [task-counter   (atom 0)
+        uid            (random-uuid)
+        shutting-down? (fn [] (not (running? task-executor)))]
     #_{:clj-kondo/ignore [:loop-without-recur :invalid-arity]}
-    (p/loop []
-      (t/trace! {:id ::worker-poll-fn :uid uid :data {:polling-ms polling-ms}}
-        ;; ensure t/trace is blocking to wait for the inner loop
-        (let [span-ctx     #?(:clj (Context/current) :cljs nil)
-              ctx          {:id ::worker-poll-fn :uid uid}]
-          @(-> (p/delay polling-ms)
-               (p/chain (fn [_]
-                          (loop []
-                            (t/log! {:level :debug} ["Polling for tasks"])
-                            (when-let [task (store/dequeue-task store)]
-                              (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
-                              (submit task-executor (fn []
-                                                      (t/with-ctx ctx
-                                                        #?(:cljs
-                                                           (t/trace! {:id ::worker-execute-fn :parent {:id ::worker-poll-fn :uid uid} :data {:task-id (:id task)}}
-                                                             (t/catch->error! ::error
-                                                               (worker-execute-fn store protocols task task-counter (fn [] (not (running? task-executor))))))
-                                                           :clj
-                                                           (with-open [_ (.makeCurrent (Span/fromContext span-ctx))]
-                                                             (t/trace! {:id ::worker-execute-fn :parent {:id ::worker-poll-fn :uid uid} :data {:task-id (:id task)}}
-                                                               (t/catch->error! ::error
-                                                                 (worker-execute-fn store protocols task task-counter (fn [] (not (running? task-executor)))))))))))))))
-               (p/catch (fn [e]
-                          (t/with-ctx ctx
-                            (t/error! {:id ::worker-poll-fn} e))
-                          (t/log! {:level :warn :data {:exception e}} ["Caught error during task polling, continuing"])))
-               (p/finally (fn [_ _]
-                            (when (running? task-executor)
-                              (p/recur))))))))))
+
+    @(p/loop []
+       (-> (p/delay polling-ms)
+           (p/chain (fn [_]
+                      (loop []
+                        (t/log! {:level :debug} ["Polling for tasks"])
+                        (when-let [task (store/dequeue-task store)]
+                          (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
+                          (submit task-executor (fn []
+                                                  (worker-execute-fn store protocols task task-counter shutting-down?)))))))
+           (p/catch (fn [e]
+                      (t/error! {:id ::worker-poll-fn} e)
+                      (t/log! {:level :warn :data {:exception e}} ["Caught error during task polling, continuing"])))
+           (p/finally (fn [_ _]
+                        (when (running? task-executor)
+                          (p/recur))))))))
 
 (defn start-poller!
   "Starts a poller that will submit tasks to the `task-executor`.
@@ -168,29 +152,16 @@
          uid          (random-uuid)]
      (internal/libthread "Worker"
        #_{:clj-kondo/ignore [:loop-without-recur :invalid-arity]}
-       (p/loop []
-         (t/trace! {:id ::worker :uid uid :data {:polling-ms polling-ms}}
-           ;; ensure t/trace is blocking to wait for the inner loop
-           (let [span-ctx     #?(:clj (Context/current) :cljs nil)
-                 ctx          {:id ::worker :uid uid}]
-            (-> (p/delay polling-ms)
-                (p/chain (fn [_]
-                           (when-let [task (store/dequeue-task store)]
-                             (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
-                             (internal/libthread (str "Worker-" (:id task))
-                               (t/with-ctx ctx
-                                 #?(:cljs
-                                    (t/trace! {:id ::worker-execute-fn :parent {:id ::worker :uid uid} :data {:task-id (:id task)}}
-                                      (t/catch->error! ::error
-                                        (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))
-                                    :clj
-                                    (with-open [_ (.makeCurrent (Span/fromContext span-ctx))]
-                                      (t/trace! {:id ::worker-execute-fn :parent {:id ::worker :uid uid} :data {:task-id (:id task)}}
-                                        (t/catch->error! ::error
-                                          (worker-execute-fn store protocols task task-counter (fn [] (not @run?))))))))))
+       @(p/loop []
+          (-> (p/delay polling-ms)
+              (p/chain (fn [_]
+                         (when-let [task  (store/dequeue-task store)]
+                           (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
+                           (internal/libthread (str "Worker-" (:id task))
+                             (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))
 
-                           (when @run?
-                             (p/recur)))))))))
+                         (when @run?
+                           (p/recur)))))))
      (fn []
        (t/log! {:level :info} ["Stopping worker"])
        (reset! run? false)))))

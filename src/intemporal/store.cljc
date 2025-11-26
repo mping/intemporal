@@ -233,7 +233,7 @@
          (maybe-fail!)
          (let [task        (find-task this id)
                deferred    (p/deferred)
-               wrap-result (fn [{:keys [result] :as task}]
+               wrap-result (bound-fn [{:keys [result] :as task}]
                              (cond
                                (si/success? task) (p/resolved result)
                                (si/failure? task) (p/rejected result)
@@ -243,14 +243,14 @@
              (wrap-result task)
              ;;else
              (do
-               (watch-task this id (fn [task]
+               (watch-task this id (bound-fn [task]
                                      (when (si/terminal? task)
                                        (p/resolve! deferred task)
                                        true)))
                ;; wait for resolution
                ;; remember: js doesnt have blocking op so we need to chain
                (-> (p/timeout deferred timeout-ms ::timeout)
-                   (p/then (fn [resolved]
+                   (p/then (bound-fn [resolved]
                              (if (= ::timeout resolved)
                                (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
                                (wrap-result resolved)))))))))

@@ -1,18 +1,17 @@
 {:paths      ["src" "target"]
  :test-paths ["test"]
 
- :deps       {org.clojure/clojure                {:mvn/version "1.12.1"}
-              thheller/shadow-cljs               {:mvn/version "2.28.11"}
-              com.taoensso/telemere              {:mvn/version "1.1.0"}
-              com.taoensso/nippy                 {:mvn/version "3.6.0"}
-              io.opentelemetry/opentelemetry-api {:mvn/version "1.53.0"}
-              io.opentelemetry/opentelemetry-sdk {:mvn/version "1.53.0"}
+ :deps       {org.clojure/clojure                 {:mvn/version "1.12.1"}
+              thheller/shadow-cljs                {:mvn/version "2.28.11"}
+              com.taoensso/telemere               {:mvn/version "1.1.0"}
+              com.taoensso/nippy                  {:mvn/version "3.6.0"}
+              com.github.steffan-westcott/clj-otel-api {:mvn/version "0.2.10"}
               ;;stuff
-              net.cgrand/macrovich               {:mvn/version "0.2.2"}
-              funcool/promesa                    {:mvn/version "11.0.678"}
-              metosin/malli                      {:mvn/version "0.19.1"}
-              thedavidmeister/cljc-md5           {:mvn/version "0.0.2"}
-              missionary/missionary              {:mvn/version "b.46"}}
+              net.cgrand/macrovich                {:mvn/version "0.2.2"}
+              funcool/promesa                     {:mvn/version "11.0.678"}
+              metosin/malli                       {:mvn/version "0.19.1"}
+              thedavidmeister/cljc-md5            {:mvn/version "0.0.2"}
+              missionary/missionary               {:mvn/version "b.46"}}
 
  :aliases    {:dev   {:extra-paths ["dev" "test"]
                       :jvm-opts    ["-Djdk.attach.allowAttachSelf"]

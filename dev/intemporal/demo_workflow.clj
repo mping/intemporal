@@ -5,6 +5,8 @@
 
 ;;;;
 ;; demo
+;(clojure.pprint/pprint (telemere/check-interop))
+;l(telemere/add-handler! :default/open-telemetry (tot/handler:open-telemetry))
 
 (defn nested-fn [a]
   [a :nested])

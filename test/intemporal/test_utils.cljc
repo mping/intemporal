@@ -48,11 +48,12 @@
 (defn make-workflow-task [& {:keys [] :as args}]
   (make-task (assoc args :type :workflow)))
 
-(defn make-activity-task [& {:keys [] :as args}]
-  (make-task (assoc args :type :activity)))
+(comment "unused"
+  (defn make-activity-task [& {:keys [] :as args}]
+    (make-task (assoc args :type :activity)))
 
-(defn make-protocol-task [& {:keys [] :as args}]
-  (make-task (assoc args :type :proto-activity)))
+  (defn make-protocol-task [& {:keys [] :as args}]
+    (make-task (assoc args :type :proto-activity))))
 
 ;;;;
 ;; misc
