@@ -85,14 +85,13 @@
                 (let [res# (do ~@body)]
                   res#))))))
 
-(defn trace-event!
-  ([task ename]
-   (trace-event! task ename {}))
+(defn add-event!
   ([task ename attrs]
    #?(:clj (when-let [ctx (-> task :runtime :telemetry-context)]
-             (otspan/add-span-data! {:event {:name       (str ename)
-                                             :attributes attrs}
-                                     :context (otctx/headers->merged-context ctx)})))))
+             (otctx/with-context! (otctx/headers->merged-context ctx)
+               (add-event! ename attrs)))))
+  ([ename attrs]
+   #?(:clj (otspan/add-event! ename attrs))))
 
 ;;;;
 ;; task definitions
@@ -145,6 +144,7 @@
                      :required proto})))
   ;; do we have invocation and result events for this task?
   (t/log! {:level :debug :sym sym} ["Resuming task with id" id])
+  (add-event! :intemporal.workflow.internal.resume-fn-task/resuming {:id id})
 
   (try
     (let [shutting-down? (fn [] (and (ifn? shutdown?) (shutdown?))) ;; TODO fix this hack
@@ -305,7 +305,11 @@
   (let [db-task (or (store/find-task store id)
                     (store/enqueue-task store task))
 
+        _       (add-event! :intemporal.workflow.internal.enqueue-and-wait/db-task {})
         prom    (store/await-task store (:id db-task) opts)]
 
-    #?(:clj  (deref prom)
+    #?(:clj  (try
+               (deref prom)
+               (finally
+                 (add-event! :intemporal.workflow.internal.enqueue-and-wait/deref {})))
        :cljs prom)))

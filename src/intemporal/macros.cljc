@@ -6,9 +6,9 @@
             [promesa.core :as p]
             [taoensso.telemere :as t])
   #?(:clj  (:require [net.cgrand.macrovich :as macros]
-                     [intemporal.workflow.internal :refer [trace! trace-async! trace-event!]])
+                     [intemporal.workflow.internal :refer [trace! trace-async! add-event!]])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
-                            [intemporal.workflow.internal :refer [trace! trace-async! trace-event!]]
+                            [intemporal.workflow.internal :refer [trace! trace-async! add-event!]]
                             [intemporal.macros :refer [env-let defn-workflow stub-function stub-protocol]])))
 
 (def cljs-available?
@@ -81,6 +81,7 @@
                    ;; id can be passed by env if we're dequeuing a task from store
                    task# (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv id#)]
                (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" (:id task#)])
+               (add-event! ::w/enqueue-and-wait {})
                (w/enqueue-and-wait i/*env* task#))))))))
 
 (defmacro stub-function
