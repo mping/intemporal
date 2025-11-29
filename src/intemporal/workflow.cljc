@@ -5,10 +5,11 @@
             [taoensso.telemere :as t])
   #?(:cljs (:require-macros
              #_:clj-kondo/ignore
-             [intemporal.workflow.internal :refer [with-env-internal trace! add-event!]]
+             [intemporal.workflow.internal :refer [with-env-internal trace! trace-async! add-event!]]
              [intemporal.workflow :refer [with-env]]))
   #?(:clj (:require [intemporal.workflow.internal :as i]
-                    [intemporal.workflow.internal :refer [trace! add-event!]]))
+                    [intemporal.workflow.internal :refer [trace! trace-async! add-event!]]
+                    [steffan-westcott.clj-otel.context :as otctx]))
   #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
                    [java.lang AutoCloseable]
                    [io.opentelemetry.api.trace Span]
@@ -89,7 +90,7 @@
 
 (defn- worker-execute-fn
   "Executes a given protocol, activity or workflow `task`"
-  [store protocols {:keys [type id root] :as task} task-counter shutting-down?]
+  [store protocols {:keys [type id root runtime] :as task} task-counter shutting-down?]
   (let [runtime      (:runtime task)
         base-env     {:store     store
                       :type      type
@@ -102,8 +103,11 @@
         internal-env (merge internal/default-env base-env runtime)]
     ;; root task: we only enqueue workflows
     (with-env internal-env
-      (t/log! {:level :debug :data {:sym (:sym task) :env internal-env}} ["Resuming task with id" (:id task)])
-      (internal/resume-task internal-env store protocols task))))
+      (trace-async! {:name ::worker-execute-fn :attributes {:task-id (:id task)}}
+        (t/log! {:level :debug :data {:sym (:sym task) :env internal-env}} ["Resuming task with id" (:id task)])
+        #?(:cljs (internal/resume-task internal-env store protocols task)
+           :clj (otctx/bind-context! (otctx/headers->merged-context (:telemetry-context runtime))
+                  (internal/resume-task internal-env store protocols task)))))))
 
 (defn- worker-poll-fn
   "Continously polls for task while `task-executor` is active."
@@ -119,7 +123,7 @@
                       (loop []
                         (t/log! {:level :debug} ["Polling for tasks"])
                         (when-let [task (store/dequeue-task store)]
-                          ;; TODO cant really add tracing events onto the task
+                          ;; TODO cant really add tracing events onto the task without being inside a span
                           (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
                           (submit task-executor (fn []
                                                   (worker-execute-fn store protocols task task-counter shutting-down?)))))))

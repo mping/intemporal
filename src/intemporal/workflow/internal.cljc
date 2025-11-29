@@ -127,7 +127,36 @@
   (and (= t t2) (= s s2)))
 
 ;;;;
+;; traced store fns
+
+(defn- all-events [store id]
+  (add-event! ::store/all-events {:task-id id})
+  (store/all-events store id))
+
+(defn- task<-event [store task-id event-descr]
+  (add-event! (:type event-descr) {:task-id task-id})
+  (store/task<-event store task-id event-descr))
+
+(defn- task<-panic [store task-id error]
+  (add-event! ::store/task<-panic {:task-id task-id})
+  (store/task<-panic store task-id error))
+
+(defn- find-task [store task-id]
+  (add-event! ::store/find-task {:task-id task-id})
+  (store/find-task store task-id))
+
+(defn- enqueue-task [store task]
+  (add-event! ::store/enqueue-task {:task-id (:id task)})
+  (store/enqueue-task store task))
+
+(defn- await-task [store task-id opts]
+  (trace-async! {:name ::store/await-task
+                 :attributes {:task-id task-id}}
+          (store/await-task store task-id opts)))
+
+;;;;
 ;; task execution/replay
+
 
 (defn resume-fn-task
   "Resumes a generic fn call task"
@@ -143,13 +172,11 @@
                      :protocols protos
                      :required proto})))
   ;; do we have invocation and result events for this task?
-  (t/log! {:level :debug :sym sym} ["Resuming task with id" id])
-  (add-event! :intemporal.workflow.internal.resume-fn-task/resuming {:id id})
+  (t/log! {:level :debug :sym sym} ["Resuming try/catch task with id" id])
 
   (try
     (let [shutting-down? (fn [] (and (ifn? shutdown?) (shutdown?))) ;; TODO fix this hack
-          [inv? res?] #_(trace! {:id ::store/all-events})
-                      (store/all-events store id)]
+          [inv? res?] (all-events store id)]
 
       ;; mark invoke/replay
       (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
@@ -161,8 +188,7 @@
         (cond
           ;; do we have an invocation event? if not, save this one
           (not inv?)
-          ;(trace! {:id ::store/task<-event})
-          (store/task<-event store id next-event)
+          (task<-event store id next-event)
 
           ;; we do have an invocation event, is it a match of the above?
           (not (event-matches? inv? next-event))
@@ -172,33 +198,31 @@
       ;; mark success/failure or replay
       (let [next-event   {:ref id :root (or root id) :type success :sym sym}
             next-failure (assoc next-event :type failure)
-            handle-ok    (fn [r]
+            handle-ok    (bound-fn [r]
                            ;; TODO assert r is serializable!
                            ;; we check for shutdown because in js runtime, there is no thread interruption
                            (let [panic? (shutting-down?)]
                              (try
                                (if panic?
                                  ;(trace! {:id ::store/task<-panic})
-                                 (store/task<-panic store id (error/panic "Worker shutting down during invocation result handling"))
+                                 (task<-panic store id (error/panic "Worker shutting down during invocation result handling"))
                                  ;(trace! {:id ::store/task<-event})
-                                 (do
-                                   (store/task<-event store id (assoc next-event :result r))
+                                 (let [new-event (assoc next-event :result r)]
+                                   (task<-event store id new-event)
                                    r))
                                (finally
                                  (if panic?
                                    (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupted result" id])
                                    (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id]))))))
-            handle-fail  (fn [e]
+            handle-fail  (bound-fn [e]
                            (if (shutting-down?)
                              (do
                                (t/log! {:level :warn :data {:exception e}} ["Exception caught during shutdown, panicking task"])
-                               ;(trace! {:id ::store/task<-panic})
-                               (store/task<-panic store id (error/panic "Worker shutting down during invocation failure handling")))
+                               (task<-panic store id (error/panic "Worker shutting down during invocation failure handling")))
                              (do
                                (t/log! {:level :debug :data {:sym sym :exception e}} ["Exception caught during actual function invocation for task" id])
-                               ;(trace! {:id ::store/task<-event})
-                               (store/task<-event store id (cond-> (assoc next-failure :error e)
-                                                                   (error/internal-error? e) (assoc :type ::failure)))))
+                               (task<-event store id (cond-> (assoc next-failure :error e)
+                                                             (error/internal-error? e) (assoc :type ::failure)))))
                            (p/rejected e))
             retval       (cond
                            ;; are we replaying a result?
@@ -206,8 +230,7 @@
                            (let [success? (some? (:result res?))
                                  retval   (if success? (:result res?) (:error? res?))]
                              ;etype    (if success? :result :error)]
-                             ;(trace! {:id ::store/task<-event})
-                             (store/task<-event store id res?)
+                             (task<-event store id res?)
                              (if success?
                                (p/resolved retval)
                                (p/rejected retval)))
@@ -268,8 +291,7 @@
     ;; ensure we terminate the fn call, even if the next event wouldnt be the expected type
     (catch #?(:clj Exception :cljs js/Error) e
       (let [wrapped (ex-info "Internal error while resuming execution" {::type :internal} e)]
-        ;(trace! {:id ::store/task<-event})
-        (store/task<-event store id {:ref id :root (or root id) :type ::failure :sym sym :error wrapped}))
+        (task<-event store id {:ref id :root (or root id) :type ::failure :sym sym :error wrapped}))
       (p/rejected e))))
 
 #?(:clj (ns-unmap *ns* 'resume-task))
@@ -302,14 +324,11 @@
   (assert (some? task) "Task should exist")
 
   ;; TODO trace
-  (let [db-task (or (store/find-task store id)
-                    (store/enqueue-task store task))
+  (let [db-task (or (find-task store id)
+                    (enqueue-task store task))
 
         _       (add-event! :intemporal.workflow.internal.enqueue-and-wait/db-task {})
-        prom    (store/await-task store (:id db-task) opts)]
+        prom    (await-task store (:id db-task) opts)]
 
-    #?(:clj  (try
-               (deref prom)
-               (finally
-                 (add-event! :intemporal.workflow.internal.enqueue-and-wait/deref {})))
+    #?(:clj (deref prom)
        :cljs prom)))
