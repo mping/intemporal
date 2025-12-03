@@ -31,13 +31,13 @@
   (find-task [this id]
     "Finds the task on the db by id")
   (reenqueue-pending-tasks [this callback]
-    "Marks all pending tasks belonging to the store's `owner` as `new`")
+    "Marks all pending tasks belonging to the store's `owner` (or `nil` owner) as `new`")
   (release-pending-tasks [this]
-    "Disowns all tasks that are pending for the store's `owner`, making them available")
+    "Disowns all tasks that are pending for the store's `owner` (or `nil` owner), making them available")
   (enqueue-task [this task]
     "Atomically enqueues a protocol, workflow or activity task execution")
   (dequeue-task [this] [this opts]
-    "Atomically dequeues some workflow, protocol or activity task execution.
+    "Atomically dequeues some workflow, protocol or activity task.
     For deterministic purposes, should dequeue the oldest task first.
     If the task was deserialized, its `fvar` attribute must be a `fn`
     Opts:
@@ -90,7 +90,9 @@
 (def default-owner "intemporal")
 
 (defn make-store
-  "Creates a new memory-based store"
+  "Creates a new memory-based store. All workflows will belong to the store's owner.
+  When calling `release-pending-tasks` or `reenqueue-pending-tasks`, only tasks that either belong to the
+  store's `owner` or have `owner = nil` will be picked up."
   ([]
    (make-store nil))
   ([{:keys [owner file readers failures]
