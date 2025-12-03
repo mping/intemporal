@@ -5,11 +5,13 @@
             [promesa.core :as p]
             [taoensso.telemere :as t])
   #?(:clj (:require [steffan-westcott.clj-otel.context :as otctx]
+                    [steffan-westcott.clj-otel.api.trace.span :as otspan]
                     [net.cgrand.macrovich :as macros]
-                    [steffan-westcott.clj-otel.api.trace.span :as otspan]))
+                    [intemporal.store :refer [bfn]]))
   #?(:cljs (:require-macros
              [net.cgrand.macrovich :as macros]
-             [intemporal.workflow.internal :refer [trace!]]
+             [intemporal.workflow.internal :refer [trace! trace-async!]]
+             [intemporal.store :refer [bfn]]
              #_:clj-kondo/ignore)))
 
 #?(:clj (set! *warn-on-reflection* true))
@@ -198,7 +200,7 @@
       ;; mark success/failure or replay
       (let [next-event   {:ref id :root (or root id) :type success :sym sym}
             next-failure (assoc next-event :type failure)
-            handle-ok    (bound-fn [r]
+            handle-ok    (bfn [r]
                            ;; TODO assert r is serializable!
                            ;; we check for shutdown because in js runtime, there is no thread interruption
                            (let [panic? (shutting-down?)]
@@ -214,7 +216,7 @@
                                  (if panic?
                                    (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupted result" id])
                                    (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id]))))))
-            handle-fail  (bound-fn [e]
+            handle-fail  (bfn [e]
                            (if (shutting-down?)
                              (do
                                (t/log! {:level :warn :data {:exception e}} ["Exception caught during shutdown, panicking task"])
@@ -252,10 +254,9 @@
                                              (if vthread?
                                                (let [inner (p/create (fn [res rej]
                                                                        (-> (p/vthread ;TODO: user thread
-                                                                             (with-env-internal (-> env
-                                                                                                    (dissoc :vhtread?)
-                                                                                                    (assoc :telemetry-context (->telemetry-context))))
-                                                                             (binding [*env* (dissoc env :vthread?)]
+                                                                             (binding [*env* (-> env
+                                                                                                 (dissoc :vhtread?)
+                                                                                                 (assoc :telemetry-context (->telemetry-context)))]
                                                                                ;(trace! {:id sym})
                                                                                #?(:clj (otctx/bind-context! (otctx/headers->merged-context (:telemetry-context env))
                                                                                          (apply fvar args'))

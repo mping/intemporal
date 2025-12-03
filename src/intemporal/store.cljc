@@ -3,10 +3,21 @@
             [intemporal.store.internal :as si]
             [promesa.core :as p]
             [taoensso.telemere :as t]
-            #?(:clj [clojure.java.io :as io]))
+            #?(:clj [clojure.java.io :as io])
+            #?(:clj [net.cgrand.macrovich :as macros]))
+  #?(:cljs (:require-macros
+             [net.cgrand.macrovich :as macros]
+             [intemporal.store :refer [bfn]]))
   #?(:clj (:import [java.io File])))
 
 #?(:clj (set! *warn-on-reflection* true))
+
+(defmacro bfn
+  "Like bound-fn on JVM; falls back to fn on CLJS."
+  [args & body]
+  (macros/case
+    :clj  `(clojure.core/bound-fn ~args ~@body)
+    :cljs `(fn ~args ~@body)))
 
 ;;;;
 ;; main protos
@@ -245,14 +256,14 @@
              (wrap-result task)
              ;;else
              (do
-               (watch-task this id (bound-fn [task]
+               (watch-task this id (bfn [task]
                                      (when (si/terminal? task)
                                        (p/resolve! deferred task)
                                        true)))
                ;; wait for resolution
                ;; remember: js doesnt have blocking op so we need to chain
                (-> (p/timeout deferred timeout-ms ::timeout)
-                   (p/then (bound-fn [resolved]
+                   (p/then (bfn [resolved]
                              (if (= ::timeout resolved)
                                (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
                                (wrap-result resolved)))))))))
