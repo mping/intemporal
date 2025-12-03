@@ -27,7 +27,7 @@
   - `:timeout-ms`: optional timeout for workflow execution
   "
   [m & body]
-  `(internal/with-env-internal ~m ~@body))
+  `(internal/with-env-internal ~m (do ~@body)))
 
 (defn current-env
   "Returns the workflow execution environment for the current thread"
@@ -103,8 +103,8 @@
         internal-env (merge internal/default-env base-env runtime)]
     ;; root task: we only enqueue workflows
     (with-env internal-env
+      (t/log! {:level :debug :data {:sym (:sym task) :env internal-env}} ["Resuming task with id" (:id task)])
       (trace-async! {:name ::worker-execute-fn :attributes {:task-id (:id task)}}
-        (t/log! {:level :debug :data {:sym (:sym task) :env internal-env}} ["Resuming task with id" (:id task)])
         #?(:cljs (internal/resume-task internal-env store protocols task)
            :clj (otctx/bind-context! (otctx/headers->merged-context (:telemetry-context runtime))
                   (internal/resume-task internal-env store protocols task)))))))

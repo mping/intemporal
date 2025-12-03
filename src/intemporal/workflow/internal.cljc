@@ -154,7 +154,7 @@
 (defn- await-task [store task-id opts]
   (trace-async! {:name ::store/await-task
                  :attributes {:task-id task-id}}
-          (store/await-task store task-id opts)))
+    (store/await-task store task-id opts)))
 
 ;;;;
 ;; task execution/replay
@@ -210,6 +210,7 @@
                                  (task<-panic store id (error/panic "Worker shutting down during invocation result handling"))
                                  ;(trace! {:id ::store/task<-event})
                                  (let [new-event (assoc next-event :result r)]
+                                   #?(:clj (otspan/add-span-data! {:attributes {:replayed false :result r}}))
                                    (task<-event store id new-event)
                                    r))
                                (finally
@@ -229,13 +230,18 @@
             retval       (cond
                            ;; are we replaying a result?
                            (some? res?)
-                           (let [success? (some? (:result res?))
-                                 retval   (if success? (:result res?) (:error? res?))]
-                             ;etype    (if success? :result :error)]
+                           (let [success? (contains? res? :result)
+                                 retval   (if success? (:result res?) (:error? res?))
+                                 ;; we need to ensure replay events return the same type
+                                 ;; as if they were called via a vthread
+                                 wrapped (if vthread?
+                                           (p/vthread retval)
+                                           retval)]
+                             #?(:clj (otspan/add-span-data! {:attributes {:replayed true :result retval}}))
                              (task<-event store id res?)
                              (if success?
-                               (p/resolved retval)
-                               (p/rejected retval)))
+                               (p/resolved wrapped)
+                               (p/rejected wrapped)))
 
                            ;; no replay, lets do the actual call
                            (not res?)

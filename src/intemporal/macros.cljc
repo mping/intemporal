@@ -54,7 +54,7 @@
   "Runs `body` within a virtual thread, returning a promise."
   [& body]
   `(binding [i/*env* (assoc i/*env* :vthread? true)]
-     ~@body))
+     (do ~@body)))
 
 (defmacro defn-workflow
   "Defines a workflow. Workflows are functions that are resillient to crashes, as
