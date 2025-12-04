@@ -5,15 +5,12 @@
             [taoensso.telemere :as t])
   #?(:cljs (:require-macros
              #_:clj-kondo/ignore
-             [intemporal.workflow.internal :refer [with-env-internal trace! trace-async! add-event!]]
+             [intemporal.workflow.internal :refer [with-env-internal trace! trace-async!]]
              [intemporal.workflow :refer [with-env]]))
-  #?(:clj (:require [intemporal.workflow.internal :as i]
-                    [intemporal.workflow.internal :refer [trace! trace-async! add-event!]]
+  #?(:clj (:require [intemporal.workflow.internal :refer [trace! trace-async!]]
                     [steffan-westcott.clj-otel.context :as otctx]))
   #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
-                   [java.lang AutoCloseable]
-                   [io.opentelemetry.api.trace Span]
-                   [io.opentelemetry.context Context])))
+                   [java.lang AutoCloseable])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -123,12 +120,10 @@
                       (loop []
                         (t/log! {:level :debug} ["Polling for tasks"])
                         (when-let [task (store/dequeue-task store)]
-                          ;; TODO cant really add tracing events onto the task without being inside a span
                           (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
                           (submit task-executor (fn []
                                                   (worker-execute-fn store protocols task task-counter shutting-down?)))))))
            (p/catch (fn [e]
-                      ;(t/error! {:id ::worker-poll-fn} e)
                       (t/log! {:level :warn :data {:exception e}} ["Caught error during task polling, continuing"])))
            (p/finally (fn [_ _]
                         (when (running? task-executor)

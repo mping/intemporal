@@ -11,8 +11,7 @@
   #?(:cljs (:require-macros
              [net.cgrand.macrovich :as macros]
              [intemporal.workflow.internal :refer [trace! trace-async!]]
-             [intemporal.store :refer [bfn]]
-             #_:clj-kondo/ignore)))
+             [intemporal.store :refer [bfn]])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
