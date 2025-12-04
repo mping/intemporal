@@ -3,14 +3,7 @@
             [intemporal.store :as store]
             [intemporal.workflow :as w]
             [intemporal.macros :refer [stub-protocol vthread defn-workflow]]
-            [promesa.core :as p]
-            [taoensso.telemere :as telemere]
-            [taoensso.telemere.open-telemetry :as tot]))
-
-;;;;
-;; demo - recovery of a crashed process
-(clojure.pprint/pprint (telemere/check-interop))
-(telemere/add-handler! :default/open-telemetry (tot/handler:open-telemetry))
+            [promesa.core :as p]))
 
 (defprotocol ThreadActivity
   (with-thread [this id]))

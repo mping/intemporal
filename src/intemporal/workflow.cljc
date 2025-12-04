@@ -7,7 +7,7 @@
              #_:clj-kondo/ignore
              [intemporal.workflow.internal :refer [with-env-internal trace! trace-async!]]
              [intemporal.workflow :refer [with-env]]))
-  #?(:clj (:require [intemporal.workflow.internal :refer [trace! trace-async!]]
+  #?(:clj (:require [intemporal.workflow.internal :refer [trace! trace-async! add-event!]]
                     [steffan-westcott.clj-otel.context :as otctx]))
   #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
                    [java.lang AutoCloseable])))
@@ -87,7 +87,7 @@
 
 (defn- worker-execute-fn
   "Executes a given protocol, activity or workflow `task`"
-  [store protocols {:keys [type id root runtime] :as task} task-counter shutting-down?]
+  [store protocols {:keys [type id root runtime fvar] :as task} task-counter shutting-down?]
   (let [runtime      (:runtime task)
         base-env     {:store     store
                       :type      type
@@ -101,6 +101,10 @@
     ;; root task: we only enqueue workflows
     (with-env internal-env
       (t/log! {:level :debug :data {:sym (:sym task) :env internal-env}} ["Resuming task with id" (:id task)])
+      ;; this span creation is required in order for
+      ;; subsequent workflow traces to have a "parent" span, otherwise
+      ;; they won't show up correctly in jaeger
+      ;; TODO test with eg loki
       (trace-async! {:name ::worker-execute-fn :attributes {:task-id (:id task)}}
         #?(:cljs (internal/resume-task internal-env store protocols task)
            :clj (otctx/bind-context! (otctx/headers->merged-context (:telemetry-context runtime))

@@ -151,9 +151,8 @@
   (store/enqueue-task store task))
 
 (defn- await-task [store task-id opts]
-  (trace-async! {:name ::store/await-task
-                 :attributes {:task-id task-id}}
-    (store/await-task store task-id opts)))
+  (add-event! ::store/await-task {:task-id task-id})
+  (store/await-task store task-id opts))
 
 ;;;;
 ;; task execution/replay

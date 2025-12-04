@@ -15,7 +15,8 @@
 
  :aliases    {:dev   {:extra-paths ["dev" "test"]
                       :jvm-opts    ["-Djdk.attach.allowAttachSelf"]
-                      :extra-deps  {lambdaisland/kaocha                      {:mvn/version "1.91.1392"}
+                      :extra-deps  {exoscale/automata                        {:mvn/version "0.1.10"}
+                                    lambdaisland/kaocha                      {:mvn/version "1.91.1392"}
                                     lambdaisland/kaocha-cloverage            {:mvn/version "1.1.89"}
                                     lambdaisland/kaocha-junit-xml            {:mvn/version "1.17.101"}
                                     com.lambdaisland/kaocha-cljs             {:mvn/version "1.5.154"}
