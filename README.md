@@ -83,7 +83,8 @@ Examples:
   - [x] Protocol options
   - [x] Regular fn options
 - [x] Convert to `.cljc` 
-- [x] workers + queues
-- [x] saga
-- [ ] retries
-- [ ] signals
+- [x] Workers + Queues
+- [x] Saga pattern
+- [ ] Workflow cancellation
+- [x] OT tracing
+- [ ] Signals

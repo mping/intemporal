@@ -1,5 +1,6 @@
 ;; https://github.com/clj-kondo/clj-kondo/blob/master/doc/linters.md
 {:lint-as {intemporal.macros/defn-workflow clojure.core/defn
+           intemporal.store/bfn clojure.core/fn
            intemporal.macros/env-let clojure.core/let
            intemporal.macros/with-failure clojure.core/let
            intemporal.store.foundationdb/with-tx clojure.core/with-open

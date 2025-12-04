@@ -3,10 +3,21 @@
             [intemporal.store.internal :as si]
             [promesa.core :as p]
             [taoensso.telemere :as t]
-            #?(:clj [clojure.java.io :as io]))
+            #?(:clj [clojure.java.io :as io])
+            #?(:clj [net.cgrand.macrovich :as macros]))
+  #?(:cljs (:require-macros
+             [net.cgrand.macrovich :as macros]
+             [intemporal.store :refer [bfn]]))
   #?(:clj (:import [java.io File])))
 
 #?(:clj (set! *warn-on-reflection* true))
+
+(defmacro bfn
+  "Like bound-fn on JVM; falls back to fn on CLJS."
+  [args & body]
+  (macros/case
+    :clj  `(clojure.core/bound-fn ~args ~@body)
+    :cljs `(fn ~args ~@body)))
 
 ;;;;
 ;; main protos
@@ -31,13 +42,13 @@
   (find-task [this id]
     "Finds the task on the db by id")
   (reenqueue-pending-tasks [this callback]
-    "Marks all pending tasks belonging to the store's `owner` as `new`")
+    "Marks all pending tasks belonging to the store's `owner` (or `nil` owner) as `new`")
   (release-pending-tasks [this]
-    "Disowns all tasks that are pending for the store's `owner`, making them available")
+    "Disowns all tasks that are pending for the store's `owner` (or `nil` owner), making them available")
   (enqueue-task [this task]
     "Atomically enqueues a protocol, workflow or activity task execution")
   (dequeue-task [this] [this opts]
-    "Atomically dequeues some workflow, protocol or activity task execution.
+    "Atomically dequeues some workflow, protocol or activity task.
     For deterministic purposes, should dequeue the oldest task first.
     If the task was deserialized, its `fvar` attribute must be a `fn`
     Opts:
@@ -90,7 +101,9 @@
 (def default-owner "intemporal")
 
 (defn make-store
-  "Creates a new memory-based store"
+  "Creates a new memory-based store. All workflows will belong to the store's owner.
+  When calling `release-pending-tasks` or `reenqueue-pending-tasks`, only tasks that either belong to the
+  store's `owner` or have `owner = nil` will be picked up."
   ([]
    (make-store nil))
   ([{:keys [owner file readers failures]
@@ -243,14 +256,14 @@
              (wrap-result task)
              ;;else
              (do
-               (watch-task this id (fn [task]
+               (watch-task this id (bfn [task]
                                      (when (si/terminal? task)
                                        (p/resolve! deferred task)
                                        true)))
                ;; wait for resolution
                ;; remember: js doesnt have blocking op so we need to chain
                (-> (p/timeout deferred timeout-ms ::timeout)
-                   (p/then (fn [resolved]
+                   (p/then (bfn [resolved]
                              (if (= ::timeout resolved)
                                (throw (ex-info "Timeout waiting for task to be completed" {:task task}))
                                (wrap-result resolved)))))))))

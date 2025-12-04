@@ -5,18 +5,14 @@
             [taoensso.telemere :as t])
   #?(:cljs (:require-macros
              #_:clj-kondo/ignore
-             [intemporal.workflow.internal :refer [with-env-internal]]
+             [intemporal.workflow.internal :refer [with-env-internal trace! trace-async!]]
              [intemporal.workflow :refer [with-env]]))
+  #?(:clj (:require [intemporal.workflow.internal :refer [trace! trace-async! add-event!]]
+                    [steffan-westcott.clj-otel.context :as otctx]))
   #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
-                   [java.lang AutoCloseable]
-                   [io.opentelemetry.api.trace Span]
-                   [io.opentelemetry.context Context])))
+                   [java.lang AutoCloseable])))
 
 #?(:clj (set! *warn-on-reflection* true))
-
-;;;;
-;; logging/tracing
-
 
 ;;;;
 ;; runtime
@@ -28,7 +24,7 @@
   - `:timeout-ms`: optional timeout for workflow execution
   "
   [m & body]
-  `(internal/with-env-internal ~m ~@body))
+  `(internal/with-env-internal ~m (do ~@body)))
 
 (defn current-env
   "Returns the workflow execution environment for the current thread"
@@ -91,7 +87,7 @@
 
 (defn- worker-execute-fn
   "Executes a given protocol, activity or workflow `task`"
-  [store protocols {:keys [type id root] :as task} task-counter shutting-down?]
+  [store protocols {:keys [type id root runtime fvar] :as task} task-counter shutting-down?]
   (let [runtime      (:runtime task)
         base-env     {:store     store
                       :type      type
@@ -105,43 +101,37 @@
     ;; root task: we only enqueue workflows
     (with-env internal-env
       (t/log! {:level :debug :data {:sym (:sym task) :env internal-env}} ["Resuming task with id" (:id task)])
-      (internal/resume-task internal-env store protocols task))))
+      ;; this span creation is required in order for
+      ;; subsequent workflow traces to have a "parent" span, otherwise
+      ;; they won't show up correctly in jaeger
+      ;; TODO test with eg loki
+      (trace-async! {:name ::worker-execute-fn :attributes {:task-id (:id task)}}
+        #?(:cljs (internal/resume-task internal-env store protocols task)
+           :clj (otctx/bind-context! (otctx/headers->merged-context (:telemetry-context runtime))
+                  (internal/resume-task internal-env store protocols task)))))))
 
 (defn- worker-poll-fn
   "Continously polls for task while `task-executor` is active."
   [store protocols task-executor polling-ms]
-  (let [task-counter (atom 0)
-        uid          (random-uuid)]
+  (let [task-counter   (atom 0)
+        uid            (random-uuid)
+        shutting-down? (fn [] (not (running? task-executor)))]
     #_{:clj-kondo/ignore [:loop-without-recur :invalid-arity]}
-    (p/loop []
-      (t/trace! {:id ::worker-poll-fn :uid uid :data {:polling-ms polling-ms}}
-        ;; ensure t/trace is blocking to wait for the inner loop
-        (let [span-ctx     #?(:clj (Context/current) :cljs nil)
-              ctx          {:id ::worker-poll-fn :uid uid}]
-          @(-> (p/delay polling-ms)
-               (p/chain (fn [_]
-                          (loop []
-                            (t/log! {:level :debug} ["Polling for tasks"])
-                            (when-let [task (store/dequeue-task store)]
-                              (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
-                              (submit task-executor (fn []
-                                                      (t/with-ctx ctx
-                                                        #?(:cljs
-                                                           (t/trace! {:id ::worker-execute-fn :parent {:id ::worker-poll-fn :uid uid} :data {:task-id (:id task)}}
-                                                             (t/catch->error! ::error
-                                                               (worker-execute-fn store protocols task task-counter (fn [] (not (running? task-executor))))))
-                                                           :clj
-                                                           (with-open [_ (.makeCurrent (Span/fromContext span-ctx))]
-                                                             (t/trace! {:id ::worker-execute-fn :parent {:id ::worker-poll-fn :uid uid} :data {:task-id (:id task)}}
-                                                               (t/catch->error! ::error
-                                                                 (worker-execute-fn store protocols task task-counter (fn [] (not (running? task-executor)))))))))))))))
-               (p/catch (fn [e]
-                          (t/with-ctx ctx
-                            (t/error! {:id ::worker-poll-fn} e))
-                          (t/log! {:level :warn :data {:exception e}} ["Caught error during task polling, continuing"])))
-               (p/finally (fn [_ _]
-                            (when (running? task-executor)
-                              (p/recur))))))))))
+
+    @(p/loop []
+       (-> (p/delay polling-ms)
+           (p/chain (fn [_]
+                      (loop []
+                        (t/log! {:level :debug} ["Polling for tasks"])
+                        (when-let [task (store/dequeue-task store)]
+                          (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
+                          (submit task-executor (fn []
+                                                  (worker-execute-fn store protocols task task-counter shutting-down?)))))))
+           (p/catch (fn [e]
+                      (t/log! {:level :warn :data {:exception e}} ["Caught error during task polling, continuing"])))
+           (p/finally (fn [_ _]
+                        (when (running? task-executor)
+                          (p/recur))))))))
 
 (defn start-poller!
   "Starts a poller that will submit tasks to the `task-executor`.
@@ -168,34 +158,23 @@
          uid          (random-uuid)]
      (internal/libthread "Worker"
        #_{:clj-kondo/ignore [:loop-without-recur :invalid-arity]}
-       (p/loop []
-         (t/trace! {:id ::worker :uid uid :data {:polling-ms polling-ms}}
-           ;; ensure t/trace is blocking to wait for the inner loop
-           (let [span-ctx     #?(:clj (Context/current) :cljs nil)
-                 ctx          {:id ::worker :uid uid}]
-            (-> (p/delay polling-ms)
-                (p/chain (fn [_]
-                           (when-let [task (store/dequeue-task store)]
-                             (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
-                             (internal/libthread (str "Worker-" (:id task))
-                               (t/with-ctx ctx
-                                 #?(:cljs
-                                    (t/trace! {:id ::worker-execute-fn :parent {:id ::worker :uid uid} :data {:task-id (:id task)}}
-                                      (t/catch->error! ::error
-                                        (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))
-                                    :clj
-                                    (with-open [_ (.makeCurrent (Span/fromContext span-ctx))]
-                                      (t/trace! {:id ::worker-execute-fn :parent {:id ::worker :uid uid} :data {:task-id (:id task)}}
-                                        (t/catch->error! ::error
-                                          (worker-execute-fn store protocols task task-counter (fn [] (not @run?))))))))))
+       @(p/loop []
+          (-> (p/delay polling-ms)
+              (p/chain (fn [_]
+                         (when-let [task (store/dequeue-task store)]
+                           (t/log! {:level :debug :data {:sym (:sym task)}} ["Dequeued task with id" (:id task)])
+                           (internal/libthread (str "Worker-" (:id task))
+                             (worker-execute-fn store protocols task task-counter (fn [] (not @run?)))))
 
-                           (when @run?
-                             (p/recur)))))))))
+                         (when @run?
+                           (p/recur)))))))
      (fn []
        (t/log! {:level :info} ["Stopping worker"])
        (reset! run? false)))))
 
 (defn enqueue-and-wait
+  "Adds the task to the internal queue, awaits for its execution.
+  Task might be fulfilled by other threads"
   [{:keys [store] :as opts} task]
   (t/log! {:level :debug :data {:sym (:sym task)}} ["Enqueuing task with id" (:id task)])
   (internal/enqueue-and-wait opts task))
@@ -210,6 +189,7 @@
   "Runs compensation in program order. A failure of the compensation action will stop running other compensations."
   []
   (let [thunks (-> internal/*env* :compensations)]
-    (doseq [f @thunks]
-      (swap! thunks pop)
-      (f))))
+    (trace! {:name "compensations" :attributes {:fn-count (count @thunks)}}
+      (doseq [f @thunks]
+        (swap! thunks pop)
+        (f)))))

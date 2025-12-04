@@ -50,3 +50,4 @@
 
 (print-tables)
 (println "Result:" res)
+(stop-worker)

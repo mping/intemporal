@@ -3,7 +3,15 @@
   (:require [intemporal.store :as store]
             [intemporal.error :as error]
             [promesa.core :as p]
-            [taoensso.telemere :as t]))
+            [taoensso.telemere :as t])
+  #?(:clj (:require [steffan-westcott.clj-otel.context :as otctx]
+                    [steffan-westcott.clj-otel.api.trace.span :as otspan]
+                    [net.cgrand.macrovich :as macros]
+                    [intemporal.store :refer [bfn]]))
+  #?(:cljs (:require-macros
+             [net.cgrand.macrovich :as macros]
+             [intemporal.workflow.internal :refer [trace! trace-async!]]
+             [intemporal.store :refer [bfn]])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -26,7 +34,7 @@
 (defn- env->runtime
   "Derives the `runtime` attrs from the current env."
   []
-  (select-keys *env* [:timeout-ms]))
+  (select-keys *env* [:timeout-ms :telemetry-context]))
 
 (defn random-id
   "Generates a random id. if env var `DEV` is defined, generates a two-word human-readable id."
@@ -46,6 +54,45 @@
   [m & body]
   `(binding [*env* (merge default-env ~m)]
      (do ~@body)))
+
+;;;;
+;; telemetry
+
+(defn ->telemetry-context []
+  #?(:clj (otctx/->headers)
+     :cljs {}))
+
+(defmacro trace!
+  "Wraps body in a tracing context. "
+  [{:keys [name attributes] :as attrs} & body]
+  (macros/case
+    ;; cljs: no telemetry
+    :cljs `(do ~@body)
+    :clj `(let [attrs# (do ~attrs)]
+            (otspan/with-span! attrs#
+              (with-env-internal (merge *env* {:telemetry-context (->telemetry-context)})
+                (let [res# (do ~@body)]
+                  res#))))))
+
+(defmacro trace-async!
+  "Wraps body in a tracing context. "
+  [{:keys [name attributes] :as attrs} & body]
+  (macros/case
+    ;; cljs: no telemetry
+    :cljs `(do ~@body)
+    :clj `(let [attrs# (do ~attrs)]
+            (otspan/async-bound-cf-span attrs#
+              (with-env-internal (merge *env* {:telemetry-context (->telemetry-context)})
+                (let [res# (do ~@body)]
+                  res#))))))
+
+(defn add-event!
+  ([task ename attrs]
+   #?(:clj (when-let [ctx (-> task :runtime :telemetry-context)]
+             (otctx/with-context! (otctx/headers->merged-context ctx)
+               (add-event! ename attrs)))))
+  ([ename attrs]
+   #?(:clj (otspan/add-event! ename attrs))))
 
 ;;;;
 ;; task definitions
@@ -81,7 +128,35 @@
   (and (= t t2) (= s s2)))
 
 ;;;;
+;; traced store fns
+
+(defn- all-events [store id]
+  (add-event! ::store/all-events {:task-id id})
+  (store/all-events store id))
+
+(defn- task<-event [store task-id event-descr]
+  (add-event! (:type event-descr) {:task-id task-id})
+  (store/task<-event store task-id event-descr))
+
+(defn- task<-panic [store task-id error]
+  (add-event! ::store/task<-panic {:task-id task-id})
+  (store/task<-panic store task-id error))
+
+(defn- find-task [store task-id]
+  (add-event! ::store/find-task {:task-id task-id})
+  (store/find-task store task-id))
+
+(defn- enqueue-task [store task]
+  (add-event! ::store/enqueue-task {:task-id (:id task)})
+  (store/enqueue-task store task))
+
+(defn- await-task [store task-id opts]
+  (add-event! ::store/await-task {:task-id task-id})
+  (store/await-task store task-id opts))
+
+;;;;
 ;; task execution/replay
+
 
 (defn resume-fn-task
   "Resumes a generic fn call task"
@@ -97,11 +172,11 @@
                      :protocols protos
                      :required proto})))
   ;; do we have invocation and result events for this task?
-  (t/log! {:level :debug :sym sym} ["Resuming task with id" id])
+  (t/log! {:level :debug :sym sym} ["Resuming try/catch task with id" id])
 
   (try
     (let [shutting-down? (fn [] (and (ifn? shutdown?) (shutdown?))) ;; TODO fix this hack
-          [inv? res?] (store/all-events store id)]
+          [inv? res?] (all-events store id)]
 
       ;; mark invoke/replay
       (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
@@ -113,7 +188,7 @@
         (cond
           ;; do we have an invocation event? if not, save this one
           (not inv?)
-          (store/task<-event store id next-event)
+          (task<-event store id next-event)
 
           ;; we do have an invocation event, is it a match of the above?
           (not (event-matches? inv? next-event))
@@ -123,48 +198,48 @@
       ;; mark success/failure or replay
       (let [next-event   {:ref id :root (or root id) :type success :sym sym}
             next-failure (assoc next-event :type failure)
-            handle-ok    (fn [r]
+            handle-ok    (bfn [r]
                            ;; TODO assert r is serializable!
                            ;; we check for shutdown because in js runtime, there is no thread interruption
                            (let [panic? (shutting-down?)]
                              (try
                                (if panic?
-                                 (store/task<-panic store id (error/panic "Worker shutting down during invocation result handling"))
-                                 (do (store/task<-event store id (assoc next-event :result r))
-                                     r))
+                                 ;(trace! {:id ::store/task<-panic})
+                                 (task<-panic store id (error/panic "Worker shutting down during invocation result handling"))
+                                 ;(trace! {:id ::store/task<-event})
+                                 (let [new-event (assoc next-event :result r)]
+                                   #?(:clj (otspan/add-span-data! {:attributes {:replayed false :result r}}))
+                                   (task<-event store id new-event)
+                                   r))
                                (finally
                                  (if panic?
                                    (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupted result" id])
-                                   (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id])))))
-                           #_
-                           (if (shutting-down?)
-                             (do
-                               (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupting result" id])
-                               (store/task<-panic store id (error/panic "Worker shutting down during invocation result handling")))
-                             (do
-                               (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id])
-                               (store/task<-event store id (assoc next-event :result r))
-                               r)))
-            handle-fail  (fn [e]
+                                   (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id]))))))
+            handle-fail  (bfn [e]
                            (if (shutting-down?)
                              (do
                                (t/log! {:level :warn :data {:exception e}} ["Exception caught during shutdown, panicking task"])
-                               (store/task<-panic store id (error/panic "Worker shutting down during invocation failure handling")))
+                               (task<-panic store id (error/panic "Worker shutting down during invocation failure handling")))
                              (do
                                (t/log! {:level :debug :data {:sym sym :exception e}} ["Exception caught during actual function invocation for task" id])
-                               (store/task<-event store id (cond-> (assoc next-failure :error e)
-                                                                   (error/internal-error? e) (assoc :type ::failure)))))
+                               (task<-event store id (cond-> (assoc next-failure :error e)
+                                                             (error/internal-error? e) (assoc :type ::failure)))))
                            (p/rejected e))
             retval       (cond
                            ;; are we replaying a result?
                            (some? res?)
-                           (let [success? (some? (:result res?))
-                                 retval   (if success? (:result res?) (:error? res?))]
-                             ;etype    (if success? :result :error)]
-                             (store/task<-event store id res?)
+                           (let [success? (contains? res? :result)
+                                 retval   (if success? (:result res?) (:error? res?))
+                                 ;; we need to ensure replay events return the same type
+                                 ;; as if they were called via a vthread
+                                 wrapped (if vthread?
+                                           (p/vthread retval)
+                                           retval)]
+                             #?(:clj (otspan/add-span-data! {:attributes {:replayed true :result retval}}))
+                             (task<-event store id res?)
                              (if success?
-                               (p/resolved retval)
-                               (p/rejected retval)))
+                               (p/resolved wrapped)
+                               (p/rejected wrapped)))
 
                            ;; no replay, lets do the actual call
                            (not res?)
@@ -182,10 +257,14 @@
                                              ;; - then we can process the underlying impl call
                                              (if vthread?
                                                (let [inner (p/create (fn [res rej]
-                                                                       (-> (p/vthread ;uthread
-                                                                             (binding [*env* (dissoc env :vthread?)]
-                                                                               (t/trace! {:id sym}
-                                                                                 (apply fvar args'))))
+                                                                       (-> (p/vthread ;TODO: user thread
+                                                                             (binding [*env* (-> env
+                                                                                                 (dissoc :vhtread?)
+                                                                                                 (assoc :telemetry-context (->telemetry-context)))]
+                                                                               ;(trace! {:id sym})
+                                                                               #?(:clj (otctx/bind-context! (otctx/headers->merged-context (:telemetry-context env))
+                                                                                         (apply fvar args'))
+                                                                                  :cljs (apply fvar args'))))
                                                                            (p/then res)
                                                                            (p/catch rej))))]
                                                  ;; in cljs we dont need delay bc its single threaded
@@ -199,8 +278,10 @@
                                                ;; exceptions
                                                (-> nil
                                                    (p/then (fn [_] (binding [*env* env]
-                                                                     (t/trace! {:id sym}
-                                                                       (apply fvar args')))))
+                                                                     ;(trace! {:id sym})
+                                                                     #?(:clj (otctx/bind-context! (otctx/headers->merged-context (:telemetry-context env))
+                                                                               (apply fvar args'))
+                                                                        :cljs (apply fvar args')))))
                                                    (p/then' handle-ok)
                                                    (p/catch handle-fail))))]
                                  ;; r can be a value or a promise
@@ -215,7 +296,7 @@
     ;; ensure we terminate the fn call, even if the next event wouldnt be the expected type
     (catch #?(:clj Exception :cljs js/Error) e
       (let [wrapped (ex-info "Internal error while resuming execution" {::type :internal} e)]
-        (store/task<-event store id {:ref id :root (or root id) :type ::failure :sym sym :error wrapped}))
+        (task<-event store id {:ref id :root (or root id) :type ::failure :sym sym :error wrapped}))
       (p/rejected e))))
 
 #?(:clj (ns-unmap *ns* 'resume-task))
@@ -247,10 +328,12 @@
   (assert (some? store) "Store should exist")
   (assert (some? task) "Task should exist")
 
-  (let [db-task (or (store/find-task store id)
-                    (store/enqueue-task store task))
+  ;; TODO trace
+  (let [db-task (or (find-task store id)
+                    (enqueue-task store task))
 
-        prom    (store/await-task store (:id db-task) opts)]
+        _       (add-event! :intemporal.workflow.internal.enqueue-and-wait/db-task {})
+        prom    (await-task store (:id db-task) opts)]
 
-    #?(:clj  (deref prom)
+    #?(:clj (deref prom)
        :cljs prom)))

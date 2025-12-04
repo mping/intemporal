@@ -1,10 +1,14 @@
 (ns intemporal.demo-workflow
   (:require [intemporal.store :as store]
             [intemporal.workflow :as w]
-            [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]))
+            [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]
+            [intemporal.test-utils :as tu]))
 
 ;;;;
 ;; demo
+;(clojure.pprint/pprint (telemere/check-interop))
+;(telemere/add-handler! :default/open-telemetry (tot/handler:open-telemetry))
+(tu/setup-telemere)
 
 (defn nested-fn [a]
   [a :nested])

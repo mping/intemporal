@@ -21,9 +21,11 @@
     (Thread/sleep 200)
     id))
 
+(def nthreads 10)
+
 (defn-workflow my-workflow []
   (let [pr    (stub-protocol ThreadActivity {})
-        proms (for [i (range 10)]
+        proms (for [i (range nthreads)]
                 (vthread
                   (with-thread pr i)))]
     ;; at this point, all of `with-thread` calls are queued, so
@@ -49,7 +51,7 @@
               evts (sort-by :id evts)]
 
           (testing "workflow has result"
-            (is (= (into [] (range 10))
+            (is (= (into [] (range nthreads))
                    (-> evts last :result)))))))
 
     (stop-worker)))

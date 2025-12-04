@@ -5,8 +5,10 @@
             [md5.core :as md5]
             [promesa.core :as p]
             [taoensso.telemere :as t])
-  #?(:clj  (:require [net.cgrand.macrovich :as macros])
+  #?(:clj  (:require [net.cgrand.macrovich :as macros]
+                     [intemporal.workflow.internal :refer [trace! trace-async! add-event!]])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
+                            [intemporal.workflow.internal :refer [trace! trace-async! add-event!]]
                             [intemporal.macros :refer [env-let defn-workflow stub-function stub-protocol]])))
 
 (def cljs-available?
@@ -52,7 +54,7 @@
   "Runs `body` within a virtual thread, returning a promise."
   [& body]
   `(binding [i/*env* (assoc i/*env* :vthread? true)]
-     ~@body))
+     (do ~@body)))
 
 (defmacro defn-workflow
   "Defines a workflow. Workflows are functions that are resillient to crashes, as
@@ -69,14 +71,18 @@
          ;;   (my-workflow ...
          ;; TODO: fixme: task id generator must be deterministic for a given workflow
          (assert (some? (:store i/*env*)) "Environment does not have a `:store`, did you call `\n(with-env {:store ..}\n\t(my-workflow ...` ?")
-         (let [ref#  (:ref i/*env*)
-               root# (:root i/*env*)
-               ;; id can be passed by env if we're dequeuing a task from store
-               id#   (or (:id i/*env*) (i/random-id))
+         (let [id#   (or (:id i/*env*) (i/random-id))
                fvar# #'~wname
-               task# (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv id#)]
-           (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" (:id task#)])
-           (w/enqueue-and-wait i/*env* task#))))))
+               ;; #'my-workflown-fn- => my-workflow-fn
+               orig# (subs (str fvar#) 2 (dec (count (str fvar#))))]
+           (trace! {:name (format "workflow: %s" orig#) :attributes {:task-id id#}}
+             (let [ref#  (:ref i/*env*)
+                   root# (:root i/*env*)
+                   ;; id can be passed by env if we're dequeuing a task from store
+                   task# (i/create-workflow-task ref# root# (symbol fvar#) (macros/case :cljs fvar# :clj (var-get fvar#)) ~argv id#)]
+               (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" (:id task#)])
+               (add-event! ::w/enqueue-and-wait {})
+               (w/enqueue-and-wait i/*env* task#))))))))
 
 (defmacro stub-function
   "Stubs `f`, wrapping it in an activity-aware function."
@@ -97,11 +103,12 @@
 
          ;; an embedded workflow engine doesn't need to have a task per invocation
          (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id " id#])
-         (let [res# (i/resume-task i/*env* store# protos# task#)]
-           (macros/case
-             :cljs res#
-             :clj (deref res#)))))))
-;(w/enqueue-and-wait i/*env* task#)))))
+         (trace! {:name (format "activity: %s" (symbol fvar#)) :attributes {:task-id id#}}
+           (let [res# (i/resume-task i/*env* store# protos# task#)]
+             (macros/case
+               :cljs res#
+               :clj (deref res#))))))))
+               ;(w/enqueue-and-wait i/*env* task#)))))
 
 (defmacro stub-protocol
   "Stub a protocol definition. Opts are currently unused.
@@ -153,7 +160,7 @@
 
                       (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" id#])
                       (i/resume-task i/*env* store# protos# task#))))))))
-    ;(w/enqueue-and-wait i/*env* task#))))))))
+                      ;(w/enqueue-and-wait i/*env* task#))))))))
 
     :clj
     #_{:clj-kondo/ignore [:unresolved-symbol]}
@@ -195,8 +202,12 @@
                                   id#)]
 
                     (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" id#])
-                    @(i/resume-task i/*env* store# protos# task#)))))))))
-;(w/enqueue-and-wait i/*env* task#)))))))))
+                    (if (:vthread? i/*env*)
+                      (trace-async! {:name (format "activity: %s" aid#) :attributes {:task-id id# :protocol (-> ~proto :var symbol)}}
+                        @(i/resume-task i/*env* store# protos# task#))
+                      (trace! {:name (format "activity: %s" aid#) :attributes {:task-id id# :protocol (-> ~proto :var symbol)}}
+                        @(i/resume-task i/*env* store# protos# task#)))))))))))
+                        ;(w/enqueue-and-wait i/*env* task#)))))))))
 
 (defmacro with-failure
   "Runs `fcall`, ensuring that if it fails, compensation will always run.

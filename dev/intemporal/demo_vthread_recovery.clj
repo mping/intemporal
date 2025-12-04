@@ -5,9 +5,6 @@
             [intemporal.macros :refer [stub-protocol vthread defn-workflow]]
             [promesa.core :as p]))
 
-;;;;
-;; demo - recovery of a crashed process
-
 (defprotocol ThreadActivity
   (with-thread [this id]))
 
@@ -49,3 +46,6 @@
 (store/reenqueue-pending-tasks mstore println)
 ;; print again
 (print-tables)
+
+(comment
+  (stop-worker))
