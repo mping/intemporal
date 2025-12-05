@@ -7,7 +7,7 @@
             [intemporal.test-utils :as tu :refer [with-result]])
   (:import (java.util.concurrent CountDownLatch)))
 
-(t/use-fixtures :once tu/with-trace-logging)
+;(t/use-fixtures :once tu/with-trace-logging)
 
 (def activity-invoked? (CountDownLatch. 1))
 (def executor-shutdown? (CountDownLatch. 1))
@@ -34,7 +34,7 @@
   (testing "failure: task validation fails"
     (let [mstore   (store/make-store {})
           executor (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
-                                            :polling-ms 10})]
+                                            :polling-ms 500})]
 
       (testing "shutdown of ongoing workflow"
         (future
