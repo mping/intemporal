@@ -39,4 +39,5 @@
                       :deps        {io.github.clojure/tools.build {:mvn/version "0.10.10"}}
                       :ns-default  build}
 
-              :test  {:main-opts ["-m" "kaocha.runner"]}}}
+              :test  {:jvm-opts  ["--enable-native-access=ALL-UNNAMED"]
+                      :main-opts ["-m" "kaocha.runner"]}}}

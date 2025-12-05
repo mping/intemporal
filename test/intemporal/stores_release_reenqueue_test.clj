@@ -35,7 +35,7 @@
 
 ;;;; test proper
 
-(deftest executor-shutdown-test
+(deftest executor-shutdown-reenqueue-test
   (doseq [[label store] @stores]
 
     (store/clear-events store)
