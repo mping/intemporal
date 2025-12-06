@@ -7,7 +7,7 @@
              #_:clj-kondo/ignore
              [intemporal.workflow.internal :refer [with-env-internal trace! trace-async!]]
              [intemporal.workflow :refer [with-env]]))
-  #?(:clj (:require [intemporal.workflow.internal :refer [trace! trace-async! add-event!]]
+  #?(:clj (:require [intemporal.workflow.internal :refer [trace! trace-async!]]
                     [steffan-westcott.clj-otel.context :as otctx]))
   #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
                    [java.lang AutoCloseable])))
