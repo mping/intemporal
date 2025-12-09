@@ -35,13 +35,13 @@
 
 (deftest store-failure-test
   (testing "failure: task validation fails"
-    (let [mstore      (store/make-store {:failures {:validation 1.0}})
-          stop-worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
+    (let [mstore (store/make-store {:failures {:validation 1.0}})
+          ex     (w/start-poller! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
 
       (with-result [res (w/with-env {:store mstore}
-                          (my-workflow :ok))]
+                                    (my-workflow :ok))]
         (is (instance? #?(:clj Exception :cljs js/Error) res))
         (is (= {:intemporal.workflow.internal/type :internal} (ex-data (or (ex-cause res) res))))
-        (stop-worker)))))
+        (w/shutdown ex 1000)))))
 
 ;(cljs.test/run-tests *ns*)

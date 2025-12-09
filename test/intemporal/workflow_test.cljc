@@ -27,7 +27,7 @@
 
      :cljs
      (env-let [f (stub-function nested-fn)]
-       (f :sub))))
+              (f :sub))))
 
 (defprotocol MyActivities
   (foo [this a]))
@@ -56,13 +56,13 @@
 (deftest workflow-happy-path-test
   (testing "workflow"
     (let [mstore      (store/make-store)
-          stop-worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})
+          ex          (w/start-poller! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})
           uuid-store  (atom nil)
           workflow-id (str (random-uuid))]
 
       (with-result [v (w/with-env {:store mstore
-                                   :id workflow-id}
-                        (my-workflow uuid-store))]
+                                   :id    workflow-id}
+                                  (my-workflow uuid-store))]
 
         (testing "workflow result"
           (is (= [:root [:sub :nested] [:proto :pr]]
@@ -112,7 +112,7 @@
               (is (every? #(= @uuid-store %) (map :id tasks)))
               (is (= @uuid-store workflow-id)))))
 
-        (stop-worker)))))
+        (w/shutdown ex 1000)))))
 
 #_:clj-kondo/ignore
 (comment

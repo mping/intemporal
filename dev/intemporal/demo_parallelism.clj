@@ -1,9 +1,8 @@
 (ns intemporal.demo-parallelism
   (:require [intemporal.store :as store]
             [intemporal.workflow :as w]
-            [promesa.core :as p])
-  (:require [intemporal.macros :refer [stub-protocol defn-workflow vthread]]
-            [intemporal.workflow]))
+            [intemporal.macros :refer [stub-protocol defn-workflow vthread]]
+            [promesa.core :as p]))
 
 ;;;;
 ;; demo
@@ -26,8 +25,8 @@
     ;; this code is deterministic up to here
     @(p/all proms)))
 
-(def mstore (store/make-store ))
-(def stop-worker (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}}))
+(def mstore (store/make-store))
+(def ex (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}}))
 
 ;; note that in cljs, this returns a promise
 (def res (w/with-env {:store mstore}

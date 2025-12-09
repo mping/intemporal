@@ -39,9 +39,9 @@
 
 (deftest activity-failure-test
   (testing "failure: activity throws"
-    (let [mstore      (store/make-store)
-          stop-worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
+    (let [mstore (store/make-store)
+          ex     (w/start-poller! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}})]
       (with-result [res (w/with-env {:store mstore}
-                          (my-workflow :nok))]
+                                    (my-workflow :nok))]
         (is (instance? #?(:clj Exception :cljs js/Error) res))
-        (stop-worker)))))
+        (w/shutdown ex 1000)))))

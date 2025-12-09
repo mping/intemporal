@@ -31,15 +31,15 @@
 ;;;; test proper
 
 (def mstore (store/make-store {}))
-(def stop-worker (w/start-worker! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
-                                          :polling-ms 10}))
+(def ex (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
+                                 :polling-ms 10}))
 
 (deftest executor-shutdown-test
   (testing "shutdown of ongoing workflow"
 
     (with-result [res (w/with-env {:store mstore}
-                        (my-workflow :ok))]
-      (stop-worker)
+                                  (my-workflow :ok))]
+      (w/shutdown ex 1000)
 
       (is (instance? js/Error res))
       (is (error/panic? res))
