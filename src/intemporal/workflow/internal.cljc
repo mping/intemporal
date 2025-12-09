@@ -11,7 +11,8 @@
   #?(:cljs (:require-macros
              [net.cgrand.macrovich :as macros]
              [intemporal.workflow.internal :refer [trace! trace-async!]]
-             [intemporal.store :refer [bfn]])))
+             [intemporal.store :refer [bfn]]))
+  #?(:clj (:import [java.util.function BiConsumer])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -80,11 +81,17 @@
   (macros/case
     ;; cljs: no telemetry
     :cljs `(do ~@body)
-    :clj `(let [attrs# (do ~attrs)]
-            (otspan/async-bound-cf-span attrs#
-              (with-env-internal (merge *env* {:telemetry-context (->telemetry-context)})
-                (let [res# (do ~@body)]
-                  res#))))))
+    :clj `(let [attrs# (do ~attrs)
+                span# (otspan/new-span! attrs#)]
+            ;(otspan/async-bound-cf-span attrs#)
+            ;(with-env-internal (merge *env* {:telemetry-context (->telemetry-context)}))
+            (let [res# (do ~@body)]
+              (.whenComplete res#
+                            (reify BiConsumer
+                              (accept [_# t# e#]
+                                (when e# (otspan/add-exception! {:context span#} e#))
+                                (otspan/end-span! {:context span#}))))))))
+
 
 (defn add-event!
   ([task ename attrs]
@@ -156,7 +163,6 @@
 
 ;;;;
 ;; task execution/replay
-
 
 (defn resume-fn-task
   "Resumes a generic fn call task"
@@ -292,6 +298,7 @@
                            (throw (error/internal-error "Transition unexpected" {:got      (:type res?)
                                                                                  :expected [success failure]})))]
         (t/log! {:level :debug :data {:sym sym :retval retval}} ["Finished internal execution for task" id])
+        ;; if userland called a vthread, retval will be delayed
         retval))
     ;; ensure we terminate the fn call, even if the next event wouldnt be the expected type
     (catch #?(:clj Exception :cljs js/Error) e

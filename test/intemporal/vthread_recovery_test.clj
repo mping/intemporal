@@ -36,8 +36,8 @@
   ;; make a backup of the db to allow replay
   (io/copy (io/file "./test/intemporal/vthread-recovery.edn")
            (io/file "/tmp/intemporal-vthread-recovery.edn"))
-  (let [mstore      (store/make-store {:file "/tmp/intemporal-vthread-recovery.edn"})
-        stop-worker (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})]
+  (let [mstore (store/make-store {:file "/tmp/intemporal-vthread-recovery.edn"})
+        ex     (w/start-poller! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})]
 
     (store/reenqueue-pending-tasks mstore println)
 
@@ -54,4 +54,4 @@
             (is (= (into [] (range nthreads))
                    (-> evts last :result)))))))
 
-    (stop-worker)))
+    (w/shutdown ex 1000)))

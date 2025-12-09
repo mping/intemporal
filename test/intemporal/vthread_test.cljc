@@ -32,10 +32,10 @@
 
 (defn-workflow my-workflow [sleep-time]
   (let [pr    (stub-protocol ThreadActivity {})
-        proms (-> (for [i (range 10)]
-                    (vthread
-                      (sleep pr i sleep-time)))
-                  (doall))]
+        proms (->> (for [i (range 10)]
+                     (vthread
+                       (sleep pr i sleep-time)))
+                   (doall))]
     #?(:clj (Thread/sleep (long sleep-time)))
     (p/all proms)))
 
@@ -50,7 +50,7 @@
         ;; cljs runtimes return promises
         ;; clj runtime will run synchronously
         (with-result [v (w/with-env {:store mstore}
-                          (my-workflow sleep-time))]
+                                    (my-workflow sleep-time))]
 
           (testing "result"
             (is (= (range 10)
