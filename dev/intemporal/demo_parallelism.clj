@@ -26,7 +26,7 @@
     ;; this code is deterministic up to here
     @(p/all proms)))
 
-(def mstore (store/make-store))
+(def mstore (store/make-store ))
 (def stop-worker (w/start-worker! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}}))
 
 ;; note that in cljs, this returns a promise

@@ -288,6 +288,7 @@
                       (try
                         ;; ensure we only run f once - swap! might run the fn multiple times
                         (assoc task :state :new :owner owner)
+                        ;; TODO log reenqueued task
                         (finally
                           (when-not (contains? @task->run? task)
                             (try

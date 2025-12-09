@@ -210,14 +210,14 @@
                         ;(w/enqueue-and-wait i/*env* task#)))))))))
 
 (defmacro with-failure
-  "Runs `fcall`, ensuring that if it fails, compensation will always run.
-  - if `fcall` fails, `binding` will have the value `intemporal.activity/failure`.
-  - if `fcall` succeeds, but compensation is invoked later (eg other activity failure), `binding` will have its return value
+  "Runs `body`, ensuring that if it fails, compensation will always run.
+  - if `body` fails, `binding` will have the value `intemporal.activity/failure`.
+  - if `body` succeeds, but compensation is invoked later (eg other activity failure), `binding` will have its return value
 
   (with-failure [v (book-hotel stub \"hotel\")]
     (cancel-hotel stub v n))
   "
-  [[binding fcall] comp-fn]
+  [[binding body] comp-fn]
   `(let [val# (atom :intemporal.activity/failure)]
      (w/add-compensation (fn [] (let [~binding @val#] (do ~comp-fn))))
-     (reset! val# (do ~fcall))))
+     (reset! val# (do ~body))))

@@ -71,3 +71,12 @@ $ JAVA_OPTS="-DFDB_LIBRARY_PATH_FDB_C=/usr/local/lib/libfdb_c.dylib -DFDB_LIBRAR
   (.invoke method com.apple.foundationdb.JNIUtil (object-array ["fdb_c"])))
 
 ```
+
+# Telemetry
+
+# Get the OT javaagent
+
+```shell
+wget --content-disposition https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.21.0/opentelemetry-javaagent.jar
+```
+Run with the `dev` profile to activate the java agent.

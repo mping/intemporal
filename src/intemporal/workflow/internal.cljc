@@ -328,7 +328,9 @@
   (assert (some? store) "Store should exist")
   (assert (some? task) "Task should exist")
 
-  ;; TODO trace
+  ;; TODO trace if we pick the task from the db?
+  ;; the db task should have a telemetry context already no?
+  ;; (trace! {:name (format "workflow: %s" orig#) :attributes {:task-id id#}}
   (let [db-task (or (find-task store id)
                     (enqueue-task store task))
 
