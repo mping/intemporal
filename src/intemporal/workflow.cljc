@@ -105,7 +105,7 @@
       ;; subsequent workflow traces to have a "parent" span, otherwise
       ;; they won't show up correctly in jaeger
       ;; TODO test with eg loki
-      (trace-async! {:name ::worker-execute-fn :attributes {:task-id (:id task)}}
+      (trace-async! {:name "worker: worker-execute-fn" :attributes {:task-id (:id task)}}
         #?(:cljs (internal/resume-task internal-env store protocols task)
            :clj (otctx/bind-context! (otctx/headers->merged-context (:telemetry-context runtime))
                   (internal/resume-task internal-env store protocols task)))))))
