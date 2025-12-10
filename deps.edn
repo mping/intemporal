@@ -34,7 +34,7 @@
                                     tortue/spy                               {:mvn/version "2.15.0"}
                                     nubank/matcher-combinators               {:mvn/version "3.9.2"}
                                     com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.6.2"}}}
-              :fdb   {:extra-deps {org.foundationdb/fdb-java {:mvn/version "7.1.60"}
+              :fdb   {:extra-deps {org.foundationdb/fdb-java {:mvn/version "7.3.57"}
                                    me.vedang/clj-fdb         {:mvn/version "0.3.0"}}}
 
               :jdbc  {:extra-deps {com.github.seancorfield/next.jdbc {:mvn/version "1.3.1048"}
