@@ -12,7 +12,8 @@
              [net.cgrand.macrovich :as macros]
              [intemporal.workflow.internal :refer [trace! trace-async!]]
              [intemporal.store :refer [bfn]]))
-  #?(:clj (:import [java.util.function BiConsumer])))
+  #?(:clj (:import [java.util.function BiConsumer]
+                   [java.util.concurrent CompletableFuture])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -86,7 +87,7 @@
             ;(otspan/async-bound-cf-span attrs#)
             ;(with-env-internal (merge *env* {:telemetry-context (->telemetry-context)}))
             (let [res# (do ~@body)]
-              (.whenComplete res#
+              (.whenComplete ^CompletableFuture res#
                             (reify BiConsumer
                               (accept [_# t# e#]
                                 (when e# (otspan/add-exception! {:context span#} e#))

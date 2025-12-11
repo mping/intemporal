@@ -19,7 +19,6 @@
   MyActivities
   (foo [this a]
     (.countDown activity-invoked?)
-    (Thread/sleep 100)
     (.await executor-shutdown?)
     :foo))
 
@@ -34,7 +33,7 @@
   (testing "failure: task validation fails"
     (let [mstore   (store/make-store {})
           executor (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
-                                            :polling-ms 10})]
+                                            :polling-ms 500})]
 
       (testing "shutdown of ongoing workflow"
         (future
