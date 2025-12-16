@@ -45,27 +45,6 @@
   (shutdown [this grace-period-ms] "Shuts down the task executor")
   (running? [this] "Indicates if the executor is running"))
 
-;; allow expressions like (with-open [executor (w/start-poller ....
-
-#?(:clj #_:clj-kondo/ignore (extend-protocol ITaskExecutor
-                              AutoCloseable
-                              (close [this] (shutdown this 0))))
-
-;; make sure that any given executor service can implement ITaskExecutor
-#?(:clj (extend-type ExecutorService
-          ITaskExecutor
-          (submit [executor f]
-            (.submit ^ExecutorService executor ^Runnable f))
-          (shutdown [executor grace-period-ms]
-            ;; todo: release tasks
-            (.shutdown ^ExecutorService executor)
-            (t/log! {:level :debug} ["Executor shutdown"])
-            (when-not (.awaitTermination ^ExecutorService executor grace-period-ms TimeUnit/MILLISECONDS)
-              (t/log! {:level :debug} ["Executor shutdown grace period over, shutting down NOW"])
-              (.shutdownNow ^ExecutorService executor)))
-          (running? [executor]
-            (not (.isShutdown ^ExecutorService executor)))))
-
 (defn make-task-executor
   "Creates an object that satisfies `ITaskExecutor`."
   []
@@ -78,12 +57,31 @@
          (shutdown [_ grace-period-ms]
            (t/log! {:level :debug} ["Executor shutdown"])
            (reset! run? false))
-         (running? [_] @run?))
+         (running? [_]
+           @run?))
        :clj
-       (let [factory (-> (Thread/ofVirtual)
-                         (.name "Task Thread")
-                         (.factory))]
-         (Executors/newThreadPerTaskExecutor factory)))))   ;]))))
+       (let [factory  (-> (Thread/ofVirtual)
+                          (.name "Task Thread")
+                          (.factory))
+             exec     (Executors/newThreadPerTaskExecutor factory)
+             running? (atom true)]
+         (reify
+           ITaskExecutor
+           (submit [_ f]
+             (.submit exec ^Runnable f))
+           (shutdown [_ grace-period-ms]
+             (.shutdown exec)
+             (t/log! {:level :debug} ["Executor shutdown"])
+             (when-not (.awaitTermination exec grace-period-ms TimeUnit/MILLISECONDS)
+               (t/log! {:level :debug} ["Executor shutdown grace period over, shutting down NOW"])
+               (.shutdownNow exec))
+             (reset! running? false))
+           (running? [_]
+             @running?)
+           ;; allow expressions like (with-open [executor (w/start-poller ....
+           AutoCloseable
+           (close [this]
+             (shutdown this 0)))))))
 
 (defn- worker-execute-fn
   "Executes a given protocol, activity or workflow `task`"

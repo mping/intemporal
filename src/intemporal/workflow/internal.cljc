@@ -88,11 +88,9 @@
             ;(with-env-internal (merge *env* {:telemetry-context (->telemetry-context)}))
             (let [res# (do ~@body)]
               (.whenComplete ^CompletableFuture res#
-                            (reify BiConsumer
-                              (accept [_# t# e#]
-                                (when e# (otspan/add-exception! {:context span#} e#))
-                                (otspan/end-span! {:context span#}))))))))
-
+                             (fn [t# e#]
+                               (when e# (otspan/add-exception! {:context span#} e#))
+                               (otspan/end-span! {:context span#})))))))
 
 (defn add-event!
   ([task ename attrs]
@@ -208,12 +206,11 @@
             handle-ok    (bfn [r]
                            ;; TODO assert r is serializable!
                            ;; we check for shutdown because in js runtime, there is no thread interruption
+                           ;; at this point, if we are shutting down it means we exhausted the grace period
                            (let [panic? (shutting-down?)]
                              (try
                                (if panic?
-                                 ;(trace! {:id ::store/task<-panic})
                                  (task<-panic store id (error/panic "Worker shutting down during invocation result handling"))
-                                 ;(trace! {:id ::store/task<-event})
                                  (let [new-event (assoc next-event :result r)]
                                    #?(:clj (otspan/add-span-data! {:attributes {:replayed false :result r}}))
                                    (task<-event store id new-event)
