@@ -15,7 +15,7 @@
                     [net.cgrand.macrovich :as macros]
                     [clojure.pprint :as pprint]))
   #?(:cljs (:require-macros [net.cgrand.macrovich :as macros]
-                            [intemporal.test-utils :refer [with-result]]))
+                            [intemporal.test-utils :refer [with-result wait]]))
   #?(:clj (:import [java.util.concurrent TimeoutException])))
 
 ;;;;
@@ -86,7 +86,8 @@
 ;;;;
 ;; macros
 
-(def with-result-default-timeout 10000)
+(def ^:dynamic with-result-default-timeout 10000)
+(def ^:dynamic wait-default-timeout 3000)
 
 (defmacro with-result
   "Promise-aware macro: the result can either be a value or a thrown exception.
@@ -124,6 +125,39 @@
                             (finally
                               (done#)))))
              0))))))
+
+(defmacro wait
+  "Waits for 3 secs until the result is true, or throws;
+  In `clj` it polls every 100ms
+  In `cljs` it continuously loops
+  ```
+  (wait (db/find id)
+    (is (= 1 1))
+  ```
+  "
+  [condition & body]
+  (macros/case
+    :clj
+    `(let [timeout# wait-default-timeout
+           start# (System/currentTimeMillis)]
+       (loop []
+         (if ~condition
+           (do ~@body)
+           (if (> (- (System/currentTimeMillis) start#) timeout#)
+             (throw (ex-info "Timed out" {:timeout timeout#}))
+             (do (Thread/sleep 100)
+                 (recur))))))
+
+    :cljs
+    `(let [timeout# 3000
+           start# (.getTime (js/Date.))]
+       (loop []
+         (if ~condition
+           (do ~@body)
+           (if (> (- (.getTime (js/Date.)) start#) timeout#)
+             (throw (ex-info "Timed out" {:timeout timeout#}))
+             ;; Note: In CLJS this is a "busy wait" loop
+             (recur)))))))
 
 (defn setup-telemere []
   #?(:clj (clojure.pprint/pprint (telemere/check-interop)))

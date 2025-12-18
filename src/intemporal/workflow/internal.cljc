@@ -141,6 +141,8 @@
   (store/all-events store id))
 
 (defn- task<-event [store task-id event-descr]
+  ;; TODO patch this to use a compare-and-swap
+  ;; must send the expected state as arg
   (add-event! (:type event-descr) {:task-id task-id})
   (store/task<-event store task-id event-descr))
 
