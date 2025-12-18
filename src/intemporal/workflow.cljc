@@ -70,12 +70,15 @@
            (submit [_ f]
              (.submit exec ^Runnable f))
            (shutdown [_ grace-period-ms]
-             (.shutdown exec)
-             (t/log! {:level :debug} ["Executor shutdown"])
-             (when-not (.awaitTermination exec grace-period-ms TimeUnit/MILLISECONDS)
-               (t/log! {:level :debug} ["Executor shutdown grace period over, shutting down NOW"])
-               (.shutdownNow exec))
-             (reset! running? false))
+             (try
+               (.shutdown exec)
+               (t/log! {:level :debug} ["Executor shutdown"])
+               (when-not (.awaitTermination exec grace-period-ms TimeUnit/MILLISECONDS)
+                 (t/log! {:level :debug} ["Executor shutdown grace period over, shutting down NOW"])
+                 (.shutdownNow exec))
+               ;; in case we got interrupted exception, make sure to set the flag
+               (finally
+                 (reset! running? false))))
            (running? [_]
              @running?)
            ;; allow expressions like (with-open [executor (w/start-poller ....
@@ -112,7 +115,6 @@
   "Continously polls for task while `task-executor` is active."
   [store protocols task-executor polling-ms]
   (let [task-counter   (atom 0)
-        uid            (random-uuid)
         shutting-down? (fn [] (not (running? task-executor)))]
     #_{:clj-kondo/ignore [:loop-without-recur :invalid-arity]}
 
@@ -124,12 +126,15 @@
                         (when-let [task (store/dequeue-task store)]
                           (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
                           (submit task-executor (fn []
-                                                  (worker-execute-fn store protocols task task-counter shutting-down?)))))))
+                                                  (worker-execute-fn store protocols task task-counter shutting-down?)))
+                          (when (running? task-executor)
+                            (recur))))
+                      (when (running? task-executor)
+                        (p/recur))))
            (p/catch (fn [e]
-                      (t/log! {:level :warn :data {:exception e}} ["Caught error during task polling, continuing"])))
-           (p/finally (fn [_ _]
-                        (when (running? task-executor)
-                          (p/recur))))))))
+                      (t/log! {:level :warn :data {:exception e}} ["Caught error during task polling, continuing"])
+                      (when (running? task-executor)
+                        (p/recur))))))))
 
 (defn start-poller!
   "Starts a poller that will submit tasks to the `task-executor`.
@@ -141,8 +146,10 @@
    (start-poller! store (make-task-executor) opts))
   ([store task-executor & {:keys [protocols polling-ms] :or {protocols {} polling-ms 100}}]
    (assert (satisfies? ITaskExecutor task-executor) "Supplied task executor does not satisfy ITaskExecutor")
-   (let [polling-fn (fn [] (worker-poll-fn store protocols task-executor polling-ms))]
-     (submit task-executor polling-fn))
+   ;; start poller in a out-of-executor thread so it doesnt prevent the executor from shutting down
+   ;; the only way to stop the poller is via shutdown
+   (p/vthread
+     (worker-poll-fn store protocols task-executor polling-ms))
    task-executor))
 
 (defn start-worker!

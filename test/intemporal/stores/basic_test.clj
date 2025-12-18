@@ -1,4 +1,4 @@
-(ns ^:integration ^:fdb ^:sql intemporal.stores-test
+(ns ^:integration ^:fdb ^:sql intemporal.stores.basic-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [intemporal.store :as store]
             [intemporal.store.foundationdb :as fdb]
