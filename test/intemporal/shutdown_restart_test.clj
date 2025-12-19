@@ -64,7 +64,7 @@
 
                 (testing "workflow resumes"
                   (with-open [_ (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
-                                                         :polling-ms 500})]
+                                                         :polling-ms 100})]
                     (store/reenqueue-pending-tasks mstore (constantly nil))
                     (tu/wait-for-task mstore (:id w1))
                     (tu/print-tables mstore)

@@ -91,6 +91,24 @@
    [:result {:optional true} :any]
    [:error {:optional true} :any]])
 
+;; valid task states
+(def valid-state-transitions {:new     #{:pending}
+                              :pending #{:new :success :failure}})
+
+(defn validate-transition!
+  "Ensures that the task's new `:state`, if any, is allowed.
+  Useful to implement compare-and-swap semantics"
+  [{:keys [state id]} attrs]
+  (let [next-states (get valid-state-transitions state)]
+    ;; if we are updating state
+    ;; and the new state is not allowed
+    ;; error out
+    (when (and (contains? attrs :state)
+               (not= (:state attrs) state)
+               (not (contains? next-states (:state attrs))))
+      (throw (ex-info (str "Cannot update task with id " id " from state " state " to " (:state attrs)) {:task-id    id
+                                                                                                         :state      state
+                                                                                                         :next-state (:state attrs)})))))
 (def validate-task!
   "Throws if the task is not valid"
   (m/coercer Task nil {:registry registry}))
@@ -106,6 +124,7 @@
   ([obj msg]
    (when-not (serializable? obj)
      (throw (ex-info msg {:object obj})))))
+
 
 (defn success? [{:keys [state] :as task}]
   (= :success state))

@@ -123,6 +123,10 @@
         ;; and they would expect the event to be present in the history
         (jdbc/with-transaction [tx db-spec]
           (let [evt          {:ref ref :root root :type type :sym sym :args args}
+                expected-state (cond
+                                 (some? args) :new
+                                 (or (some? result) (some? error)) :pending
+                                 :else :unknown)
                 updated-task (cond
                                (some? args) {:state (kw->db :pending) :args (serialize args)}
                                (some? error) {:state (kw->db :failure) :result (serialize error)}
@@ -136,8 +140,11 @@
               (store/save-event this task-id updated-evt))
             ;; cant really validate because its a partial task
             ;(validate-task! updated-task)
-            (jdbc/execute-one! tx (builder/for-update "tasks" updated-task {:id task-id} default-opts))
-            updated-evt)))
+            (let [updated (jdbc/execute-one! tx (builder/for-update "tasks" updated-task {:id task-id :state (name expected-state)} default-opts))]
+              (when (empty? updated)
+                (throw (ex-info (format "Cannot update task with id %s, expected state %s did not match" id expected-state {:task-id id
+                                                                                                                            :expected-state expected-state}))))
+              updated-evt))))
 
       (find-task [this id]
         (some-> (jdbc/with-transaction [tx db-spec]

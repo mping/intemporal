@@ -110,6 +110,7 @@
              ;; not every invocation will come from a persisted task
              (when task
                (si/validate-task! updated-task)
+               (si/validate-transition! task updated-task)
                (fc/set tx subspace-owned-tasks task-id (serialize updated-task)))
              updated-evt)))
 
