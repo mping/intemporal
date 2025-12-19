@@ -34,6 +34,9 @@
 (def ex (w/start-poller! mstore {:protocols  {`MyActivities (->MyActivitiesImpl)}
                                  :polling-ms 10}))
 
+(defn stop-worker []
+  (w/shutdown ex 1000))
+
 (deftest executor-shutdown-test
   (testing "shutdown of ongoing workflow"
 
@@ -72,4 +75,4 @@
 
           (stop-worker)))))
 
-;(cljs.test/run-tests *ns*)
+(cljs.test/run-tests *ns*)

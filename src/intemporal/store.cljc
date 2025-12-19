@@ -135,10 +135,11 @@
          find-task   (fn [this id]
                        (get @tasks id))
 
-         update-task (fn [this id & kvs]
+         update-task (fn [this id attrs]
                        (when-let [w (find-task this id)]
                          (maybe-fail!)
-                         (->> (apply assoc w kvs)
+                         (si/validate-transition! w attrs)
+                         (->> (merge w attrs)
                               (si/validate-task!)
                               (swap! tasks assoc id))))]
 
@@ -191,7 +192,7 @@
                  (vals @tasks)))
 
        (task<-panic [this task-id error]
-         (update-task this task-id :result error))
+         (update-task this task-id {:result error}))
 
        (task<-event [this task-id {:keys [id ref root type sym args result error] :as event-descr}]
          ;; some redundancy between :result in task and event
@@ -202,14 +203,14 @@
            (let [evt {:ref ref :root root :type type :sym sym :args args :error nil :result nil}]
              (when-not id
                (save-event this task-id evt))
-             (update-task this task-id :state :pending)
+             (update-task this task-id {:state :pending})
              evt)
 
            (some? error)
            (let [evt {:ref ref :root root :type type :sym sym :args nil :error error :result nil}]
              (when-not id
                (save-event this task-id evt))
-             (update-task this task-id :state :failure :result error)
+             (update-task this task-id {:state :failure :result error})
              evt)
 
            ;;(some? result) ;result can be nil
@@ -217,7 +218,7 @@
            (let [evt {:ref ref :root root :type type :sym sym :args nil :error nil :result result}]
              (when-not id
                (save-event this task-id evt))
-             (update-task this task-id :state :success :result result)
+             (update-task this task-id {:state :success :result result})
              evt)))
 
        (find-task [this id]
