@@ -25,11 +25,10 @@ deps:
   CACHE ~/.m2
   RUN clj -Stree
   RUN npm install
-  #RUN wget https://github.com/apple/foundationdb/releases/download/7.3.63/foundationdb-clients_7.3.63-1_aarch64.deb
-  #RUN dpkg -i foundationdb-clients_7.3.63-1_aarch64.deb
-  RUN wget -q https://github.com/apple/foundationdb/releases/download/7.1.31/foundationdb-clients_7.1.31-1_amd64.deb
-  RUN dpkg -i foundationdb-clients_7.1.31-1_amd64.deb
+  RUN wget -nv https://github.com/apple/foundationdb/releases/download/7.3.57/foundationdb-clients_7.3.57-1_amd64.deb
+  RUN dpkg -i foundationdb-clients_7.3.57-1_amd64.deb
   RUN echo "docker:docker@127.0.0.1:4500" > /etc/foundationdb/fdb.cluster
+  RUN wget -nv --content-disposition https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar
 
 build-base:
   FROM +deps
