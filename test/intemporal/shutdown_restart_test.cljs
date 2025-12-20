@@ -75,4 +75,4 @@
 
           (stop-worker)))))
 
-(cljs.test/run-tests *ns*)
+;(cljs.test/run-tests *ns*)
