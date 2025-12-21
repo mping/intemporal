@@ -7,7 +7,7 @@ concurrency:
 
 jobs:
   earthly:
-    if: false
+    if: true
     name: Earthly ci
     runs-on: ubuntu-latest
     permissions: write-all
@@ -37,7 +37,7 @@ jobs:
           coverage-file: './coverage/lcov.info'
 
   clojure:
-    if: true
+    if: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
