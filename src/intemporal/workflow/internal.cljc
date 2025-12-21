@@ -12,8 +12,7 @@
              [net.cgrand.macrovich :as macros]
              [intemporal.workflow.internal :refer [trace! trace-async!]]
              [intemporal.store :refer [bfn]]))
-  #?(:clj (:import [java.util.function BiConsumer]
-                   [java.util.concurrent CompletableFuture])))
+  #?(:clj (:import [java.util.concurrent CompletableFuture])))
 
 #?(:clj (set! *warn-on-reflection* true))
 
