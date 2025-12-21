@@ -55,10 +55,10 @@
             (is (match? {:type :workflow :sym 'intemporal.shutdown-restart-test/my-workflow- :state :pending} w1))))
 
         (testing "workflow events"
-          (let [[e1 e2 e3] (store/list-events mstore)]
-            (is (match? {:type :intemporal.workflow/invoke :sym 'intemporal.shutdown-restart-test/my-workflow-} e1))
-            (is (match? {:type :intemporal.protocol/invoke :sym 'intemporal.shutdown-restart-test/foo} e2))
-            (is (nil? e3))))))))
+             (let [[e1 e2 e3] (store/list-events mstore)]
+               (is (match? {:type :intemporal.workflow/invoke :sym 'intemporal.shutdown-restart-test/my-workflow-} e1)
+                 (is (match? {:type :intemporal.protocol/invoke :sym 'intemporal.shutdown-restart-test/foo} e2)))
+               (is (nil? e3))))))))
 
 #_(deftest executor-shutdown-resume-test
     (testing "workflow resumes"

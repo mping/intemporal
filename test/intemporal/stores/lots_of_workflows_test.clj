@@ -1,5 +1,5 @@
-(ns ^:integration ^:fdb ^:sql intemporal.stores.resilience-test
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+(ns ^:integration ^:fdb ^:sql intemporal.stores.lots-of-workflows-test
+  (:require [clojure.test :refer [deftest is testing]]
             [intemporal.store :as store]
             [intemporal.store.foundationdb :as fdb]
             [intemporal.store.jdbc :as jdbc]
@@ -8,8 +8,6 @@
             [intemporal.test-utils :as tu :refer [wait]]
             [promesa.core :as p])
   (:import (java.util.concurrent CountDownLatch)))
-
-;(tu/setup-telemere)
 
 (defprotocol MyActivities
   (foo [this a]))
@@ -31,7 +29,7 @@
                                                 :migration-dir "migrations/postgres"})}))
 
 
-(def iterations 10)
+(def iterations 100)
 (def latch (CountDownLatch. iterations))
 
 (deftest stores-test
@@ -44,10 +42,10 @@
 
       (testing "multiple iterations"
         (w/with-env {:store store}
-                    (dotimes [_ iterations]
-                      ;; workflows are blocking, we wrap in a virtual thread
-                      (p/vthread
-                        (my-workflow))))
+          (dotimes [_ iterations]
+            ;; workflows are blocking, we wrap in a virtual thread
+            (p/vthread
+              (my-workflow))))
 
         ;; check that all tasks are enqueued
         (wait (= iterations (count (store/list-tasks store)))
@@ -63,7 +61,7 @@
             (wait (not (contains? (into #{} (map :state (store/list-tasks store))) :new))
               (w/shutdown ex 5000))
 
-            (testing "workflows are all new"
+            (testing "workflows are all completed"
               (let [wflows (store/list-tasks store)]
                 (is (= iterations (count wflows)))
                 (is (= #{:success} (set (map :state wflows))))))
