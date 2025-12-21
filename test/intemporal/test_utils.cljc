@@ -87,7 +87,7 @@
 ;; macros
 
 (def ^:dynamic with-result-default-timeout 10000)
-(def ^:dynamic wait-default-timeout 3000)
+(def ^:dynamic wait-default-timeout 10000)
 
 (defmacro with-result
   "Promise-aware macro: the result can either be a value or a thrown exception.
@@ -127,7 +127,7 @@
              0))))))
 
 (defmacro wait
-  "Waits for 3 secs until the result is true, or throws;
+  "Waits for 10 secs until the result is true, or throws;
   In `clj` it polls every 100ms
   In `cljs` it continuously loops
   ```
