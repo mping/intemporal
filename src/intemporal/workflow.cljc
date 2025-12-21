@@ -9,7 +9,7 @@
              [intemporal.workflow :refer [with-env]]))
   #?(:clj (:require [intemporal.workflow.internal :refer [trace! trace-async!]]
                     [steffan-westcott.clj-otel.context :as otctx]))
-  #?(:clj (:import [java.util.concurrent ExecutorService Executors TimeUnit]
+  #?(:clj (:import [java.util.concurrent Executors TimeUnit]
                    [java.lang AutoCloseable])))
 
 #?(:clj (set! *warn-on-reflection* true))

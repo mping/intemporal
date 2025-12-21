@@ -142,8 +142,8 @@
             ;(validate-task! updated-task)
             (let [updated (jdbc/execute-one! tx (builder/for-update "tasks" updated-task {:id task-id :state (name expected-state)} default-opts))]
               (when (empty? updated)
-                (throw (ex-info (format "Cannot update task with id %s, expected state %s did not match" id expected-state {:task-id id
-                                                                                                                            :expected-state expected-state}))))
+                (throw (ex-info (format "Cannot update task with id %s, expected state %s did not match" id expected-state)
+                                {:task-id id :expected-state expected-state})))
               updated-evt))))
 
       (find-task [this id]
