@@ -33,7 +33,6 @@
                                     com.lambdaisland/kaocha-cljs             {:mvn/version "1.5.154"}
                                     ch.qos.logback/logback-classic           {:mvn/version "1.5.18"}
                                     tortue/spy                               {:mvn/version "2.15.0"}
-                                    org.testcontainers/testcontainers        {:mvn/version "2.0.2"}
                                     nubank/matcher-combinators               {:mvn/version "3.9.2"}
                                     com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.6.2"}}}
               :fdb   {:extra-deps {org.foundationdb/fdb-java {:mvn/version "7.3.57"}
