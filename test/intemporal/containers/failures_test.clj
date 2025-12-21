@@ -4,7 +4,8 @@
             [clojure.tools.logging :as log]
             [intemporal.containers.start-runner]
             [intemporal.containers.execute-workflow])
-  (:import (org.testcontainers.containers BindMode GenericContainer)
+  (:import (java.util.concurrent CountDownLatch)
+           (org.testcontainers.containers BindMode GenericContainer)
            (org.testcontainers.containers.wait.strategy Wait)))
 
 ;; assumes docker-compose is running
@@ -17,10 +18,11 @@
   ;; -e JDBC_URL="jdbc:postgresql://postgresql:5432/root?user=root&password=root"
   ;; -v "$(pwd)":/tmp clojure:temurin-25-tools-deps-noble clj
   ;; -A:dev:jdbc:fdb -m intemporal.containers.execute-workflow postgres intemporal.containers.execute-workflow/test-workflow
-  (let [cmd       (format "clj -A:%s -m %s %s" aliases clj-main (str/join " " args))
+  (let [cmd       (format "clj -A:%s -M -m %s %s" aliases clj-main (str/join " " args))
         img       "clojure:temurin-25-tools-deps-noble"
         container (doto (GenericContainer. img)
                     (.withEnv env)
+                    ;; requires docker-compose running foundation and postgres
                     (.withNetworkMode default-network)
                     (.withCommand cmd)
                     ;; will wait until the work is finished, but no exit
@@ -43,17 +45,30 @@
 
 (deftest postgres-test
   (testing "failure via crash"
-    (let [runner      (make-container (var->ns #'intemporal.containers.start-runner/-main) {:args ["postgres"]})
-          workflow-fn #'intemporal.containers.execute-workflow/test-workflow
-          workflow    (make-container (var->ns workflow-fn) {:args ["postgres" (var->str workflow-fn)]})]
+    (let [runner        (make-container (var->ns #'intemporal.containers.start-runner/-main) {:args ["postgres"]})
+          workflow-fn   #'intemporal.containers.execute-workflow/test-workflow
+          num-workflows 10
+          workflows     (mapv (fn [_] (make-container (var->ns workflow-fn) {:args ["postgres" (var->str workflow-fn)]}))
+                              (range num-workflows))
+          latch         (CountDownLatch. num-workflows)]
       (try
         (.start runner)
-        (.start workflow)
+        ;; start all at same time
+        (doseq [workflow workflows]
+          (future
+            (try (.start workflow)
+                 (finally
+                   (.countDown latch)))))
 
         (testing "containers eventually exit"
+          ;; at this point, runner is ready
+
           (is (zero? (container-exit-code runner)))
-          (is (zero? (container-exit-code workflow))))
+          (.await latch)
+          (doseq [workflow workflows]
+            (is (zero? (container-exit-code workflow)))))
 
         (finally
           (.stop runner)
-          (.stop workflow))))))
+          (doseq [workflow workflows]
+            (.stop workflow)))))))
