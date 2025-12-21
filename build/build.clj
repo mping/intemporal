@@ -1,21 +1,6 @@
 (ns build
   (:require [clojure.tools.build.api :as b]
             [clojure.pprint :as pprint]))
-
-(def base-nses ['intemporal.workflow
-                'intemporal.store.internal
-                'intemporal.store.foundationdb
-                'intemporal.store
-                'intemporal.macros
-                'intemporal.workflow.internal
-                'intemporal.store.jdbc])
-
-(def dev-nses ['intemporal.demo-parallelism
-               'intemporal.demo-recovery
-               'intemporal.demo-saga
-               'intemporal.demo-vthread-recovery
-               'intemporal.demo-workflow])
-
 ;; clj -T:build compile-main
 (defn compile-main [opts]
   (b/delete {:path "target/classes"})

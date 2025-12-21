@@ -302,6 +302,8 @@
         retval))
     ;; ensure we terminate the fn call, even if the next event wouldnt be the expected type
     (catch #?(:clj Exception :cljs js/Error) e
+      ;; TODO at this point we should just panic, "userland" exceptions should be handled in the handle-fail
+      ;; on theory there is no other way for a user exception to bubble out
       (let [wrapped (ex-info "Internal error while resuming execution" {::type :internal} e)]
         (task<-event store id {:ref id :root (or root id) :type ::failure :sym sym :error wrapped}))
       (p/rejected e))))
