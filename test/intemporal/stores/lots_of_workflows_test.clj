@@ -33,38 +33,39 @@
 (def latch (CountDownLatch. iterations))
 
 (deftest stores-test
-  (doseq [[label store] @stores]
-    (testing (format "store: %s" label)
+  (with-redefs [tu/wait-default-timeout 60000]
+    (doseq [[label store] @stores]
+      (testing (format "store: %s" label)
 
-      (testing "clear"
-        (store/clear-events store)
-        (store/clear-tasks store))
+        (testing "clear"
+          (store/clear-events store)
+          (store/clear-tasks store))
 
-      (testing "multiple iterations"
-        (w/with-env {:store store}
-          (dotimes [_ iterations]
-            ;; workflows are blocking, we wrap in a virtual thread
-            (p/vthread
-              (my-workflow))))
+        (testing "multiple iterations"
+          (w/with-env {:store store}
+            (dotimes [_ iterations]
+              ;; workflows are blocking, we wrap in a virtual thread
+              (p/vthread
+                (my-workflow))))
 
-        ;; check that all tasks are enqueued
-        (with-redefs [tu/wait-default-timeout 60000]
+          ;; check that all tasks are enqueued
+
           (wait (= iterations (count (store/list-tasks store)))
                 (let [wflows (store/list-tasks store)]
                   (testing "workflows are all new"
                     (is (= iterations (count wflows)))
-                    (is (= #{:new} (set (map :state wflows)))))))))
+                    (is (= #{:new} (set (map :state wflows))))))))
 
-      (testing "enqueue all jobs"
-        (let [ex (w/start-poller! store {:protocols {`MyActivities (->MyActivitiesImpl)}})]
-          ;; lets wait for all pending
-          (try
-            (wait (not (contains? (into #{} (map :state (store/list-tasks store))) :new))
-              (w/shutdown ex 5000))
+        (testing "enqueue all jobs"
+          (let [ex (w/start-poller! store {:protocols {`MyActivities (->MyActivitiesImpl)}})]
+            ;; lets wait for all pending
+            (try
+              (wait (not (contains? (into #{} (map :state (store/list-tasks store))) :new))
+                (w/shutdown ex 5000))
 
-            (testing "workflows are all completed"
-              (let [wflows (store/list-tasks store)]
-                (is (= iterations (count wflows)))
-                (is (= #{:success} (set (map :state wflows))))))
-            (finally
-              (w/shutdown ex 0))))))))
+              (testing "workflows are all completed"
+                (let [wflows (store/list-tasks store)]
+                  (is (= iterations (count wflows)))
+                  (is (= #{:success} (set (map :state wflows))))))
+              (finally
+                (w/shutdown ex 0)))))))))
