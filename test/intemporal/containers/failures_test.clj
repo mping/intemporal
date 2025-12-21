@@ -5,7 +5,6 @@
             [intemporal.containers.start-runner]
             [intemporal.containers.execute-workflow])
   (:import (org.testcontainers.containers BindMode GenericContainer)
-           (org.testcontainers.containers.startupcheck IndefiniteWaitOneShotStartupCheckStrategy)
            (org.testcontainers.containers.wait.strategy Wait)))
 
 ;; assumes docker-compose is running
