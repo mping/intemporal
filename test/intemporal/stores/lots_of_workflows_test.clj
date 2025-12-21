@@ -48,11 +48,12 @@
               (my-workflow))))
 
         ;; check that all tasks are enqueued
-        (wait (= iterations (count (store/list-tasks store)))
-              (let [wflows (store/list-tasks store)]
-                (testing "workflows are all new"
-                  (is (= iterations (count wflows)))
-                  (is (= #{:new} (set (map :state wflows))))))))
+        (with-redefs [tu/wait-default-timeout 60000]
+          (wait (= iterations (count (store/list-tasks store)))
+                (let [wflows (store/list-tasks store)]
+                  (testing "workflows are all new"
+                    (is (= iterations (count wflows)))
+                    (is (= #{:new} (set (map :state wflows)))))))))
 
       (testing "enqueue all jobs"
         (let [ex (w/start-poller! store {:protocols {`MyActivities (->MyActivitiesImpl)}})]

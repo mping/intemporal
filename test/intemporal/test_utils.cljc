@@ -87,7 +87,7 @@
 ;; macros
 
 (def ^:dynamic with-result-default-timeout 10000)
-(def ^:dynamic wait-default-timeout 10000)
+(def ^:dynamic wait-default-timeout 3000)
 
 (defmacro with-result
   "Promise-aware macro: the result can either be a value or a thrown exception.
