@@ -101,7 +101,7 @@
         internal-env (merge internal/default-env base-env runtime)]
     ;; root task: we only enqueue workflows
     (with-env internal-env
-      (t/log! {:level :debug :data {:sym (:sym task) :env internal-env}} ["Resuming task with id" (:id task)])
+      (t/log! {:level :debug :data {:sym (:sym task)}} ["Resuming task with id" (:id task)])
       ;; this span creation is required in order for
       ;; subsequent workflow traces to have a "parent" span, otherwise
       ;; they won't show up correctly in jaeger
