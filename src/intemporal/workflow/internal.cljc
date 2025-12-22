@@ -187,9 +187,9 @@
       ;; mark invoke/replay
       (let [next-event {:ref id :root (or root id) :type invoke :sym sym :args args}]
         (when inv?
-          (t/log! {:level :debug :data {:task task}} ["Found replay event for task with id" (:id task)]))
+          (t/log! {:level :debug :data {:sym (:sym task)}} ["Found replay event for task with id" (:id task)]))
         (when res?
-          (t/log! {:level :debug :data {:task task}} ["Found result event for task with id" (:id task)]))
+          (t/log! {:level :debug :data {:sym (:sym task)}} ["Found result event for task with id" (:id task)]))
 
         (cond
           ;; do we have an invocation event? if not, save this one
