@@ -104,11 +104,11 @@
          ;; an embedded workflow engine doesn't need to have a task per invocation
          (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id " id#])
          (trace! {:name (format "activity: %s" (symbol fvar#)) :attributes {:task-id id#}}
-           (let [res# (i/resume-task i/*env* store# protos# task#)]
-             (macros/case
-               :cljs res#
-               :clj (deref res#))))))))
-               ;(w/enqueue-and-wait i/*env* task#)))))
+           (w/enqueue-and-wait i/*env* task#)
+           #_(let [res# (i/resume-task i/*env* store# protos# task#)]
+               (macros/case
+                 :cljs res#
+                 :clj (deref res#))))))))
 
 (defmacro stub-protocol
   "Stub a protocol definition. Opts are currently unused.
@@ -159,8 +159,8 @@
                                     id#)]
 
                       (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" id#])
-                      (i/resume-task i/*env* store# protos# task#))))))))
-                      ;(w/enqueue-and-wait i/*env* task#))))))))
+                      ;(i/resume-task i/*env* store# protos# task#))))))))
+                      (w/enqueue-and-wait i/*env* task#))))))))
 
     :clj
     #_{:clj-kondo/ignore [:unresolved-symbol]}
@@ -203,11 +203,15 @@
 
                     (t/log! {:level :debug :_data {:env i/*env* :task task#}} ["Invoking task with id" id#])
                     (if (:vthread? i/*env*)
+
                       (trace-async! {:name (format "activity: %s" aid#) :attributes {:task-id id# :protocol (-> ~proto :var symbol)}}
                         @(i/resume-task i/*env* store# protos# task#))
+                      #_
                       (trace! {:name (format "activity: %s" aid#) :attributes {:task-id id# :protocol (-> ~proto :var symbol)}}
-                        @(i/resume-task i/*env* store# protos# task#)))))))))))
-                        ;(w/enqueue-and-wait i/*env* task#)))))))))
+                        (w/enqueue-and-wait i/*env* task#))
+                      (trace! {:name (format "activity: %s" aid#) :attributes {:task-id id# :protocol (-> ~proto :var symbol)}}
+                        ;@(i/resume-task i/*env* store# protos# task#)))))))))))
+                        (w/enqueue-and-wait i/*env* task#)))))))))))
 
 (defmacro with-failure
   "Runs `body`, ensuring that if it fails, compensation will always run.

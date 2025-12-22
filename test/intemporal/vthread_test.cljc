@@ -40,17 +40,18 @@
     (p/all proms)))
 
 (deftest workflow-with-vthread-test
-  (let [sleep-time (+ 3000 (rand-int 500))]
+  (let [sleep-time (+ 1000 (rand-int 500))]
     (testing "workflow"
       (let [mstore   (store/make-store)
-            executor (w/start-poller! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}})
+            executor (w/start-poller! mstore {:protocols {`ThreadActivity (->ThreadActivityImpl)}
+                                              :polling-ms 10})
 
             start    (store/now)]
 
         ;; cljs runtimes return promises
         ;; clj runtime will run synchronously
         (with-result [v (w/with-env {:store mstore}
-                                    (my-workflow sleep-time))]
+                          (my-workflow sleep-time))]
 
           (testing "result"
             (is (= (range 10)

@@ -166,7 +166,7 @@
 
 (defn resume-fn-task
   "Resumes a generic fn call task"
-  [{:keys [vthread? shutdown?] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
+  [{:keys [vthread? terminated? shutdown?] :as env} store protos {:keys [type proto id root sym fvar args] :as task} [invoke success failure]]
   (when (and (= :proto-activity type)
              (nil? (get protos proto)))
     (throw (ex-info (str "Protocol implementation for "
@@ -181,7 +181,7 @@
   (t/log! {:level :debug :sym sym} ["Resuming try/catch task with id" id])
 
   (try
-    (let [shutting-down? (fn [] (and (ifn? shutdown?) (shutdown?))) ;; TODO fix this hack
+    (let [terminated? (fn [] (and (ifn? terminated?) (terminated?)))
           [inv? res?] (all-events store id)]
 
       ;; mark invoke/replay
@@ -208,7 +208,7 @@
                            ;; TODO assert r is serializable!
                            ;; we check for shutdown because in js runtime, there is no thread interruption
                            ;; at this point, if we are shutting down it means we exhausted the grace period
-                           (let [panic? (shutting-down?)]
+                           (let [panic? (terminated?)]
                              (try
                                (if panic?
                                  (task<-panic store id (error/panic "Worker shutting down during invocation result handling"))
@@ -221,7 +221,7 @@
                                    (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupted result" id])
                                    (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id]))))))
             handle-fail  (bfn [e]
-                           (if (shutting-down?)
+                           (if (terminated?)
                              (do
                                (t/log! {:level :warn :data {:exception e}} ["Exception caught during shutdown, panicking task"])
                                (task<-panic store id (error/panic "Worker shutting down during invocation failure handling")))

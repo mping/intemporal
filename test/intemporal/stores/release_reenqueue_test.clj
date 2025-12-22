@@ -53,7 +53,7 @@
             (w/shutdown executor 0)
             ;; proceed activity, it will fail
             (.countDown executor-shutdown?)
-            (is (not (w/running? executor))))
+            (is (w/shutting-down? executor)))
 
           (with-result [res (w/with-env {:store store}
                               (my-workflow :ok))]

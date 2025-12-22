@@ -64,8 +64,12 @@
   (let [tasks  (store/list-tasks store)
         events (->> (store/list-events store)
                     (sort-by :id))]
-    (pprint/print-table tasks)
-    (pprint/print-table events)))
+    (locking *out*
+      (println "==================== TASKS")
+      (pprint/print-table tasks)
+      (println "==================== EVENTS")
+      (pprint/print-table events)
+      (flush))))
 
 (defn wait-for-task
   "Waits for the task with given id to reach terminal state"

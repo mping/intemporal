@@ -61,11 +61,11 @@
             ;; lets wait for all pending
             (try
               (wait (not (contains? (into #{} (map :state (store/list-tasks store))) :new))
-                (w/shutdown ex 5000))
+                (w/shutdown ex 10000))
 
               (testing "workflows are all completed"
-                (let [wflows (store/list-tasks store)]
-                  (is (= iterations (count wflows)))
-                  (is (= #{:success} (set (map :state wflows))))))
+                (let [tasks (store/list-tasks store)]
+                  (is (= (* 2 iterations) (count tasks)))
+                  (is (= #{:success} (set (map :state tasks))))))
               (finally
                 (w/shutdown ex 0)))))))))
