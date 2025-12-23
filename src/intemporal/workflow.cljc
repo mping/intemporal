@@ -1,13 +1,15 @@
 (ns intemporal.workflow
   (:require [intemporal.store :as store]
             [intemporal.workflow.internal :as internal]
+            [intemporal.error :as error]
             [promesa.core :as p]
             [taoensso.telemere :as t])
   #?(:cljs (:require-macros
              #_:clj-kondo/ignore
              [intemporal.workflow.internal :refer [with-env-internal trace! trace-async!]]
              [intemporal.workflow :refer [with-env]]))
-  #?(:clj (:require [intemporal.workflow.internal :refer [trace! trace-async!]]
+  #?(:clj (:require [intemporal.error :as error]
+                    [intemporal.workflow.internal :refer [trace! trace-async!]]
                     [steffan-westcott.clj-otel.context :as otctx]))
   #?(:clj (:import [java.util.concurrent Executors TimeUnit]
                    [java.lang AutoCloseable])))
@@ -131,11 +133,21 @@
              (-> (p/delay polling-ms)
                  (p/chain (fn [_]
                             (loop []
-                              (t/log! {:level :debug} ["Polling for tasks"])
-                              (when-let [task (store/dequeue-task store)]
+                              ;(t/log! {:level :debug} ["Polling for tasks..."])
+                              ;; TODO add another check for shutting-down?
+                              (when-let [task (and
+                                                (not (shutting-down? task-executor))
+                                                (store/dequeue-task store))]
                                 (t/log! {:level :debug :_data {:task task}} ["Dequeued task with id" (:id task)])
-                                (submit task-executor (fn []
-                                                        (worker-execute-fn store protocols task task-counter stopped? shutdown?)))
+                                (try
+                                  (submit task-executor (fn []
+                                                          (worker-execute-fn store protocols task task-counter stopped? shutdown?)))
+                                  (catch  #?(:clj Exception :cljs js/Error) e
+                                    ;; dequeued updated the state atomically (so other txs dont do the same)
+                                    ;; but if the executor stopped in the meantime we need to revert the task's state
+                                    (when (error/rejected? e)
+                                      (t/log! {:level :warn} ["Task execution rejected, reverting state to :new"])
+                                      (store/enqueue-task store (assoc task :state :new)))))
                                 (when-not (stopped?)
                                   (recur))))
                             (when-not (stopped?)

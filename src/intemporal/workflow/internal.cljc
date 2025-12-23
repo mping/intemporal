@@ -221,14 +221,27 @@
                                    (t/log! {:level :debug :data {:sym sym :result r}} ["Shutting down, interrupted result" id])
                                    (t/log! {:level :debug :data {:sym sym :result r}} ["Got actual function result for task" id]))))))
             handle-fail  (bfn [e]
-                           (if (terminated?)
+                           (cond
+                             ;; if its a java.lang.InterruptedException it means
+                             ;; we killed the executor
+                             ;; - we must leave the task pending (assuming its idempotent)
+                             (error/interrupted? e)
+                             (t/log! {:level :debug :data {:sym sym :exception e}} ["Exception caught during actual function invocation for task" id])
+
+                             ;; executor has terminated, it means we exhausted the graceful shutdown period
+                             ;; panic the task
+                             (terminated?)
                              (do
                                (t/log! {:level :warn :data {:exception e}} ["Exception caught during shutdown, panicking task"])
                                (task<-panic store id (error/panic "Worker shutting down during invocation failure handling")))
+
+                             ;; regular task failure
+                             :else
                              (do
                                (t/log! {:level :debug :data {:sym sym :exception e}} ["Exception caught during actual function invocation for task" id])
                                (task<-event store id (cond-> (assoc next-failure :error e)
                                                              (error/internal-error? e) (assoc :type ::failure)))))
+                           ;; finally, return error
                            (p/rejected e))
             retval       (cond
                            ;; are we replaying a result?

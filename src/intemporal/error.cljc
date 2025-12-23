@@ -1,4 +1,15 @@
-(ns intemporal.error)
+(ns intemporal.error
+  #?(:clj (:import [java.lang InterruptedException]
+                   [java.util.concurrent RejectedExecutionException])))
+
+
+(defn interrupted? [e]
+  #?(:clj (instance? InterruptedException e)
+     :cljs false))
+
+(defn rejected? [e]
+  #?(:clj (instance? RejectedExecutionException e)
+     :cljs false))
 
 (defn internal-error? [ex]
   (when-let [t (-> ex ex-data ::type)]
