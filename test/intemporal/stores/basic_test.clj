@@ -1,5 +1,5 @@
 (ns ^:integration ^:fdb ^:sql intemporal.stores.basic-test
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.test :as t :refer [deftest is testing]]
             [intemporal.store :as store]
             [intemporal.store.foundationdb :as fdb]
             [intemporal.store.jdbc :as jdbc]
@@ -8,14 +8,14 @@
             [intemporal.matchers :refer [nilable?]]
             [matcher-combinators.test :refer [match?]]))
 
-(use-fixtures :once tu/with-trace-logging)
+(t/use-fixtures :once tu/with-trace-logging)
 
 (def stores (delay {:memory   (store/make-store)
                     :fdb      (fdb/make-store {:cluster-file-path "docker/fdb.cluster"})
                     :postgres (jdbc/make-store {:jdbcUrl       "jdbc:postgresql://localhost:5432/root?user=root&password=root"
                                                 :migration-dir "migrations/postgres"})}))
 
-(deftest stores-test
+(deftest basic-test
   (doseq [[label store] @stores]
     (testing (format "store: %s" label)
       (let [evt {:ref  "some-ref" :root "some-root"

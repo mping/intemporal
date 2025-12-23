@@ -33,7 +33,7 @@
 
 ;;;; test proper
 
-(deftest executor-shutdown-test
+(deftest shutdown-restart-test
   (testing "failure: task validation fails"
     (let [mstore      (store/make-store {})
           custom-ex   (te/make-test-executor (fn [] (.countDown executor-shutdown?)) nil)

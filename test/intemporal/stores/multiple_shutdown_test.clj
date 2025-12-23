@@ -9,7 +9,7 @@
             [matcher-combinators.test :refer [match?]]
             [matcher-combinators.matchers :as m]))
 
-;(t/use-fixtures :once tu/with-trace-logging)
+(t/use-fixtures :once tu/with-trace-logging)
 
 (def stores (delay {:memory   (store/make-store)
                     :fdb      (fdb/make-store {:cluster-file-path "docker/fdb.cluster"})

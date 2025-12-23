@@ -203,7 +203,8 @@
       (reenqueue-pending-tasks [this f]
         (let [tasks? (jdbc/with-transaction [tx db-spec]
                        (let [tasks (jdbc/execute! tx ["select * from tasks where state='pending' and (owner is null or owner=?)" owner] default-opts)]
-                         (jdbc/execute-one! tx ["update tasks set state='new', owner=? where id = ANY(?)" owner (into-array (mapv :id tasks))])
+                         (jdbc/execute-one! tx ["update tasks set state='new', owner=? where id = ANY(?)" owner
+                                                (into-array String (mapv :id tasks))])
                          (doseq [row tasks]
                            (f (db->task row)))
                          tasks))]

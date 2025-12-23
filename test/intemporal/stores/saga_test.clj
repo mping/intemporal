@@ -1,5 +1,5 @@
 (ns ^:integration ^:fdb ^:sql intemporal.stores.saga-test
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.test :as t :refer [deftest is testing]]
             [intemporal.store :as store]
             [intemporal.store.foundationdb :as fdb]
             [intemporal.store.jdbc :as jdbc]
@@ -9,7 +9,7 @@
             [spy.core :as spy]
             [spy.protocol :as pspy]))
 
-(use-fixtures :once tu/with-trace-logging)
+(t/use-fixtures :once tu/with-trace-logging)
 
 (defprotocol ProtocolActivity
   (some-io [this val])

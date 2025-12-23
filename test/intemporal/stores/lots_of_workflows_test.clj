@@ -32,7 +32,7 @@
 (def iterations 100)
 (def latch (CountDownLatch. iterations))
 
-(deftest stores-test
+(deftest lots-of-workflows-test
   (with-redefs [tu/wait-default-timeout 60000]
     (doseq [[label store] @stores]
       (testing (format "store: %s" label)
@@ -61,7 +61,7 @@
             ;; lets wait for all pending
             (try
               (wait (not (contains? (into #{} (map :state (store/list-tasks store))) :new))
-                (w/shutdown ex 10000))
+                (w/shutdown ex 20000))
 
               (testing "workflows are all completed"
                 (let [tasks (store/list-tasks store)]

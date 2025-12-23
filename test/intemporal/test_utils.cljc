@@ -65,9 +65,9 @@
         events (->> (store/list-events store)
                     (sort-by :id))]
     (locking *out*
-      (println "==================== TASKS")
+      (print "==================== TASKS")
       (pprint/print-table tasks)
-      (println "==================== EVENTS")
+      (println "\n==================== EVENTS")
       (pprint/print-table events)
       (flush))))
 
@@ -164,7 +164,7 @@
              (recur)))))))
 
 (defn setup-telemere []
-  #?(:clj (clojure.pprint/pprint (telemere/check-interop)))
+  ;#?(:clj (clojure.pprint/pprint (telemere/check-interop)))
   (telemere/set-min-level! :trace)
   (telemere/remove-handler! ::custom)
   #?(:clj (telemere/add-handler! :default/open-telemetry (tot/handler:open-telemetry)))

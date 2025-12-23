@@ -226,7 +226,7 @@
                              ;; we killed the executor
                              ;; - we must leave the task pending (assuming its idempotent)
                              (error/interrupted? e)
-                             (t/log! {:level :debug :data {:sym sym :exception e}} ["Exception caught during actual function invocation for task" id])
+                             (t/log! {:level :debug :data {:sym sym}} ["InterruptedException caught during actual function invocation for task" id])
 
                              ;; executor has terminated, it means we exhausted the graceful shutdown period
                              ;; panic the task
