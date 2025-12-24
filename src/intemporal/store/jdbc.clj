@@ -239,6 +239,7 @@
 
       (dequeue-task [this {:keys [lease-ms]}]
         ;; TODO check owner
+        ;; TODO select for update skip locked
         (let [query  "select * from tasks where (owner=? or owner is null) and (state='new' or lease_end < now()) order by id asc limit 1"
               found? (jdbc/with-transaction [tx datasource]
                        (when-let [task (some-> (jdbc/execute-one! tx [query owner] default-opts)

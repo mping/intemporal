@@ -6,6 +6,7 @@
             [intemporal.workflow :as w]
             [intemporal.macros :refer [stub-protocol defn-workflow]]
             [intemporal.test-utils :as tu :refer [wait]]
+            [matcher-combinators.test :refer [match?]]
             [promesa.core :as p]))
 
 (defprotocol MyActivities
@@ -64,6 +65,7 @@
               (testing "workflows are all completed"
                 (let [tasks (store/list-tasks store)]
                   (is (= (* 2 iterations) (count tasks)))
-                  (is (= #{:success} (set (map :state tasks))))))
+                  (is (match? {:success (* 2 iterations)}
+                              (frequencies (map :state tasks))))))
               (finally
                 (w/shutdown ex 0)))))))))
