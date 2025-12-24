@@ -1,5 +1,6 @@
 (ns intemporal.store.jdbc
-  (:require [intemporal.store :as store]
+  (:require [hikari-cp.core :as hikari]
+            [intemporal.store :as store]
             [intemporal.workflow.internal :as i]
             [intemporal.store.internal :as si :refer [serialize deserialize]]
             [migratus.core :as migratus]
@@ -61,9 +62,12 @@
 
 (defn make-store
   "Creates a new Postgres-based store."
-  [{:keys [owner migration-dir migrate? watch-polling-ms]
+  [{:keys [owner migration-dir migrate? watch-polling-ms jdbcUrl]
     :or   {owner store/default-owner migrate? true watch-polling-ms 100} :as opts}]
-  (let [db-spec      (dissoc opts :migration-dir :migrate? :watch-polling-ms)
+  (let [db-spec      (-> opts
+                         (dissoc  :migration-dir :migrate? :watch-polling-ms)
+                         (assoc :jdbc-url jdbcUrl))
+        datasource   (hikari/make-datasource db-spec)
         config       {:store         :database
                       :migration-dir migration-dir
                       :db            db-spec}
@@ -80,7 +84,7 @@
 
       store/HistoryStore
       (list-events [this]
-        (->> (jdbc/with-transaction [tx db-spec]
+        (->> (jdbc/with-transaction [tx datasource]
                (jdbc/execute! tx ["select * from events"] default-opts))
              (map db->event)))
 
@@ -91,29 +95,29 @@
 
         (let [args   (serialize args)
               result (serialize result)
-              res    (jdbc/with-transaction [tx db-spec]
+              res    (jdbc/with-transaction [tx datasource]
                        (jdbc/execute-one! tx ["INSERT INTO events(type, ref, root, sym, args, result) values (?,?,?,?,?,?) RETURNING id"
                                               (kw->db type) ref root (str sym) args result]
                                           default-opts))]
           (assoc event :id (:id res))))
 
       (all-events [this task-id]
-        (->> (jdbc/with-transaction [tx db-spec]
+        (->> (jdbc/with-transaction [tx datasource]
                (jdbc/execute! tx ["select * from events where ref=?" task-id] default-opts))
              (map db->event)))
 
       (clear-events [this]
-        (jdbc/with-transaction [tx db-spec]
+        (jdbc/with-transaction [tx datasource]
           (jdbc/execute! tx ["delete from events"])))
 
       store/TaskStore
       (list-tasks [this]
-        (->> (jdbc/with-transaction [tx db-spec]
+        (->> (jdbc/with-transaction [tx datasource]
                (jdbc/execute! tx ["select * from tasks where (owner is null or owner=?)" owner] default-opts))
              (map db->task)))
 
       (task<-panic [this task-id error]
-        (jdbc/with-transaction [tx db-spec]
+        (jdbc/with-transaction [tx datasource]
           (let [updated-task {:result (serialize error)}]
             (jdbc/execute-one! tx (builder/for-update "tasks" updated-task {:id task-id} default-opts)))))
 
@@ -121,7 +125,7 @@
         ;; some redundancy between :result in task and event
         ;; note that we save the event first, because update-task can trigger some watchers
         ;; and they would expect the event to be present in the history
-        (jdbc/with-transaction [tx db-spec]
+        (jdbc/with-transaction [tx datasource]
           (let [evt          {:ref ref :root root :type type :sym sym :args args}
                 expected-state (cond
                                  (some? args) :new
@@ -147,13 +151,13 @@
               updated-evt))))
 
       (find-task [this id]
-        (some-> (jdbc/with-transaction [tx db-spec]
+        (some-> (jdbc/with-transaction [tx datasource]
                   (jdbc/execute-one! tx ["select * from tasks where id=?" id] default-opts))
                 (db->task)))
 
       (watch-task [this id f]
         (let [query-state! (fn []
-                             (jdbc/with-transaction [tx db-spec]
+                             (jdbc/with-transaction [tx datasource]
                                (jdbc/execute-one! tx ["select state from tasks where id=?" id] default-opts)))
               state        (query-state!)
               watch?       (atom true)]
@@ -161,7 +165,7 @@
             (while (and @watch? state)
               (Thread/sleep (long watch-polling-ms))
               (when (not= state (query-state!))
-                (let [task (some-> (jdbc/with-transaction [tx db-spec]
+                (let [task (some-> (jdbc/with-transaction [tx datasource]
                                      (jdbc/execute-one! tx ["select * from tasks where id=?" id] default-opts))
                                    (db->task))]
                   (when (and task (f task))
@@ -197,11 +201,11 @@
                               (wrap-result resolved)))))))))
 
       (release-pending-tasks [this]
-        (jdbc/with-transaction [tx db-spec]
+        (jdbc/with-transaction [tx datasource]
           (jdbc/execute-one! tx ["update tasks set owner=null where owner=?" owner])))
 
       (reenqueue-pending-tasks [this f]
-        (let [tasks? (jdbc/with-transaction [tx db-spec]
+        (let [tasks? (jdbc/with-transaction [tx datasource]
                        (let [tasks (jdbc/execute! tx ["select * from tasks where state='pending' and (owner is null or owner=?)" owner] default-opts)]
                          (jdbc/execute-one! tx ["update tasks set state='new', owner=? where id = ANY(?)" owner
                                                 (into-array String (mapv :id tasks))])
@@ -225,7 +229,7 @@
                 args    (serialize args)
                 result  (serialize result)
                 runtime (serialize runtime)]
-            (jdbc/with-transaction [tx db-spec]
+            (jdbc/with-transaction [tx datasource]
               (jdbc/execute! tx ["INSERT INTO tasks(id,owner,proto,type,ref,root,sym,args,result,state,lease_end,runtime) values (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id"
                                  id owner proto? (kw->db type) (kw->db ref) (kw->db root) (str sym) args result (kw->db state) lease-end runtime])))
           task+owner))
@@ -236,7 +240,7 @@
       (dequeue-task [this {:keys [lease-ms]}]
         ;; TODO check owner
         (let [query  "select * from tasks where (owner=? or owner is null) and (state='new' or lease_end < now()) order by id asc limit 1"
-              found? (jdbc/with-transaction [tx db-spec]
+              found? (jdbc/with-transaction [tx datasource]
                        (when-let [task (some-> (jdbc/execute-one! tx [query owner] default-opts)
                                                (db->task))]
                          (let [lease-epoch (when lease-ms
@@ -254,7 +258,7 @@
           found?))
 
       (clear-tasks [this]
-        (jdbc/with-transaction [tx db-spec]
+        (jdbc/with-transaction [tx datasource]
           (jdbc/execute! tx ["delete from tasks"]))))))
 
 #_:clj-kondo/ignore

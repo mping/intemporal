@@ -6,8 +6,7 @@
             [intemporal.workflow :as w]
             [intemporal.macros :refer [stub-protocol defn-workflow]]
             [intemporal.test-utils :as tu :refer [wait]]
-            [promesa.core :as p])
-  (:import (java.util.concurrent CountDownLatch)))
+            [promesa.core :as p]))
 
 (defprotocol MyActivities
   (foo [this a]))
@@ -23,45 +22,44 @@
         prr (foo pr :pr)]
     prr))
 
+(def iterations 100)
+
 (def stores (delay {:memory   (store/make-store)
                     :fdb      (fdb/make-store {:cluster-file-path "docker/fdb.cluster"})
                     :postgres (jdbc/make-store {:jdbcUrl       "jdbc:postgresql://localhost:5432/root?user=root&password=root"
-                                                :migration-dir "migrations/postgres"})}))
+                                                :migration-dir "migrations/postgres"
+                                                :maximum-pool-size 20})}))
 
-
-(def iterations 100)
-(def latch (CountDownLatch. iterations))
 
 (deftest lots-of-workflows-test
-  (with-redefs [tu/wait-default-timeout 60000]
+  (with-redefs [tu/wait-default-timeout 10000]
     (doseq [[label store] @stores]
       (testing (format "store: %s" label)
 
-        (testing "clear"
-          (store/clear-events store)
-          (store/clear-tasks store))
+        (store/clear-events store)
+        (store/clear-tasks store)
 
         (testing "multiple iterations"
-          (w/with-env {:store store}
-            (dotimes [_ iterations]
-              ;; workflows are blocking, we wrap in a virtual thread
-              (p/vthread
+          (dotimes [_ iterations]
+            (p/vthread
+              (w/with-env {:store store}
+                ;; workflows are blocking, we wrap in a virtual thread
                 (my-workflow))))
 
           ;; check that all tasks are enqueued
-
           (wait (= iterations (count (store/list-tasks store)))
-                (let [wflows (store/list-tasks store)]
-                  (testing "workflows are all new"
-                    (is (= iterations (count wflows)))
-                    (is (= #{:new} (set (map :state wflows))))))))
+            (let [wflows (store/list-tasks store)]
+              (testing "workflows are all new"
+                (is (= iterations (count wflows)))
+                (is (= #{:new} (set (map :state wflows))))))))
 
         (testing "enqueue all jobs"
-          (let [ex (w/start-poller! store {:protocols {`MyActivities (->MyActivitiesImpl)}})]
+          (let [ex (w/start-poller! store {:protocols {`MyActivities (->MyActivitiesImpl)}
+                                           :polling-ms 100})]
             ;; lets wait for all pending
             (try
               (wait (not (contains? (into #{} (map :state (store/list-tasks store))) :new))
-                (w/shutdown ex 20000))
+                (w/shutdown ex 10000))
 
               (testing "workflows are all completed"
                 (let [tasks (store/list-tasks store)]
