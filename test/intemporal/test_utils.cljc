@@ -165,7 +165,7 @@
 
 (defn setup-telemere []
   ;#?(:clj (clojure.pprint/pprint (telemere/check-interop)))
-  (telemere/set-min-level! :trace)
+  (telemere/set-min-level! :info)
   (telemere/remove-handler! ::custom)
   #?(:clj (telemere/add-handler! :default/open-telemetry (tot/handler:open-telemetry)))
   (telemere/add-handler! ::custom
