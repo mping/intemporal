@@ -36,7 +36,7 @@
   that if the binding value is function stub, its value will be unrapped
   with the same environment at the callsite.
 
-  Uses `(promesa.core/let ...` under the hood so promises are resolved via
+  Uses `(promesa.core.cljc/let ...` under the hood so promises are resolved via
   a thunk with the current environment."
   [bindings & body]
   (let [env-sym   (gensym)
