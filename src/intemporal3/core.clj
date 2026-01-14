@@ -1,5 +1,6 @@
 (ns intemporal3.core
-  (:require [intemporal3.internal.error :as error]
+  (:require [clojure.tools.logging :as log]
+            [intemporal3.internal.error :as error]
             [intemporal3.internal.context :as ctx]
             [intemporal3.internal.activity :as a]
             [intemporal3.internal.runtime :as runtime]
@@ -77,15 +78,21 @@
         existing-failed (ctx/find-event history :async-failed seq-num)
         existing-started (ctx/find-event history :async-started seq-num)]
     (cond
-      ;; Already completed - just return handle
+      ;; Already completed - advance seq past consumed numbers during replay
       existing-completed
-      (->AsyncHandle seq-num)
+      (do
+        ;; Advance seq counter to skip past all seqs consumed by this async
+        (ctx/update-seq! existing-completed)
+        (->AsyncHandle seq-num))
 
-      ;; Already failed - return handle (will throw on join)
+      ;; Already failed - advance seq past consumed numbers during replay
       existing-failed
-      (->AsyncHandle seq-num)
+      (do
+        (ctx/update-seq! existing-failed)
+        (->AsyncHandle seq-num))
 
       ;; Already started but not completed - return handle (will block on join)
+      ;; During replay, don't re-execute the thunk - just wait for completion event
       existing-started
       (->AsyncHandle seq-num)
 
@@ -93,26 +100,36 @@
       :else
       (let [start-event {:event-type :async-started
                          :seq seq-num
-                         :timestamp (System/currentTimeMillis)}]
+                         :timestamp (System/currentTimeMillis)}
+            start-seq seq-num]
         (ctx/add-pending-event! start-event)
         (ctx/notify-observer p/on-async-started (:workflow-id ctx) seq-num)
         ;; Try to execute the thunk to see what activity it wants
         (try
-          (thunk)
-          ;; If thunk completes synchronously (all replayed), just return handle
-          (->AsyncHandle seq-num)
+          (let [result (thunk)
+                ;; Capture the last seq number after thunk execution
+                end-seq (dec @(:seq-counter (ctx/current-context)))]
+            ;; If thunk completes synchronously (pure computation - first run only),
+            ;; save the completion event immediately with the seq range
+            (ctx/add-pending-event! {:event-type :async-completed
+                                     :seq start-seq
+                                     :last-seq end-seq
+                                     :result result
+                                     :timestamp (System/currentTimeMillis)})
+            (ctx/notify-observer p/on-async-completed (:workflow-id ctx) start-seq result)
+            (->AsyncHandle start-seq))
           (catch Exception e
             (if (error/suspension? e)
               ;; The thunk suspended on an activity - capture it for parallel execution
               (let [suspension-info (error/suspension-data e)]
-                (ctx/add-pending-async! {:handle-seq seq-num
+                (ctx/add-pending-async! {:handle-seq start-seq
                                          :activity-name (:activity-name suspension-info)
                                          :activity-seq (:seq suspension-info)
                                          :args (:args suspension-info)
                                          :timeout-ms (:timeout-ms suspension-info)
                                          :retry-policy (:retry-policy suspension-info)})
                 ;; Return handle - we'll batch execute later
-                (->AsyncHandle seq-num))
+                (->AsyncHandle start-seq))
               (throw e))))))))
 
 (defn join
@@ -344,8 +361,9 @@
 
           :retry-or-fail
           (if (a/should-retry? retry-policy (:exception exec-result) attempt)
-            (do
-              (Thread/sleep (long (a/calculate-backoff retry-policy attempt)))
+            (let [backoff (a/calculate-backoff retry-policy attempt)]
+              (log/infof "attempt %d: sleeping %s before retrying (next attempt: %d)" attempt backoff)
+              (Thread/sleep (long backoff))
               (recur (inc attempt)))
             {:status :failed
              :error (:error exec-result)
@@ -413,6 +431,7 @@
                                            :timestamp now}
                                {:event-type :async-completed
                                            :seq (:handle-seq async-info)
+                                           :last-seq (:activity-seq async-info)
                                            :result (:result result)
                                            :timestamp now}]
                               [{:event-type :activity-failed
@@ -422,6 +441,7 @@
                                            :timestamp now}
                                {:event-type :async-failed
                                            :seq (:handle-seq async-info)
+                                           :last-seq (:activity-seq async-info)
                                            :error (:error result)
                                            :timestamp now}]))
                       pending-asyncs results)]

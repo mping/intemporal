@@ -25,6 +25,13 @@
       (swap! (:seq-counter ctx) inc)
       seq)))
 
+(defn update-seq! [event]
+  (when-let [last-seq (:last-seq event)]
+    (let [current-seq (dec @(:seq-counter (current-context)))]
+      (when (> last-seq current-seq)
+        (dotimes [_ (- last-seq current-seq)]
+          (next-seq!))))))
+
 (defn find-event [history event-type seq-num]
   (->> history
        (filter #(and (= (:event-type %) event-type)
