@@ -13,6 +13,9 @@
   (or *workflow-context*
       (throw (ex-info "Not in workflow context" {}))))
 
+(defn workflow-id []
+  (:workflow-id (current-context)))
+
 (defn check-cancelled! []
   (let [ctx (current-context)]
     (when (p/is-cancelled? (:store ctx) (:workflow-id ctx))
@@ -37,10 +40,6 @@
        (filter #(and (= (:event-type %) event-type)
                      (= (:seq %) seq-num)))
        first))
-
-(defn find-events-by-type [history event-type]
-  (->> history
-       (filter #(= (:event-type %) event-type))))
 
 (defn add-pending-event! [event]
   (let [ctx (current-context)]

@@ -1,7 +1,7 @@
 (ns intemporal3.internal.runtime
   (:require [intemporal3.internal.error :as error]
             [intemporal3.protocol :as p])
-  (:import (java.util.concurrent ExecutorService Executors Future ScheduledExecutorService ScheduledFuture TimeUnit TimeoutException)))
+  (:import (java.util.concurrent ArrayBlockingQueue ExecutorService Executors Future ScheduledExecutorService ScheduledFuture ThreadPoolExecutor ThreadPoolExecutor$CallerRunsPolicy TimeUnit TimeoutException)))
 
 
 ;; ============================================================================
@@ -106,11 +106,27 @@
     (.shutdown pool)
     (.awaitTermination pool 30 TimeUnit/SECONDS)))
 
-(defn make-parallel-executor
+(defn create-bounded-executor
+  "Creates a bounded ThreadPoolExecutor with virtual threads"
+  [max-concurrent queue-capacity]
+  (ThreadPoolExecutor.
+    max-concurrent                          ; core pool size
+    max-concurrent                          ; max pool size
+    0                                       ; keep alive time
+    TimeUnit/MILLISECONDS
+    (ArrayBlockingQueue. queue-capacity)
+    (.factory (Thread/ofVirtual))
+    (ThreadPoolExecutor$CallerRunsPolicy.)))
+
+(defn make-vthreads-executor
   "Create an executor that runs activities in parallel using a thread pool"
-  [activity-registry-atom & {:keys [threads default-timeout-ms]
-                             :or   {threads 4 default-timeout-ms 30000}}]
+  [activity-registry-atom & {:keys [max-concurrent default-timeout-ms]
+                             :or   {default-timeout-ms 30000}}]
   (->ParallelActivityExecutor
-    (Executors/newFixedThreadPool threads)
+    (if max-concurrent
+      (create-bounded-executor max-concurrent max-concurrent)
+      (Executors/newVirtualThreadPerTaskExecutor))
     activity-registry-atom
     default-timeout-ms))
+
+

@@ -21,6 +21,13 @@
              (fnil into []) events))
     events)
 
+  (find-event [this worfklow-id event-type seq-num]
+    (let [history (p/load-history this worfklow-id)]
+      (->> history
+           (filter #(and (= (:event-type %) event-type)
+                         (= (:seq %) seq-num)))
+           first)))
+
   (get-pending-signals [_ workflow-id]
     (get-in @state [:workflows workflow-id :signals] {}))
 

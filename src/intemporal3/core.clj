@@ -361,7 +361,7 @@
           :retry-or-fail
           (if (a/should-retry? retry-policy (:exception exec-result) attempt)
             (let [backoff (a/calculate-backoff retry-policy attempt)]
-              (prn (format "attempt %d: sleeping %s before retrying (next attempt: %d)" attempt backoff))
+              (prn (format "attempt %d: sleeping %s before retrying" attempt backoff))
               (Thread/sleep (long backoff))
               (recur (inc attempt)))
             {:status :failed
@@ -594,7 +594,7 @@
         :continue))))
 
 (defn- run-workflow-internal
-  [store executor scheduler registry workflow-id workflow-fn args
+  [{:keys [store executor scheduler registry] :as engine} workflow-id workflow-fn args
    {:keys [observer max-iterations wake-fn]
     :or {max-iterations 1000}}]
   (loop [iteration 0]
@@ -764,19 +764,32 @@
    - :workflow-id - Custom workflow ID (default: random UUID)
    - :observer - IWorkflowObserver for monitoring
    - :max-iterations - Maximum replay iterations (default: 1000)"
-  [{:keys [store executor scheduler registry]} workflow-fn args
+  [{:keys [store executor scheduler registry] :as engine} workflow-fn args
    & {:keys [workflow-id observer max-iterations]
       :or {max-iterations 1000}}]
-  (let [wf-id (or workflow-id (str (random-uuid)))]
+  (let [wf-id (or workflow-id (str (random-uuid)))
+        resume-promise (promise)
+        wake-fn (fn []
+                  (when observer
+                    (p/on-workflow-resumed observer wf-id))
+                  (deliver resume-promise
+                           (run-workflow-internal engine wf-id workflow-fn args
+                                                 {:observer observer
+                                                  :max-iterations max-iterations})))]
     (p/save-event store wf-id {:event-type :workflow-started
                                :workflow-id wf-id
                                :args (vec args)
                                :timestamp (System/currentTimeMillis)})
     (when observer
       (p/on-workflow-started observer wf-id args))
-    (run-workflow-internal store executor scheduler registry wf-id workflow-fn args
-                           {:observer observer
-                            :max-iterations max-iterations})))
+    (let [result (run-workflow-internal engine wf-id workflow-fn args
+                                       {:observer observer
+                                        :max-iterations max-iterations
+                                        :wake-fn wake-fn})]
+      ;; If workflow is waiting for timer/signal, block until wake-fn delivers result
+      (if (#{:waiting-timer :waiting-signal :waiting-signal-timeout} (:status result))
+        @resume-promise
+        result))))
 
 (defn resume-workflow
   "Resume a waiting workflow (e.g., after signal delivery or timer).
@@ -794,12 +807,12 @@
    Options:
    - :observer - IWorkflowObserver
    - :max-iterations - Maximum replay iterations"
-  [{:keys [store executor scheduler registry]} workflow-id workflow-fn args
+  [{:keys [store executor scheduler registry] :as engine} workflow-id workflow-fn args
    & {:keys [observer max-iterations]
       :or {max-iterations 1000}}]
   (when observer
     (p/on-workflow-resumed observer workflow-id))
-  (run-workflow-internal store executor scheduler registry workflow-id workflow-fn args
+  (run-workflow-internal engine workflow-id workflow-fn args
                          {:observer observer
                           :max-iterations max-iterations}))
 
@@ -862,7 +875,7 @@
   (let [registry (a/make-registry)
         log-atom (when enable-logging (atom []))]
     {:store (store/->InMemoryStore (atom {}))
-     :executor (runtime/make-parallel-executor registry
+     :executor (runtime/make-vthreads-executor registry
                                        :threads threads
                                        :default-timeout-ms default-timeout-ms)
      :scheduler (runtime/make-scheduler :threads scheduler-threads)
