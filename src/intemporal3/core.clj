@@ -1,6 +1,5 @@
 (ns intemporal3.core
-  (:require [clojure.tools.logging :as log]
-            [intemporal3.internal.error :as error]
+  (:require [intemporal3.internal.error :as error]
             [intemporal3.internal.context :as ctx]
             [intemporal3.internal.activity :as a]
             [intemporal3.internal.runtime :as runtime]
@@ -362,7 +361,7 @@
           :retry-or-fail
           (if (a/should-retry? retry-policy (:exception exec-result) attempt)
             (let [backoff (a/calculate-backoff retry-policy attempt)]
-              (log/infof "attempt %d: sleeping %s before retrying (next attempt: %d)" attempt backoff)
+              (prn (format "attempt %d: sleeping %s before retrying (next attempt: %d)" attempt backoff))
               (Thread/sleep (long backoff))
               (recur (inc attempt)))
             {:status :failed

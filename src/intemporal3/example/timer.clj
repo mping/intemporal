@@ -31,5 +31,5 @@
 (println "\n=== Timed Workflow ===")
 (prn (intemporal/start-workflow engine
                                 timed-flow [456]
-                                :workflow-id "timed-flow"
+                                ;:workflow-id "timed-flow"
                                 :observer (:observer engine)))
