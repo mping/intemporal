@@ -10,7 +10,7 @@
   (load-history [store workflow-id] "Load history for a workflow")
   (save-event [store workflow-id event] "Append an event to workflow history")
   (save-events [store workflow-id events] "Append multiple events atomically")
-  (find-event [event-type seq-num] "Finds the given event type by its sequence number")
+  (find-event [store workflow-id event-type seq-num] "Finds the given event type by its sequence number")
   (get-pending-signals [store workflow-id] "Get pending signals for workflow")
   (add-signal [store workflow-id signal-name signal-data] "Add a signal to workflow")
   (consume-signal [store workflow-id signal-name] "Consume and remove a signal")

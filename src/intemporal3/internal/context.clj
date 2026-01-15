@@ -9,12 +9,27 @@
 
 (def ^:dynamic *workflow-context* nil)
 
-(defn current-context []
+(defn current-context
+  "Has the following keys:
+
+    :history (atom history)
+    :workflow-id workflow-id
+    :seq-counter (atom 0)
+    :pending-events pending-events
+    :pending-asyncs pending-asyncs
+    :store store
+    :registry registry
+    :observer observer
+  "
+  []
   (or *workflow-context*
       (throw (ex-info "Not in workflow context" {}))))
 
-(defn workflow-id []
+(defn current-workflow-id []
   (:workflow-id (current-context)))
+
+(defn current-store []
+  (:store (current-context)))
 
 (defn check-cancelled! []
   (let [ctx (current-context)]
@@ -23,10 +38,10 @@
 
 (defn next-seq! []
   (check-cancelled!)
-  (let [ctx (current-context)]
-    (let [seq @(:seq-counter ctx)]
-      (swap! (:seq-counter ctx) inc)
-      seq)))
+  (let [ctx (current-context)
+        seq @(:seq-counter ctx)]
+    (swap! (:seq-counter ctx) inc)
+    seq))
 
 (defn update-seq! [event]
   (when-let [last-seq (:last-seq event)]

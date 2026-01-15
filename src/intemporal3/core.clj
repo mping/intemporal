@@ -27,9 +27,13 @@
       (ctx/check-cancelled!)
       (let [ctx (ctx/current-context)
             seq-num (ctx/next-seq!)
-            history @(:history ctx)
-            existing (ctx/find-event history :activity-completed seq-num)
-            existing-failed (ctx/find-event history :activity-failed seq-num)]
+            ;history @(:history ctx)
+            ;existing (ctx/find-event history :activity-completed seq-num)
+            ;existing-failed (ctx/find-event history :activity-failed seq-num)
+            store (ctx/current-store)
+            workflow-id (ctx/current-workflow-id)
+            existing (p/find-event store workflow-id :activity-completed seq-num)
+            existing-failed (p/find-event store workflow-id  :activity-failed seq-num)]
         (cond
           ;; Replay: return cached result
           existing
@@ -72,10 +76,15 @@
   (ctx/check-cancelled!)
   (let [ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
-        history @(:history ctx)
-        existing-completed (ctx/find-event history :async-completed seq-num)
-        existing-failed (ctx/find-event history :async-failed seq-num)
-        existing-started (ctx/find-event history :async-started seq-num)]
+        ;history @(:history ctx)
+        ;existing-completed (ctx/find-event history :async-completed seq-num)
+        ;existing-failed (ctx/find-event history :async-failed seq-num)
+        ;existing-started (ctx/find-event history :async-started seq-num)
+        store (ctx/current-store)
+        workflow-id (ctx/current-workflow-id)
+        existing-completed (p/find-event store workflow-id :async-completed seq-num)
+        existing-failed (p/find-event store workflow-id :async-failed seq-num)
+        existing-started (p/find-event store workflow-id :async-started seq-num)]
     (cond
       ;; Already completed - advance seq past consumed numbers during replay
       existing-completed
@@ -138,9 +147,14 @@
   (ctx/check-cancelled!)
   (let [ctx (ctx/current-context)
         handle-seq (:seq-num handle)
-        history @(:history ctx)
-        completed (ctx/find-event history :async-completed handle-seq)
-        failed (ctx/find-event history :async-failed handle-seq)]
+        ;history @(:history ctx)
+        ;completed (ctx/find-event history :async-completed handle-seq)
+        ;failed (ctx/find-event history :async-failed handle-seq)
+
+        store (ctx/current-store)
+        workflow-id (ctx/current-workflow-id)
+        completed (p/find-event store workflow-id :async-completed handle-seq)
+        failed (p/find-event store workflow-id :async-failed handle-seq)]
     (cond
       completed
       (:result completed)
@@ -166,8 +180,11 @@
   (ctx/check-cancelled!)
   (let [ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
-        history @(:history ctx)
-        existing (ctx/find-event history :join-any-completed seq-num)]
+        ;history @(:history ctx)
+        ;existing (ctx/find-event history :join-any-completed seq-num)
+        store (ctx/current-store)
+        workflow-id (ctx/current-workflow-id)
+        existing (p/find-event store workflow-id :join-any-completed seq-num)]
     (if existing
       {:index (:index existing)
        :result (:result existing)}
@@ -175,7 +192,7 @@
       (let [completed-idx (first
                             (keep-indexed
                                (fn [idx handle]
-                                   (when (ctx/find-event history :async-completed (:seq-num handle))
+                                   (when (p/find-event store workflow-id :async-completed (:seq-num handle))
                                        idx))
                                handles))]
         (if completed-idx
@@ -201,8 +218,11 @@
   (ctx/check-cancelled!)
   (let [ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
-        history @(:history ctx)
-        existing (ctx/find-event history :signal-received seq-num)]
+        ;history @(:history ctx)
+        ;existing (ctx/find-event history :signal-received seq-num)
+        store (ctx/current-store)
+        workflow-id (ctx/current-workflow-id)
+        existing (p/find-event store workflow-id :signal-received seq-num)]
     (if existing
       (:payload existing)
       (throw (error/make-suspension :wait-signal {:seq seq-num
@@ -215,8 +235,11 @@
   (ctx/check-cancelled!)
   (let [ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
-        history @(:history ctx)
-        existing (ctx/find-event history :signal-wait-completed seq-num)]
+        ;history @(:history ctx)
+        ;existing (ctx/find-event history :signal-wait-completed seq-num)
+        store (ctx/current-store)
+        workflow-id (ctx/current-workflow-id)
+        existing (p/find-event store workflow-id :signal-wait-completed seq-num)]
     (if existing
       (if (:received existing)
         {:received true :payload (:payload existing)}
@@ -227,7 +250,8 @@
                                      :timeout-ms timeout-ms
                                      :deadline (+ (System/currentTimeMillis) timeout-ms)})))))
 
-;; ============================================================================
+;; ================================================================
+;; ============
 ;; Timers
 ;; ============================================================================
 
@@ -237,8 +261,11 @@
   (ctx/check-cancelled!)
   (let [ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
-        history @(:history ctx)
-        existing (ctx/find-event history :timer-fired seq-num)]
+        ;history @(:history ctx)
+        ;existing (ctx/find-event history :timer-fired seq-num)
+        store (ctx/current-store)
+        workflow-id (ctx/current-workflow-id)
+        existing (p/find-event store workflow-id :timer-fired seq-num)]
     (if existing
       nil
       (let [fire-at (+ (System/currentTimeMillis) ms)]
@@ -262,10 +289,14 @@
   (ctx/check-cancelled!)
   (let [ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
-        history @(:history ctx)
+        ;history @(:history ctx)
         child-wf-id (or child-id (str (:workflow-id ctx) "/child-" seq-num))
-        existing (ctx/find-event history :child-workflow-completed seq-num)
-        existing-failed (ctx/find-event history :child-workflow-failed seq-num)]
+        ;existing (ctx/find-event history :child-workflow-completed seq-num)
+        ;existing-failed (ctx/find-event history :child-workflow-failed seq-num)
+        store (ctx/current-store)
+        workflow-id (ctx/current-workflow-id)
+        existing (p/find-event store workflow-id :child-workflow-completed seq-num)
+        existing-failed (p/find-event store workflow-id :child-workflow-failed seq-num)]
     (cond
       existing
       (:result existing)
@@ -550,23 +581,27 @@
         (when (seq pending-events)
           (p/save-events store workflow-id pending-events))
         ;; Check if the handle is now complete
-        (let [history (p/load-history store workflow-id)
-              completed (ctx/find-event history :async-completed handle-seq)
-              failed (ctx/find-event history :async-failed handle-seq)]
+        (let [;history (p/load-history store workflow-id)
+              ;completed (ctx/find-event history :async-completed handle-seq)
+              ;failed (ctx/find-event history :async-failed handle-seq)
+              store (ctx/current-store)
+              workflow-id (ctx/current-workflow-id)
+              completed (p/find-event store workflow-id :async-completed handle-seq)
+              failed (p/find-event store workflow-id :async-failed handle-seq)]
           (if (or completed failed)
             :continue
             :wait-async))))))
 
 (declare run-workflow-internal)
 
-(defn- process-child-workflow [store executor scheduler registry workflow-id
+(defn- process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
                                suspension-data pending-events observer]
   (let [{:keys [seq child-workflow-id workflow-fn args]} suspension-data]
     (p/save-events store workflow-id pending-events)
     ;; Execute child workflow synchronously for now
     ;; In a real implementation, this could be async
     (try
-      (let [result (run-workflow-internal store executor scheduler registry
+      (let [result (run-workflow-internal engine
                                           child-workflow-id workflow-fn args
                                           {:observer observer
                                            :max-iterations 1000})]
@@ -712,7 +747,7 @@
                          :continue)
 
                        :child-workflow
-                       (process-child-workflow store executor scheduler registry
+                       (process-child-workflow engine
                                                workflow-id
                                                (:suspension-data exec-result)
                                                pending-events-list

@@ -80,11 +80,11 @@
   (intemporal/shutdown-engine engine)
 
   ;; Using the convenience macro
-  (intemporal/with-workflow-engine [eng {:threads 4 :enable-logging true}]
-    (a/register-activity! (:registry eng) #'activity-fn)
-    (a/register-activity! (:registry eng) #'slow-activity)
+  (intemporal/with-workflow-engine [engine {:threads 4 :enable-logging true}]
+    (a/register-activity! (:registry engine) #'activity-fn)
+    (a/register-activity! (:registry engine) #'slow-activity)
     (let [result (intemporal/start-workflow engine
                                             my-parallel-flow [999]
-                                            :observer (:observer eng))]
+                                            :observer (:observer engine))]
       (println "Result:" result))))
 

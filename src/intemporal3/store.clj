@@ -65,8 +65,3 @@
                   :workflow-completed :completed
                   :workflow-failed :failed
                   :running))))))
-
-(defn ->InMemoryStore
-  "Create a new in-memory store"
-  ([] (->InMemoryStore (atom {})))
-  ([state] (InMemoryStore. state)))
