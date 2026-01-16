@@ -805,26 +805,33 @@
   (let [wf-id (or workflow-id (str (random-uuid)))
         resume-promise (promise)
         wake-fn (fn []
-                  (when observer
-                    (p/on-workflow-resumed observer wf-id))
-                  (deliver resume-promise
-                           (run-workflow-internal engine wf-id workflow-fn args
-                                                 {:observer observer
-                                                  :max-iterations max-iterations})))]
+                  (try
+                    (when observer
+                      (p/on-workflow-resumed observer wf-id))
+                    (deliver resume-promise
+                             (run-workflow-internal engine wf-id workflow-fn args
+                                                   {:observer observer
+                                                    :max-iterations max-iterations}))
+                    (catch Exception e
+                      (deliver resume-promise {:status :failed :error e}))))]
     (p/save-event store wf-id {:event-type :workflow-started
                                :workflow-id wf-id
                                :args (vec args)
                                :timestamp (System/currentTimeMillis)})
     (when observer
       (p/on-workflow-started observer wf-id args))
-    (let [result (run-workflow-internal engine wf-id workflow-fn args
-                                       {:observer observer
-                                        :max-iterations max-iterations
-                                        :wake-fn wake-fn})]
-      ;; If workflow is waiting for timer/signal, block until wake-fn delivers result
-      (if (#{:waiting-timer :waiting-signal :waiting-signal-timeout} (:status result))
-        @resume-promise
-        result))))
+    (try
+      (let [result (run-workflow-internal engine wf-id workflow-fn args
+                                         {:observer observer
+                                          :max-iterations max-iterations
+                                          :wake-fn wake-fn})]
+        ;; If workflow is waiting for timer/signal, block until wake-fn delivers result
+        (if (#{:waiting-timer :waiting-signal :waiting-signal-timeout} (:status result))
+          @resume-promise
+          result))
+      (catch Exception e
+        ;; If cancelled/failed before entering wait state, re-throw
+        (throw e)))))
 
 (defn resume-workflow
   "Resume a waiting workflow (e.g., after signal delivery or timer).
