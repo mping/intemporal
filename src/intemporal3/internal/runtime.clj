@@ -1,5 +1,6 @@
 (ns intemporal3.internal.runtime
   (:require [intemporal3.internal.error :as error]
+            [intemporal3.internal.activity :as activity]
             [intemporal3.protocol :as p])
   (:import (java.util.concurrent ArrayBlockingQueue ExecutorService Executors Future ScheduledExecutorService ScheduledFuture ThreadPoolExecutor ThreadPoolExecutor$CallerRunsPolicy TimeUnit TimeoutException)))
 
@@ -70,7 +71,7 @@
   (execute-activities-parallel [_ activities]
     (if (empty? activities)
       []
-      (let [futures (mapv (fn [{:keys [activity-name args timeout-ms]}]
+      (let [futures (mapv (fn [{:keys [activity-name args timeout-ms retry-policy]}]
                             (let [act     (get @registry-atom activity-name)
                                   timeout (or timeout-ms default-timeout-ms)]
                               (if (nil? act)
@@ -79,8 +80,34 @@
                                 {:future        (.submit pool ^Callable
                                                          (fn []
                                                            (let [start (System/currentTimeMillis)]
-                                                             {:result   (apply (:fn act) args)
-                                                              :duration (- (System/currentTimeMillis) start)})))
+                                                             (if (nil? retry-policy)
+                                                               ;; No retry - execute once
+                                                               {:result   (apply (:fn act) args)
+                                                                :duration (- (System/currentTimeMillis) start)}
+                                                               ;; With retry
+                                                               (loop [attempt 1]
+                                                                 (let [outcome (try
+                                                                                 ;; 1. Try the operation
+                                                                                 (let [result (apply (:fn act) args)]
+                                                                                   {:status :success
+                                                                                    :data   {:result   result
+                                                                                             :duration (- (System/currentTimeMillis) start)
+                                                                                             :attempts attempt}})
+                                                                                 (catch Exception e
+                                                                                   ;; 2. If it fails, determine if we should retry
+                                                                                   (if (activity/should-retry? retry-policy e attempt)
+                                                                                     (do
+                                                                                       ;; Perform side-effects (logging, sleeping) here
+                                                                                       (Thread/sleep (long (activity/calculate-backoff retry-policy attempt)))
+                                                                                       ;; Return a signal value instead of recurring directly
+                                                                                       {:status :retry})
+                                                                                     ;; If we shouldn't retry, rethrow
+                                                                                     (throw e))))]
+
+                                                                   ;; 3. Check the outcome outside the try/catch
+                                                                   (if (= (:status outcome) :retry)
+                                                                     (recur (inc attempt)) ;; This is now in a valid tail position
+                                                                     (:data outcome))))))))
                                  :timeout       timeout
                                  :activity-name activity-name})))
                           activities)]

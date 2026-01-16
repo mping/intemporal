@@ -435,12 +435,8 @@
     (p/save-events store workflow-id pending-events)
 
     ;; Execute all activities in parallel
-    (let [activities (mapv (fn [{:keys [activity-name args timeout-ms]}]
-                             {:activity-name activity-name
-                              :args args
-                              :timeout-ms timeout-ms})
-                           pending-asyncs)
-          results (p/execute-activities-parallel executor activities)
+    ;; Pass complete async-info including retry-policy, activity-seq, handle-seq
+    (let [results (p/execute-activities-parallel executor pending-asyncs)
           now (System/currentTimeMillis)
 
           ;; Create completion events for both activities and async handles

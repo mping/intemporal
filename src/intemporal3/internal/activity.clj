@@ -67,3 +67,4 @@
 (defn should-retry? [policy error attempt]
   (and (< attempt (:max-attempts policy))
        ((:retryable-fn policy) error)))
+
