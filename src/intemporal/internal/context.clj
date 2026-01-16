@@ -1,6 +1,6 @@
-(ns intemporal3.internal.context
-  (:require [intemporal3.internal.error :as error]
-            [intemporal3.protocol :as p]))
+(ns intemporal.internal.context
+  (:require [intemporal.internal.error :as error]
+            [intemporal.protocol :as p]))
 
 
 ;; ============================================================================

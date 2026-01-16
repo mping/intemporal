@@ -1,6 +1,6 @@
-(ns intemporal3.example.cancellation
-  (:require [intemporal3.core :as intemporal]
-            [intemporal3.internal.activity :as a]
+(ns intemporal.example.cancellation
+  (:require [intemporal.core :as intemporal]
+            [intemporal.internal.activity :as a]
             [clojure.pprint]))
 
 ;; Define activities

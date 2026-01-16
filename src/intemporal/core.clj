@@ -1,11 +1,11 @@
-(ns intemporal3.core
-  (:require [intemporal3.internal.error :as error]
-            [intemporal3.internal.context :as ctx]
-            [intemporal3.internal.activity :as a]
-            [intemporal3.internal.runtime :as runtime]
-            [intemporal3.protocol :as p]
-            [intemporal3.store :as store]
-            [intemporal3.observer :as obs]))
+(ns intemporal.core
+  (:require [intemporal.internal.error :as error]
+            [intemporal.internal.context :as ctx]
+            [intemporal.internal.activity :as a]
+            [intemporal.internal.runtime :as runtime]
+            [intemporal.protocol :as p]
+            [intemporal.store :as store]
+            [intemporal.observer :as obs]))
 
 ;; ============================================================================
 ;; Core Workflow Operations
@@ -673,6 +673,7 @@
           (when observer
             (p/on-workflow-completed observer workflow-id (:result exec-result)))
           {:status :completed
+           :workflow-id workflow-id
            :result (:result exec-result)})
 
         :cancelled
@@ -773,6 +774,7 @@
           (when observer
             (p/on-workflow-failed observer workflow-id (error/throwable->map (:error exec-result))))
           {:status :failed
+           :workflow-id workflow-id
            :error (:error exec-result)})))))
 
 ;; ============================================================================

@@ -1,5 +1,5 @@
-(ns intemporal3.store
-  (:require [intemporal3.protocol :as p]))
+(ns intemporal.store
+  (:require [intemporal.protocol :as p]))
 
 ;; ============================================================================
 ;; In-Memory Store Implementation

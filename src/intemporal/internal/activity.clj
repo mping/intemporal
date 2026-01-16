@@ -1,4 +1,4 @@
-(ns intemporal3.internal.activity)
+(ns intemporal.internal.activity)
 
 ;; ============================================================================
 ;; Activity Registry

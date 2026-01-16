@@ -1,7 +1,7 @@
-(ns intemporal3.internal.runtime
-  (:require [intemporal3.internal.error :as error]
-            [intemporal3.internal.activity :as activity]
-            [intemporal3.protocol :as p])
+(ns intemporal.internal.runtime
+  (:require [intemporal.internal.error :as error]
+            [intemporal.internal.activity :as activity]
+            [intemporal.protocol :as p])
   (:import (java.util.concurrent ArrayBlockingQueue ExecutorService Executors Future ScheduledExecutorService ScheduledFuture ThreadPoolExecutor ThreadPoolExecutor$CallerRunsPolicy TimeUnit TimeoutException)))
 
 

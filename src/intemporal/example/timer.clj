@@ -1,6 +1,6 @@
-(ns intemporal3.example.timer
-  (:require [intemporal3.core :as intemporal]
-            [intemporal3.internal.activity :as a]
+(ns intemporal.example.timer
+  (:require [intemporal.core :as intemporal]
+            [intemporal.internal.activity :as a]
             [clojure.pprint]))
 
 ;; ============================================================================

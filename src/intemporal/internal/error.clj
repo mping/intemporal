@@ -1,4 +1,4 @@
-(ns intemporal3.internal.error)
+(ns intemporal.internal.error)
 
 
 ;; ============================================================================
