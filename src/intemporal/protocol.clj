@@ -14,6 +14,8 @@
   (get-pending-signals [store workflow-id] "Get pending signals for workflow")
   (add-signal [store workflow-id signal-name signal-data] "Add a signal to workflow")
   (consume-signal [store workflow-id signal-name] "Consume and remove a signal")
+  (register-signal-callback [store workflow-id signal-name callback] "Register callback to be invoked when signal arrives")
+  (unregister-signal-callback [store workflow-id signal-name] "Unregister signal callback")
   (is-cancelled? [store workflow-id] "Check if workflow is cancelled")
   (mark-cancelled [store workflow-id] "Mark workflow as cancelled")
   (get-workflow-status [store workflow-id] "Get current workflow status"))

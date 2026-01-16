@@ -47,20 +47,22 @@
      :result   (act id)}))
 
 (println "\n=== Signal Workflow ===")
-(let [wf-id   "signal-flow"
-      result1 (intemporal/start-workflow engine
-                                         signal-flow [789]
-                                         :workflow-id wf-id
-                                         :observer (:observer engine))]
-  (println "Initial result:" result1)
-  (when (= :waiting-signal (:status result1))
-    (println "Sending signal...")
-    (intemporal/send-signal (:store engine) wf-id "approval" {:approved-by "admin"})
-    (println "Resuming...")
-    (println "Final result:"
-             (intemporal/resume-workflow engine
-                                         wf-id signal-flow [789]
-                                         :observer (:observer engine)))))
+;; Start workflow in background thread since it will block
+(let [wf-id "signal-flow"
+      result-promise (promise)
+      workflow-thread (future
+                        (deliver result-promise
+                                 (intemporal/start-workflow engine
+                                                            signal-flow [789]
+                                                            :workflow-id wf-id
+                                                            :observer (:observer engine))))]
+  ;; Give workflow time to start and enter waiting state
+  (Thread/sleep 500)
+  (println "Sending signal...")
+  (intemporal/send-signal (:store engine) wf-id "approval" {:approved-by "admin"})
+  (println "Waiting for workflow to complete...")
+  (println "Final result:" @result-promise)
+  (future-cancel workflow-thread))
 
 ;; Workflow with signal timeout
 (defn signal-timeout-flow [id]
@@ -79,3 +81,7 @@
                                          :workflow-id wf-id
                                          :observer (:observer engine))]
   (println "Initial result:" result1))
+
+;; Shutdown engine
+(intemporal/shutdown-engine engine)
+(println "\nEngine shut down.")

@@ -31,9 +31,13 @@
   (get-pending-signals [_ workflow-id]
     (get-in @state [:workflows workflow-id :signals] {}))
 
-  (add-signal [_ workflow-id signal-name signal-data]
+  (add-signal [this workflow-id signal-name signal-data]
     (swap! state update-in [:workflows workflow-id :signals signal-name]
            (fnil conj []) signal-data)
+    ;; Check if there's a callback registered for this signal
+    (when-let [callback (get-in @state [:workflows workflow-id :signal-callbacks signal-name])]
+      ;; Invoke callback asynchronously
+      (future (callback)))
     signal-data)
 
   (consume-signal [_ workflow-id signal-name]
@@ -48,6 +52,12 @@
                                 (comp vec rest)))
                    s))))
       @result))
+
+  (register-signal-callback [_ workflow-id signal-name callback]
+    (swap! state assoc-in [:workflows workflow-id :signal-callbacks signal-name] callback))
+
+  (unregister-signal-callback [_ workflow-id signal-name]
+    (swap! state update-in [:workflows workflow-id :signal-callbacks] dissoc signal-name))
 
   (is-cancelled? [_ workflow-id]
     (get-in @state [:workflows workflow-id :cancelled] false))

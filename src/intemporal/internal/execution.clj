@@ -187,11 +187,12 @@
                             (when wake-fn (wake-fn))))
         :wait-timer))))
 
-(defn process-signal [store workflow-id suspension-data pending-events observer]
+(defn process-signal [store workflow-id suspension-data pending-events wake-fn observer]
   (let [{:keys [seq signal-name]} suspension-data]
     ;; Save pending events
     (p/save-events store workflow-id pending-events)
     (if-let [signal-data (p/consume-signal store workflow-id signal-name)]
+      ;; Signal already available - process immediately
       (do
         (p/save-event store workflow-id {:event-type  :signal-received
                                          :seq         seq
@@ -202,7 +203,25 @@
         (when observer
           (p/on-signal-received observer workflow-id signal-name (:payload signal-data)))
         :continue)
-      :wait-signal)))
+      ;; Signal not yet available - register callback and wait
+      (do
+        (p/register-signal-callback store workflow-id signal-name
+                                   (fn []
+                                     ;; When signal arrives, consume it and save event
+                                     (when-let [signal-data (p/consume-signal store workflow-id signal-name)]
+                                       (p/save-event store workflow-id {:event-type  :signal-received
+                                                                        :seq         seq
+                                                                        :signal-name signal-name
+                                                                        :signal-id   (:id signal-data)
+                                                                        :payload     (:payload signal-data)
+                                                                        :timestamp   (System/currentTimeMillis)})
+                                       (when observer
+                                         (p/on-signal-received observer workflow-id signal-name (:payload signal-data))))
+                                     ;; Unregister callback
+                                     (p/unregister-signal-callback store workflow-id signal-name)
+                                     ;; Wake up the workflow
+                                     (when wake-fn (wake-fn))))
+        :wait-signal))))
 
 (defn process-signal-with-timeout [store scheduler workflow-id suspension-data
                                     pending-events wake-fn observer]
@@ -388,6 +407,7 @@
       (process-signal store workflow-id
                       suspension-data
                       pending-events-list
+                      wake-fn
                       observer)
 
       :wait-signal-timeout

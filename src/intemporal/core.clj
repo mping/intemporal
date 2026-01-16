@@ -364,9 +364,8 @@
                                          {:observer observer
                                           :max-iterations max-iterations
                                           :wake-fn wake-fn})]
-        ;; If workflow is waiting for timer or signal-with-timeout, block until wake-fn delivers result
-        ;; For plain signals, return immediately so caller can send signal and resume
-        (if (#{:waiting-timer :waiting-signal-timeout} (:status result))
+        ;; If workflow is waiting for timer, signal, or signal-with-timeout, block until wake-fn delivers result
+        (if (#{:waiting-timer :waiting-signal :waiting-signal-timeout} (:status result))
           @resume-promise
           result))
       (catch Exception e
