@@ -613,7 +613,9 @@
             (p/save-event store workflow-id {:event-type :child-workflow-failed
                                              :seq seq
                                              :child-workflow-id child-workflow-id
-                                             :error {:status (:status result)}
+                                             :error (or (:error result)
+                                                        {:status (:status result)
+                                                         :message (str "Child workflow ended with status: " (:status result))})
                                              :timestamp (System/currentTimeMillis)})
             :continue)))
       (catch Exception e
