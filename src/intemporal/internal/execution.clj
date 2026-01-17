@@ -14,7 +14,7 @@
      :result (apply workflow-fn args)
      :pending-asyncs @(:pending-asyncs (ctx/current-context))
      :pending-events @(:pending-events (ctx/current-context))}
-    (catch Exception e
+    (catch Throwable e
       (cond
         (error/suspension? e)
         {:status :suspended

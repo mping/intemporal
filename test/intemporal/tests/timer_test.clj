@@ -1,10 +1,8 @@
 (ns intemporal.tests.timer-test
   (:require [intemporal.core :as intemporal]
             [intemporal.internal.activity :as a]
-            [intemporal.observer :as obs]
             [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-            [matcher-combinators.matchers :as m]))
+            [matcher-combinators.test :refer [match?]]))
 
 (defn activity-fn [arg]
   [:processed arg])
@@ -39,11 +37,8 @@
   (testing "Workflow with multiple sleep calls"
     (intemporal/with-workflow-engine [engine {:threads 2}]
       (a/register-activity! (:registry engine) #'activity-fn)
-      (let [logs (atom [])
-            result (intemporal/start-workflow engine
-                                              multi-sleep-flow [789]
-                                              :observer (obs/->LoggingObserver logs))]
-        (clojure.pprint/print-table @logs)
+      (let [result (intemporal/start-workflow engine
+                                              multi-sleep-flow [789])]
         (is (match? {:status :completed
                      :workflow-id string?
                      :result {:results [[:processed 1] [:processed 2]]

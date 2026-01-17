@@ -2,8 +2,7 @@
   (:require [intemporal.core :as intemporal]
             [intemporal.internal.activity :as a]
             [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-            [matcher-combinators.matchers :as m]))
+            [matcher-combinators.test :refer [match?]]))
 
 (defn slow-activity [x]
   (println (str "slow activity START with " x " on thread " (.getName (Thread/currentThread))))

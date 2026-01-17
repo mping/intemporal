@@ -1,15 +1,29 @@
-(ns intemporal.internal.error)
+(ns intemporal.internal.error
+  (:import (clojure.lang IExceptionInfo)))
 
 
 ;; ============================================================================
 ;; Exceptions and Error Handling
 ;; ============================================================================
+(defn- internal-error
+  "Internal exception constructor, subclasses error to prevent userland code to caught this
+  exception in `(try ... (catch Exception e))` blocks"
+  ([message data]
+   (internal-error message data nil))
+  ([message data cause]
+   (proxy [Error IExceptionInfo] [message cause]
+     (getData [] data)
+     (toString []
+       (str message
+            (when data (str " " (pr-str data)))
+            (when cause (str "\nCaused by: " cause)))))))
 
 (defn make-suspension [type data]
-  (ex-info "Workflow suspended" {:type type :data data ::suspension true}))
+  (internal-error "Workflow suspended" {:type type :data data ::suspension true}))
 
 (defn suspension? [e]
-  (and (instance? clojure.lang.ExceptionInfo e)
+  (and (instance? Error e)
+       (instance? IExceptionInfo e)
        (::suspension (ex-data e))))
 
 (defn suspension-type [e]
@@ -19,38 +33,39 @@
   (-> e ex-data :data))
 
 (defn workflow-cancelled-exception []
-  (ex-info "Workflow cancelled" {::cancelled true}))
+  (internal-error "Workflow cancelled" {::cancelled true}))
 
 (defn cancelled-exception? [e]
-  (and (instance? clojure.lang.ExceptionInfo e)
+  (and (instance? Error e)
+       (instance? IExceptionInfo e)
        (::cancelled (ex-data e))))
 
 (defn activity-timeout-exception [activity-name timeout-ms]
   (ex-info "Activity timed out"
            {::activity-timeout true
-            :activity-name activity-name
-            :timeout-ms timeout-ms}))
+            :activity-name     activity-name
+            :timeout-ms        timeout-ms}))
 
 (defn activity-failed-exception [activity-name cause]
   (ex-info "Activity failed"
            {::activity-failed true
-            :activity-name activity-name}
+            :activity-name    activity-name}
            cause))
 
 (defn async-failed-exception [handle-seq cause]
   (ex-info "Async operation failed"
            {::async-failed true
-            :handle-seq handle-seq
-            :cause cause}))
+            :handle-seq    handle-seq
+            :cause         cause}))
 
 (defn throwable->map [^Throwable t]
   (when t
-    {:type (str (type t))
-     :message (.getMessage t)
-     :data (when (instance? clojure.lang.ExceptionInfo t)
-             (ex-data t))
+    {:type        (str (type t))
+     :message     (.getMessage t)
+     :data        (when (instance? IExceptionInfo t)
+                    (ex-data t))
      :stack-trace (mapv str (.getStackTrace t))
-     :cause (throwable->map (.getCause t))}))
+     :cause       (throwable->map (.getCause t))}))
 
 (defn map->exception [m]
   (when m

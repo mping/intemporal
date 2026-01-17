@@ -5,6 +5,9 @@
            intemporal.macros/with-failure clojure.core/let
            intemporal.store.foundationdb/with-tx clojure.core/with-open
            intemporal.test-utils/with-result clojure.core/let
+
+           intemporal.core/with-workflow-engine clojure.core/let
+
            promesa.core/let clojure.core/let
            promesa.core/loop clojure.core/loop
            promesa.core/recur clojure.core/recur}

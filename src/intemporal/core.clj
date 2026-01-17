@@ -127,7 +127,7 @@
                                      :timestamp (System/currentTimeMillis)})
             (ctx/notify-observer p/on-async-completed (:workflow-id ctx) start-seq result)
             (->AsyncHandle start-seq))
-          (catch Exception e
+          (catch Throwable e
             (if (error/suspension? e)
               ;; The thunk suspended on an activity - capture it for parallel execution
               (let [suspension-info (error/suspension-data e)]
