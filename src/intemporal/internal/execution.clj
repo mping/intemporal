@@ -332,28 +332,36 @@
    :result result})
 
 (defn finalize-cancelled
-  "Save cancellation event and return result."
+  "Save cancellation event and return result as failed."
   [store workflow-id pending-events observer]
   (p/save-events store workflow-id pending-events)
-  (p/save-event store workflow-id {:event-type :workflow-cancelled
-                                   :timestamp  (System/currentTimeMillis)})
-  (when observer
-    (p/on-workflow-cancelled observer workflow-id))
-  {:status :cancelled
-   :workflow-id workflow-id})
+  (let [error-map {:type "clojure.lang.ExceptionInfo"
+                   :message "Workflow cancelled"
+                   :data {:workflow-id workflow-id}}]
+    (p/save-event store workflow-id {:event-type :workflow-failed
+                                     :error error-map
+                                     :timestamp  (System/currentTimeMillis)})
+    (when observer
+      (p/on-workflow-cancelled observer workflow-id))
+    (when observer
+      (p/on-workflow-failed observer workflow-id error-map))
+    {:status :failed
+     :workflow-id workflow-id
+     :error error-map}))
 
 (defn finalize-failed
   "Save failure event and return result."
   [store workflow-id pending-events error observer]
   (p/save-events store workflow-id pending-events)
-  (p/save-event store workflow-id {:event-type :workflow-failed
-                                   :error      (error/throwable->map error)
-                                   :timestamp  (System/currentTimeMillis)})
-  (when observer
-    (p/on-workflow-failed observer workflow-id (error/throwable->map error)))
-  {:status :failed
-   :workflow-id workflow-id
-   :error error})
+  (let [error-map (error/throwable->map error)]
+    (p/save-event store workflow-id {:event-type :workflow-failed
+                                     :error      error-map
+                                     :timestamp  (System/currentTimeMillis)})
+    (when observer
+      (p/on-workflow-failed observer workflow-id error-map))
+    {:status :failed
+     :workflow-id workflow-id
+     :error error-map}))
 
 (defn action->result
   "Convert action keyword to workflow result map."
@@ -458,52 +466,60 @@
                                                  :iterations iteration})))
 
     ;; Check cancellation at start of each iteration
-    (when (p/is-cancelled? store workflow-id)
-      (when observer
-        (p/on-workflow-cancelled observer workflow-id))
-      (p/save-event store workflow-id {:event-type :workflow-cancelled
-                                       :timestamp (System/currentTimeMillis)})
-      (throw (ex-info "Workflow cancelled" {:workflow-id workflow-id})))
+    (if (p/is-cancelled? store workflow-id)
+      (let [error-map {:type "clojure.lang.ExceptionInfo"
+                       :message "Workflow cancelled"
+                       :data {:workflow-id workflow-id}}]
+        (when observer
+          (p/on-workflow-cancelled observer workflow-id))
+        (p/save-event store workflow-id {:event-type :workflow-failed
+                                         :error error-map
+                                         :timestamp (System/currentTimeMillis)})
+        (when observer
+          (p/on-workflow-failed observer workflow-id error-map))
+        {:status :failed
+         :workflow-id workflow-id
+         :error error-map})
 
-    (let [history (p/load-history store workflow-id)
-          ctx (make-workflow-context workflow-id history store registry observer)
-          exec-result (binding [ctx/*workflow-context* ctx]
-                        (execute-workflow-fn workflow-fn args))]
+      (let [history (p/load-history store workflow-id)
+            ctx (make-workflow-context workflow-id history store registry observer)
+            exec-result (binding [ctx/*workflow-context* ctx]
+                          (execute-workflow-fn workflow-fn args))]
 
-      (case (:status exec-result)
-        :completed
-        (finalize-completed store executor workflow-id
-                            (:pending-asyncs exec-result)
-                            (:pending-events exec-result)
-                            (:result exec-result)
-                            observer)
+        (case (:status exec-result)
+          :completed
+          (finalize-completed store executor workflow-id
+                              (:pending-asyncs exec-result)
+                              (:pending-events exec-result)
+                              (:result exec-result)
+                              observer)
 
-        :cancelled
-        (finalize-cancelled store workflow-id
-                            (:pending-events exec-result)
-                            observer)
+          :cancelled
+          (finalize-cancelled store workflow-id
+                              (:pending-events exec-result)
+                              observer)
 
-        :suspended
-        (let [action (handle-suspension engine
-                                        workflow-id
-                                        (:suspension-type exec-result)
-                                        (:suspension-data exec-result)
-                                        (:pending-asyncs exec-result)
-                                        (:pending-events exec-result)
-                                        wake-fn
-                                        observer)]
-          (when (and observer (= action :continue))
-            (p/on-workflow-resumed observer workflow-id))
+          :suspended
+          (let [action (handle-suspension engine
+                                          workflow-id
+                                          (:suspension-type exec-result)
+                                          (:suspension-data exec-result)
+                                          (:pending-asyncs exec-result)
+                                          (:pending-events exec-result)
+                                          wake-fn
+                                          observer)]
+            (when (and observer (= action :continue))
+              (p/on-workflow-resumed observer workflow-id))
 
-          (if (= action :continue)
-            (recur (inc iteration))
-            (action->result action workflow-id)))
+            (if (= action :continue)
+              (recur (inc iteration))
+              (action->result action workflow-id)))
 
-        :failed
-        (finalize-failed store workflow-id
-                         (:pending-events exec-result)
-                         (:error exec-result)
-                         observer)))))
+          :failed
+          (finalize-failed store workflow-id
+                           (:pending-events exec-result)
+                           (:error exec-result)
+                           observer))))))
 
 (defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
                                suspension-data pending-events observer]
