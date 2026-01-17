@@ -342,17 +342,25 @@
    & {:keys [workflow-id observer max-iterations]
       :or {max-iterations 1000}}]
   (let [wf-id (or workflow-id (str (random-uuid)))
-        resume-promise (promise)
-        wake-fn (fn []
+        resume-promise-atom (atom nil)
+        wake-fn (fn wake-fn-impl []
                   (try
                     (when observer
                       (p/on-workflow-resumed observer wf-id))
-                    (deliver resume-promise
-                             (exec/run-workflow-internal engine wf-id workflow-fn args
-                                                   {:observer observer
-                                                    :max-iterations max-iterations}))
+                    (let [old-promise @resume-promise-atom
+                          new-promise (promise)
+                          ;_ (reset! resume-promise-atom new-promise)
+                          result (exec/run-workflow-internal engine wf-id workflow-fn args
+                                                       {:observer observer
+                                                        :max-iterations max-iterations
+                                                        :wake-fn wake-fn-impl})]
+                      (reset! resume-promise-atom new-promise)
+                      (deliver old-promise result))
                     (catch Exception e
-                      (deliver resume-promise {:status :failed :error e}))))]
+                      (when-let [p @resume-promise-atom]
+                        (deliver p {:status :failed :error e})))))]
+    ;; Initialize with first promise
+    (reset! resume-promise-atom (promise))
     (p/save-event store wf-id {:event-type :workflow-started
                                :workflow-id wf-id
                                :args (vec args)
@@ -360,14 +368,20 @@
     (when observer
       (p/on-workflow-started observer wf-id args))
     (try
-      (let [result (exec/run-workflow-internal engine wf-id workflow-fn args
-                                         {:observer observer
-                                          :max-iterations max-iterations
-                                          :wake-fn wake-fn})]
-        ;; If workflow is waiting for timer, signal, or signal-with-timeout, block until wake-fn delivers result
-        (if (#{:waiting-timer :waiting-signal :waiting-signal-timeout} (:status result))
-          @resume-promise
-          result))
+      ;; Execute initial workflow run
+      (let [initial-result (exec/run-workflow-internal engine wf-id workflow-fn args
+                                                 {:observer observer
+                                                  :max-iterations max-iterations
+                                                  :wake-fn wake-fn})]
+        ;; Loop to handle multiple wait cycles
+        (loop [result initial-result]
+          ;; If workflow is waiting, block until wake-fn delivers next result
+          (if (#{:waiting-timer :waiting-signal :waiting-signal-timeout :waiting-async} (:status result))
+            ;; Capture the promise that wake-fn will deliver to
+            (let [next-promise @resume-promise-atom
+                  next-result @next-promise]
+              (recur next-result))
+            result)))
       (catch Exception e
         ;; If cancelled/failed before entering wait state, re-throw
         (throw e)))))
