@@ -8,6 +8,8 @@
 ;; Workflow Execution Engine
 ;; ============================================================================
 
+
+
 (defn execute-workflow-fn [workflow-fn args]
   (try
     {:status :completed
@@ -447,6 +449,32 @@
                               suspension-data
                               pending-events-list
                               observer))))
+
+
+(defn run-once
+  "Internal: Execute a side-effect thunk only once (not on replay).
+   Uses a special event marker to track execution.
+
+   This is an internal implementation detail and should not be exposed to users.
+   Users should wrap side effects in activities for proper determinism.
+
+   This can be used to eg run logging statements, etc"
+  [thunk]
+  (ctx/check-cancelled!)
+  (let [seq-num (ctx/next-seq!)
+        store (ctx/current-store)
+        workflow-id (ctx/current-workflow-id)
+        existing (p/find-event store workflow-id :run-once-completed seq-num)]
+    (if existing
+      ;; Replay: already executed, return cached result
+      (:result existing)
+      ;; First time: execute thunk and save result
+      (let [result (thunk)]
+        (ctx/add-pending-event! {:event-type :run-once-completed
+                                 :seq seq-num
+                                 :result result
+                                 :timestamp (System/currentTimeMillis)})
+        result))))
 
 (defn run-workflow-internal
   "Main workflow execution loop - orchestrates replay and execution.

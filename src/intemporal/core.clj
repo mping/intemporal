@@ -278,7 +278,6 @@
         (ctx/notify-observer p/on-timer-scheduled (:workflow-id ctx) seq-num fire-at)
         (throw (error/make-suspension :timer {:seq seq-num
                                               :fire-at fire-at}))))))
-
 ;; ============================================================================
 ;; Child Workflows
 ;; ============================================================================
