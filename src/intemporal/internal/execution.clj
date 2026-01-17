@@ -47,13 +47,17 @@
               duration (- (System/currentTimeMillis) start)]
           (when observer
             (p/on-activity-completed observer workflow-id seq-num activity-name result duration))
-          {:status :success :result result :duration duration})
+          {:status :success
+           :result result
+           :duration duration})
         (catch Exception e
           (let [duration (- (System/currentTimeMillis) start)]
             (when observer
               (p/on-activity-failed observer workflow-id seq-num activity-name
                                     (error/throwable->map e) duration))
-            {:status :failed :error (error/throwable->map e) :duration duration}))))
+            {:status :failed
+             :error (error/throwable->map e)
+             :duration duration}))))
     ;; With retry
     (loop [attempt 1]
       (let [start (System/currentTimeMillis)
@@ -64,7 +68,10 @@
                                 duration (- (System/currentTimeMillis) start)]
                             (when observer
                               (p/on-activity-completed observer workflow-id seq-num activity-name result duration))
-                            {:status :success :result result :duration duration :attempts attempt})
+                            {:status :success
+                             :result result
+                             :duration duration
+                             :attempts attempt})
                           (catch Exception e
                             (let [duration (- (System/currentTimeMillis) start)
                                   error-map (error/throwable->map e)]
@@ -132,33 +139,34 @@
           completion-events
               (mapcat (fn [async-info result]
                           (when observer
-                                       (if (= :success (:status result))
-                                           (p/on-async-completed observer workflow-id
-                                                                 (:handle-seq async-info) (:result result))
-                                           (p/on-async-failed observer workflow-id
-                                                              (:handle-seq async-info) (:error result))))
+                            (if (= :success (:status result))
+                                (p/on-async-completed observer workflow-id
+                                                      (:handle-seq async-info) (:result result))
+                                (p/on-async-failed observer workflow-id
+                                                   (:handle-seq async-info) (:error result))))
                           (if (= :success (:status result))
-                              [{:event-type :activity-completed
-                                           :seq (:activity-seq async-info)
-                                           :activity-name (:activity-name async-info)
-                                           :result (:result result)
-                                           :duration-ms (:duration result)
-                                           :timestamp now}
-                               {:event-type :async-completed
-                                           :seq (:handle-seq async-info)
-                                           :last-seq (:activity-seq async-info)
-                                           :result (:result result)
-                                           :timestamp now}]
-                              [{:event-type :activity-failed
-                                           :seq (:activity-seq async-info)
-                                           :activity-name (:activity-name async-info)
-                                           :error (:error result)
-                                           :timestamp now}
-                               {:event-type :async-failed
-                                           :seq (:handle-seq async-info)
-                                           :last-seq (:activity-seq async-info)
-                                           :error (:error result)
-                                           :timestamp now}]))
+                            [{:event-type    :activity-completed
+                              :seq           (:activity-seq async-info)
+                              :activity-name (:activity-name async-info)
+                              :result        (:result result)
+                              :duration-ms   (:duration result)
+                              :timestamp     now}
+                             {:event-type :async-completed
+                              :seq        (:handle-seq async-info)
+                              :last-seq   (:activity-seq async-info)
+                              :result     (:result result)
+                              :timestamp  now}]
+                              ;; else
+                            [{:event-type    :activity-failed
+                              :seq           (:activity-seq async-info)
+                              :activity-name (:activity-name async-info)
+                              :error         (:error result)
+                              :timestamp     now}
+                             {:event-type :async-failed
+                              :seq        (:handle-seq async-info)
+                              :last-seq   (:activity-seq async-info)
+                              :error      (:error result)
+                              :timestamp  now}]))
                       pending-asyncs results)]
       (p/save-events store workflow-id completion-events)))
   :continue)

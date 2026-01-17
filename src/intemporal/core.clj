@@ -26,15 +26,15 @@
         effective-retry (or retry-policy (:retry-policy activity-info))]
     (fn [& args]
       (ctx/check-cancelled!)
-      (let [ctx (ctx/current-context)
-            seq-num (ctx/next-seq!)
+      (let [ctx             (ctx/current-context)
+            seq-num         (ctx/next-seq!)
             ;history @(:history ctx)
             ;existing (ctx/find-event history :activity-completed seq-num)
             ;existing-failed (ctx/find-event history :activity-failed seq-num)
-            store (ctx/current-store)
-            workflow-id (ctx/current-workflow-id)
-            existing (p/find-event store workflow-id :activity-completed seq-num)
-            existing-failed (p/find-event store workflow-id  :activity-failed seq-num)]
+            store           (ctx/current-store)
+            workflow-id     (ctx/current-workflow-id)
+            existing        (p/find-event store workflow-id :activity-completed seq-num)
+            existing-failed (p/find-event store workflow-id :activity-failed seq-num)]
         (cond
           ;; Replay: return cached result
           existing
@@ -46,23 +46,23 @@
 
           ;; Execute: need to run the activity
           :else
-          (let [scheduled-event {:event-type :activity-scheduled
-                                 :seq seq-num
+          (let [scheduled-event {:event-type    :activity-scheduled
+                                 :seq           seq-num
                                  :activity-name activity-name
-                                 :args (vec args)
-                                 :timeout-ms effective-timeout
-                                 :retry-policy (when effective-retry
-                                                 {:max-attempts (:max-attempts effective-retry)
-                                                  :backoff-ms (:backoff-ms effective-retry)})
-                                 :timestamp (System/currentTimeMillis)}]
+                                 :args          (vec args)
+                                 :timeout-ms    effective-timeout
+                                 :retry-policy  (when effective-retry
+                                                  {:max-attempts (:max-attempts effective-retry)
+                                                   :backoff-ms   (:backoff-ms effective-retry)})
+                                 :timestamp     (System/currentTimeMillis)}]
             (ctx/add-pending-event! scheduled-event)
             (ctx/notify-observer p/on-activity-scheduled
                                  (:workflow-id ctx) seq-num activity-name (vec args))
-            (throw (error/make-suspension :activity {:seq seq-num
+            (throw (error/make-suspension :activity {:seq           seq-num
                                                      :activity-name activity-name
-                                                     :args (vec args)
-                                                     :timeout-ms effective-timeout
-                                                     :retry-policy effective-retry}))))))))
+                                                     :args          (vec args)
+                                                     :timeout-ms    effective-timeout
+                                                     :retry-policy  effective-retry}))))))))
 
 ;; ============================================================================
 ;; Async Support
@@ -108,8 +108,8 @@
       ;; Need to start - record and try to capture what activity it needs
       :else
       (let [start-event {:event-type :async-started
-                         :seq seq-num
-                         :timestamp (System/currentTimeMillis)}
+                         :seq        seq-num
+                         :timestamp  (System/currentTimeMillis)}
             start-seq seq-num]
         (ctx/add-pending-event! start-event)
         (ctx/notify-observer p/on-async-started (:workflow-id ctx) seq-num)
@@ -121,22 +121,22 @@
             ;; If thunk completes synchronously (pure computation - first run only),
             ;; save the completion event immediately with the seq range
             (ctx/add-pending-event! {:event-type :async-completed
-                                     :seq start-seq
-                                     :last-seq end-seq
-                                     :result result
-                                     :timestamp (System/currentTimeMillis)})
+                                     :seq        start-seq
+                                     :last-seq   end-seq
+                                     :result     result
+                                     :timestamp  (System/currentTimeMillis)})
             (ctx/notify-observer p/on-async-completed (:workflow-id ctx) start-seq result)
             (->AsyncHandle start-seq))
           (catch Throwable e
             (if (error/suspension? e)
               ;; The thunk suspended on an activity - capture it for parallel execution
               (let [suspension-info (error/suspension-data e)]
-                (ctx/add-pending-async! {:handle-seq start-seq
+                (ctx/add-pending-async! {:handle-seq    start-seq
                                          :activity-name (:activity-name suspension-info)
-                                         :activity-seq (:seq suspension-info)
-                                         :args (:args suspension-info)
-                                         :timeout-ms (:timeout-ms suspension-info)
-                                         :retry-policy (:retry-policy suspension-info)})
+                                         :activity-seq  (:seq suspension-info)
+                                         :args          (:args suspension-info)
+                                         :timeout-ms    (:timeout-ms suspension-info)
+                                         :retry-policy  (:retry-policy suspension-info)})
                 ;; Return handle - we'll batch execute later
                 (->AsyncHandle start-seq))
               (throw e))))))))
@@ -305,17 +305,17 @@
       (throw (error/map->exception (:error existing-failed)))
 
       :else
-      (let [scheduled-event {:event-type :child-workflow-scheduled
-                             :seq seq-num
+      (let [scheduled-event {:event-type        :child-workflow-scheduled
+                             :seq               seq-num
                              :child-workflow-id child-wf-id
-                             :args (vec args)
-                             :timestamp (System/currentTimeMillis)}]
+                             :args              (vec args)
+                             :timestamp         (System/currentTimeMillis)}]
         (ctx/add-pending-event! scheduled-event)
         (throw (error/make-suspension :child-workflow
-                                {:seq seq-num
-                                 :child-workflow-id child-wf-id
-                                 :workflow-fn child-workflow-fn
-                                 :args args}))))))
+                                      {:seq               seq-num
+                                       :child-workflow-id child-wf-id
+                                       :workflow-fn       child-workflow-fn
+                                       :args              args}))))))
 
 ;; ============================================================================
 ;; Public API
