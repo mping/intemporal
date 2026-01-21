@@ -342,6 +342,8 @@
       :or {max-iterations 1000}}]
   (let [wf-id (or workflow-id (str (random-uuid)))
         resume-promise-atom (atom nil)
+        ;; TODO fixme this could be passed via the `with-workflow-engine` macro
+        observer (or observer (get engine :observer))
         wake-fn (fn wake-fn-impl []
                   (try
                     (when observer
@@ -460,8 +462,9 @@
    - :threads - Number of executor threads (default: 4)
    - :scheduler-threads - Number of scheduler threads (default: 2)
    - :default-timeout-ms - Default activity timeout (default: 30000)
-   - :enable-logging - Enable logging observer (default: false)"
-  [& {:keys [threads scheduler-threads default-timeout-ms enable-logging]
+   - :enable-logging - Enable logging observer (default: false)
+   - :observer - Custom observer instance (overrides :enable-logging)"
+  [& {:keys [threads scheduler-threads default-timeout-ms enable-logging observer]
       :or {threads 4
            scheduler-threads 2
            default-timeout-ms 30000
@@ -474,9 +477,11 @@
                                        :default-timeout-ms default-timeout-ms)
      :scheduler (runtime/make-scheduler :threads scheduler-threads)
      :registry registry
-     :observer (if enable-logging
-                 (obs/make-logging-observer log-atom)
-                 (obs/noop-observer))
+     ;; opts
+     :observer (or observer
+                   (if enable-logging
+                     (obs/make-logging-observer log-atom)
+                     (obs/noop-observer)))
      :log (when enable-logging log-atom)}))
 
 (defn shutdown-engine
