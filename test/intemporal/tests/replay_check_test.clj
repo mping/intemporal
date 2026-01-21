@@ -26,7 +26,6 @@
   (testing "run-once facility can be used for any purpose"
     (intemporal/with-workflow-engine [engine {:threads 4 :enable-logging true}]
       ;; Register activities
-      (a/register-activity! (:registry engine) #'activity)
       (let [result (intemporal/start-workflow engine
                                               my-parallel-flow [999])]
         (is (match? {:status :completed} result))

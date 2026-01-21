@@ -39,7 +39,6 @@
 (deftest test-simple-child-workflow
   (testing "Parent workflow can run child workflow"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'activity-fn)
       (let [result (intemporal/start-workflow engine
                                               parent-flow [5])]
         (is (match? {:status      :completed
@@ -51,7 +50,6 @@
 (deftest test-nested-child-workflows
   (testing "Child workflows can have their own child workflows"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'activity-fn)
       (let [result (intemporal/start-workflow engine
                                               nested-parent-flow [3])]
         (is (match? {:status :completed
@@ -81,7 +79,6 @@
 (deftest test-multiple-child-workflows
   (testing "Parent can run multiple child workflows sequentially"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'activity-fn)
       (let [multi-child-flow (fn [id]
                                (let [c1 (intemporal/run-child-workflow child-flow [1])
                                      c2 (intemporal/run-child-workflow child-flow [2])

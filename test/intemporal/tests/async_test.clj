@@ -41,12 +41,11 @@
     {:race-result (intemporal/join-any [prom1 prom2])
      :id          id}))
 
-#_
+
 (deftest test-async-workflow
   (testing "Async workflow"
     (intemporal/with-workflow-engine [engine {:threads 4 :enable-logging true}]
-      ;; Register activities
-      (a/register-activity! (:registry engine) #'slow-activity)
+      ;; Activities are automatically registered via stub call
       (let [result (intemporal/start-workflow engine
                                             my-parallel-flow [999])]
         (is (match? {:status :completed
@@ -57,8 +56,7 @@
 (deftest test-race-workflow
   (testing "Async race workflow"
     (intemporal/with-workflow-engine [engine {:threads 4 :enable-logging true}]
-      ;; Register activities
-      (a/register-activity! (:registry engine) #'sleep-activity)
+      ;; Activities are automatically registered via stub call
       (let [result (intemporal/start-workflow engine
                                               my-race-flow [999])]
         (is (match? {:status :completed

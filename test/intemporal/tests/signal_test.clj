@@ -27,7 +27,6 @@
 (deftest test-signal-blocking
   (testing "Workflow blocks until signal is sent"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'activity-fn)
       (let [wf-id "signal-test"
             result-future (future
                             (intemporal/start-workflow engine
@@ -48,7 +47,6 @@
 (deftest test-signal-timeout-received
   (testing "Signal received before timeout"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'activity-fn)
       (let [wf-id "signal-timeout-test"
             result-future (future
                             (intemporal/start-workflow engine
@@ -65,7 +63,6 @@
 (deftest test-signal-timeout-expired
   (testing "Signal times out when not received"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'activity-fn)
       (let [result (intemporal/start-workflow engine
                                               signal-timeout-flow [789 100])]
         (is (match? {:status :completed
@@ -76,7 +73,6 @@
 (deftest test-multiple-signals
   (testing "Multiple signals can be sent to same workflow"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'activity-fn)
       (let [wf-id "multi-signal-test"]
         ;; Send signals before workflow starts
         (intemporal/send-signal (:store engine) wf-id "approval" {:user "alice"})

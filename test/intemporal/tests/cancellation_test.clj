@@ -29,7 +29,6 @@
 (deftest test-workflow-cancellation
   (testing "Workflow can be cancelled mid-execution"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'slow-activity)
       (let [wf-id "cancel-test"
             result-future (future
                             (intemporal/start-workflow engine
@@ -49,7 +48,6 @@
 (deftest test-cancellation-with-timer
   (testing "Workflow cancelled while waiting on timer"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'slow-activity)
       (let [wf-id "cancel-timer-test"
             result-future (future
                             (intemporal/start-workflow engine
@@ -68,7 +66,6 @@
 (deftest test-cancel-before-start
   (testing "Workflow cancelled before it starts"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'slow-activity)
       (let [wf-id "cancel-before-start"]
         ;; Cancel before starting
         (intemporal/cancel-workflow (:store engine) wf-id)
@@ -85,7 +82,6 @@
 (deftest test-workflow-status-after-cancel
   (testing "Workflow status is cancelled after cancellation"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'slow-activity)
       (let [wf-id "cancel-status-test"
             result-future (future
                             (intemporal/start-workflow engine

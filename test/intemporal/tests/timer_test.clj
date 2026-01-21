@@ -25,7 +25,6 @@
 (deftest test-simple-timer
   (testing "Workflow with timer completes after sleep"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'activity-fn)
       (let [result (intemporal/start-workflow engine
                                               timed-flow [456])]
         (is (match? {:status :completed
@@ -36,7 +35,6 @@
 (deftest test-multiple-timers
   (testing "Workflow with multiple sleep calls"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'activity-fn)
       (let [result (intemporal/start-workflow engine
                                               multi-sleep-flow [789])]
         (is (match? {:status :completed
@@ -48,7 +46,6 @@
 (deftest test-timer-replay
   (testing "Timer workflow is deterministic on replay"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (a/register-activity! (:registry engine) #'activity-fn)
       (let [wf-id "timer-replay-test"
             result1 (intemporal/start-workflow engine
                                                timed-flow [100]
