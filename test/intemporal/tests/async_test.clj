@@ -1,6 +1,5 @@
 (ns intemporal.tests.async-test
   (:require [intemporal.core :as intemporal]
-            [intemporal.internal.activity :as a]
             [clojure.test :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]))
 
