@@ -39,13 +39,13 @@
             ;; Replay: return cached result
             existing
             (do
-              (log/tracef "Found existing result for activity")
+              (log/infof "Found existing result for activity")
               (:result existing))
 
             ;; Replay: throw cached error
             existing-failed
             (do
-              (log/tracef "Found existing error for activity")
+              (log/infof "Found existing error for activity")
               (throw (error/map->exception (:error existing-failed))))
 
             ;; Execute: need to run the activity
@@ -62,7 +62,7 @@
               (ctx/add-pending-event! scheduled-event)
               (ctx/notify-observer p/on-activity-scheduled
                                    (:workflow-id ctx) seq-num activity-name (vec args))
-              (log/tracef "Scheduling activity with sequence number %d and suspending" seq-num)
+              (log/infof "Scheduling activity with sequence number %d and suspending" seq-num)
               (throw (error/make-suspension :activity {:seq           seq-num
                                                        :activity-name activity-name
                                                        :args          (vec args)
@@ -120,7 +120,7 @@
         (ctx/notify-observer p/on-async-started (:workflow-id ctx) seq-num)
         ;; Try to execute the thunk to see what activity it wants
         (try
-          (log/infof "Invoking thunk with sequence number %d" seq-num)
+          (log/tracef "Invoking Async thunk with sequence number %d" seq-num)
           (let [result (thunk)
                 ;; Capture the last seq number after thunk execution
                 end-seq (dec @(:seq-counter (ctx/current-context)))]
@@ -380,7 +380,7 @@
           ;; Loop to handle multiple wait cycles
           (loop [result initial-result]
             ;; If workflow is waiting, block until wake-fn delivers next result
-            (log/infof "Got result %s with status %s" initial-result (:status initial-result))
+            (log/infof "Got result %s with status %s" (:result initial-result) (:status initial-result))
             (if (#{:waiting-timer :waiting-signal :waiting-signal-timeout :waiting-async} (:status result))
               ;; Capture the promise that wake-fn will deliver to
               (do

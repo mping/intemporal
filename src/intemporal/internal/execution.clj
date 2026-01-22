@@ -45,13 +45,13 @@
   (if (nil? retry-policy)
     ;; No retry - execute once
     (let [start (System/currentTimeMillis)]
-      (log/infof "Executing activity")
+      (log/infof "Executing activity with sequence number %d via executor %s" seq-num executor)
       (-notify p/on-activity-started observer workflow-id seq-num activity-name)
       (try
         (let [result (p/execute-activity executor activity-name args timeout-ms)
               duration (- (System/currentTimeMillis) start)]
           (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
-          (log/infof "Activity succeeded, result: %s" result)
+          (log/infof "Activity succeeded with sequence number %d, result: %s" seq-num result)
           {:status :success
            :result result
            :duration duration})
@@ -59,20 +59,21 @@
           (let [duration (- (System/currentTimeMillis) start)]
             (-notify p/on-activity-failed observer workflow-id seq-num activity-name
                                     (error/throwable->map e) duration)
-            (log/warnf e "Activity failed")
+            (log/warnf e "Activity failed with sequence number %d" seq-num)
             {:status :failed
              :error (error/throwable->map e)
              :duration duration}))))
     ;; With retry
     (loop [attempt 1]
       (-notify p/on-activity-started observer workflow-id seq-num activity-name)
-      (log/infof "Executing activity (attempt %d)"  attempt)
+      (log/infof "Executing activity with sequence number %d (attempt %d)" seq-num attempt)
       (let [start (System/currentTimeMillis)
             exec-result (try
+                          (log/infof "Executing activity with sequence number %d via executor %s" seq-num executor)
                           (let [result (p/execute-activity executor activity-name args timeout-ms)
                                 duration (- (System/currentTimeMillis) start)]
                             (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
-                            (log/infof "Activity succeeded (attempt %d), result: %s" attempt result)
+                            (log/infof "Activity succeeded with sequence number %d (attempt %d), result: %s" seq-num attempt result)
                             {:status   :success
                              :result   result
                              :duration duration
@@ -81,7 +82,7 @@
                             (let [duration (- (System/currentTimeMillis) start)
                                   error-map (error/throwable->map e)]
                               (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
-                              (log/warnf e "Activity failed (attempt %d)" attempt)
+                              (log/warnf e "Activity failed with sequence number %d (attempt %d)" seq-num attempt)
                               {:status :retry-or-fail
                                :error error-map
                                :exception e
@@ -133,6 +134,7 @@
 
     ;; Execute all activities in parallel
     ;; Pass complete async-info including retry-policy, activity-seq, handle-seq
+    (log/infof "Executing %d activities in parallel via executor %s" (count pending-asyncs) executor)
     (let [results (p/execute-activities-parallel executor pending-asyncs)
           now (System/currentTimeMillis)
 
