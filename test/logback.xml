@@ -1,0 +1,14 @@
+<configuration scan="true" scanPeriod="5 seconds">
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+      <encoder>
+          <pattern>%d{HH:mm:ss.SSS} [%10.10thread-5] [WF:%10.10X{workflow-id}] [%X{activity}] %-5level %logger{36} - %msg%n</pattern>
+      </encoder>
+  </appender>
+
+  <root level="DEBUG">
+    <appender-ref ref="STDOUT" />
+  </root>
+  <!-- <logger name="org.apache" level="WARN"/> -->
+  <!-- <logger name="com.datastax" level="WARN"/> -->
+  <!-- <logger name="io.netty" level="WARN"/> -->
+</configuration>

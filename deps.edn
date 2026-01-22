@@ -2,16 +2,13 @@
  :test-paths ["test"]
 
  :deps       {org.clojure/clojure                      {:mvn/version "1.12.1"}
-              thheller/shadow-cljs                     {:mvn/version "2.28.11"}
-              com.taoensso/telemere                    {:mvn/version "1.1.0"}
-              com.taoensso/nippy                       {:mvn/version "3.6.0"}
+              org.clojure/tools.logging                {:mvn/version "1.2.4"}
+              ch.qos.logback/logback-classic           {:mvn/version "1.5.18"}
+              ;thheller/shadow-cljs                     {:mvn/version "2.28.11"}
+              net.logstash.logback/logstash-logback-encoder {:mvn/version "8.1"}
               com.github.steffan-westcott/clj-otel-api {:mvn/version "0.2.10"}
               ;;stuff
-              net.cgrand/macrovich                     {:mvn/version "0.2.2"}
-              funcool/promesa                          {:mvn/version "11.0.678"}
-              metosin/malli                            {:mvn/version "0.19.1"}
-              thedavidmeister/cljc-md5                 {:mvn/version "0.0.2"}
-              missionary/missionary                    {:mvn/version "b.46"}}
+              net.cgrand/macrovich                     {:mvn/version "0.2.2"}}
 
  :aliases    {:dev   {:extra-paths ["dev" "test"]
                       :_jvm-opts   ["-Djdk.attach.allowAttachSelf"
@@ -31,7 +28,7 @@
                                     lambdaisland/kaocha-cloverage            {:mvn/version "1.1.89"}
                                     lambdaisland/kaocha-junit-xml            {:mvn/version "1.17.101"}
                                     com.lambdaisland/kaocha-cljs             {:mvn/version "1.5.154"}
-                                    ch.qos.logback/logback-classic           {:mvn/version "1.5.18"}
+                                    ;ch.qos.logback/logback-classic           {:mvn/version "1.5.18"}
                                     tortue/spy                               {:mvn/version "2.15.0"}
                                     nubank/matcher-combinators               {:mvn/version "3.9.2"}
                                     com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.6.2"}}}

@@ -2,6 +2,7 @@
   (:require [intemporal.internal.activity :as a]
             [intemporal.internal.context :as ctx]
             [intemporal.internal.error :as error]
+            [intemporal.internal.logging :as log]
             [intemporal.protocol :as p]))
 
 ;; ============================================================================
@@ -44,11 +45,13 @@
   (if (nil? retry-policy)
     ;; No retry - execute once
     (let [start (System/currentTimeMillis)]
+      (log/infof "Executing activity")
       (-notify p/on-activity-started observer workflow-id seq-num activity-name)
       (try
         (let [result (p/execute-activity executor activity-name args timeout-ms)
               duration (- (System/currentTimeMillis) start)]
           (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
+          (log/infof "Activity succeeded, result: %s" result)
           {:status :success
            :result result
            :duration duration})
@@ -56,25 +59,29 @@
           (let [duration (- (System/currentTimeMillis) start)]
             (-notify p/on-activity-failed observer workflow-id seq-num activity-name
                                     (error/throwable->map e) duration)
+            (log/warnf e "Activity failed")
             {:status :failed
              :error (error/throwable->map e)
              :duration duration}))))
     ;; With retry
     (loop [attempt 1]
       (-notify p/on-activity-started observer workflow-id seq-num activity-name)
+      (log/infof "Executing activity (attempt %d)"  attempt)
       (let [start (System/currentTimeMillis)
             exec-result (try
                           (let [result (p/execute-activity executor activity-name args timeout-ms)
                                 duration (- (System/currentTimeMillis) start)]
                             (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
-                            {:status :success
-                             :result result
+                            (log/infof "Activity succeeded (attempt %d), result: %s" attempt result)
+                            {:status   :success
+                             :result   result
                              :duration duration
                              :attempts attempt})
                           (catch Exception e
                             (let [duration (- (System/currentTimeMillis) start)
                                   error-map (error/throwable->map e)]
                               (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
+                              (log/warnf e "Activity failed (attempt %d)" attempt)
                               {:status :retry-or-fail
                                :error error-map
                                :exception e
@@ -86,7 +93,7 @@
           :retry-or-fail
           (if (a/should-retry? retry-policy (:exception exec-result) attempt)
             (let [backoff (a/calculate-backoff retry-policy attempt)]
-              (prn (format "attempt %d: sleeping %s before retrying" attempt backoff))
+              (log/debugf "Activity sleeping %s before retrying (attempt %d)" backoff attempt)
               (Thread/sleep (long backoff))
               (recur (inc attempt)))
             ;; else
@@ -95,25 +102,27 @@
              :duration (:duration exec-result)
              :attempts attempt}))))))
 
-(defn process-pending-activity [store executor workflow-id suspension-data pending-events observer]
-  (let [{:keys [seq activity-name args timeout-ms retry-policy]} suspension-data
-        exec-result (execute-with-retry executor activity-name args timeout-ms
-                                        retry-policy observer workflow-id seq)]
-    ;; Save all pending events first
-    (p/save-events store workflow-id pending-events)
-    ;; Then save the completion or failure
-    (let [success? (= :success (:status exec-result))
-          event    (cond-> {:event-type    (if success? :activity-completed :activity-failed)
-                            :seq           seq
-                            :activity-name activity-name
-                            :result        (:result exec-result)
-                            :duration-ms   (:duration exec-result)
-                            :attempts      (:attempts exec-result)
-                            :timestamp     (System/currentTimeMillis)}
-                           success? (assoc :result (:result exec-result))
-                           (not success?) (assoc :error (:error exec-result)))]
-      (p/save-event store workflow-id event)
-      :continue)))
+(defn process-pending-activity [store executor workflow-id
+                                {:keys [seq activity-name args timeout-ms retry-policy] :as suspension-data}
+                                pending-events observer]
+  (log/with-mdc {:activity activity-name}
+    (let [exec-result (execute-with-retry executor activity-name args timeout-ms
+                                          retry-policy observer workflow-id seq)]
+      ;; Save all pending events first
+      (p/save-events store workflow-id pending-events)
+      ;; Then save the completion or failure
+      (let [success? (= :success (:status exec-result))
+            event    (cond-> {:event-type    (if success? :activity-completed :activity-failed)
+                              :seq           seq
+                              :activity-name activity-name
+                              :result        (:result exec-result)
+                              :duration-ms   (:duration exec-result)
+                              :attempts      (:attempts exec-result)
+                              :timestamp     (System/currentTimeMillis)}
+                             success? (assoc :result (:result exec-result))
+                             (not success?) (assoc :error (:error exec-result)))]
+        (p/save-event store workflow-id event)
+        :continue))))
 
 (defn process-pending-asyncs-parallel
   "Process all pending async operations in parallel"
@@ -129,10 +138,15 @@
 
           ;; Create completion events for both activities and async handles
           completion-events
-              (mapcat (fn [async-info result]
+              (mapcat (fn [{:keys [activity-name] :as async-info} result]
+                        (log/with-mdc {:activity activity-name}
                           (if (= :success (:status result))
+                            (do
                               (-notify p/on-async-completed observer workflow-id (:handle-seq async-info) (:result result))
-                              (-notify p/on-async-failed observer workflow-id (:handle-seq async-info) (:error result)))
+                              (log/tracef "Got completion event: activity succeeded, result: %s" result))
+                            (do
+                              (-notify p/on-async-failed observer workflow-id (:handle-seq async-info) (:error result))
+                              (log/tracef "Got completion event: activity failed, error: %s" (:error result))))
                           (if (= :success (:status result))
                             [{:event-type    :activity-completed
                               :seq           (:activity-seq async-info)
@@ -145,7 +159,7 @@
                               :last-seq   (:activity-seq async-info)
                               :result     (:result result)
                               :timestamp  now}]
-                              ;; else
+                            ;; else
                             [{:event-type    :activity-failed
                               :seq           (:activity-seq async-info)
                               :activity-name (:activity-name async-info)
@@ -155,7 +169,7 @@
                               :seq        (:handle-seq async-info)
                               :last-seq   (:activity-seq async-info)
                               :error      (:error result)
-                              :timestamp  now}]))
+                              :timestamp  now}])))
                       pending-asyncs results)]
       (p/save-events store workflow-id completion-events)))
   :continue)
@@ -473,15 +487,20 @@
       (throw (ex-info "Max iterations exceeded" {:workflow-id workflow-id
                                                  :iterations iteration})))
 
+    (log/debugf "Internal loop %d of %d" iteration max-iterations)
+
     ;; Check cancellation at start of each iteration
     (if (p/is-cancelled? store workflow-id)
       (let [error-map {:type "clojure.lang.ExceptionInfo"
                        :message "Workflow cancelled"
                        :data {:workflow-id workflow-id}}]
+
         (-notify p/on-workflow-cancelled observer workflow-id)
         (p/save-event store workflow-id {:event-type :workflow-failed
-                                         :error error-map
-                                         :timestamp (System/currentTimeMillis)})
+                                         :error      error-map
+                                         :timestamp  (System/currentTimeMillis)})
+
+        (log/info "Workflow cancelled, failing")
         (-notify p/on-workflow-failed observer workflow-id error-map)
         {:status :failed
          :workflow-id workflow-id
@@ -490,8 +509,10 @@
       (let [history (p/load-history store workflow-id)
             ctx (make-workflow-context workflow-id history store registry observer)
             exec-result (binding [ctx/*workflow-context* ctx]
+                          (log/debugf "Executing workflow function %s..." workflow-fn)
                           (execute-workflow-fn workflow-fn args))]
 
+        (log/debugf "Workflow function executed, got: %s" (:status exec-result))
         (case (:status exec-result)
           :completed
           (finalize-completed store executor workflow-id
@@ -545,6 +566,7 @@
                                              :child-workflow-id child-workflow-id
                                              :result            (:result result)
                                              :timestamp         (System/currentTimeMillis)})
+            (log/infof "Child workflow with id %s completed" child-workflow-id)
             :continue)
           ;; ELSE
           (do
@@ -555,6 +577,7 @@
                                                                     {:status (:status result)
                                                                      :message (str "Child workflow ended with status: " (:status result))})
                                              :timestamp         (System/currentTimeMillis)})
+            (log/infof "Child workflow with id %s failed, status: %s, error: %s" child-workflow-id (:status result) (:error result))
             :continue)))
       (catch Exception e
         (p/save-event store workflow-id {:event-type        :child-workflow-failed
@@ -562,4 +585,5 @@
                                          :child-workflow-id child-workflow-id
                                          :error             (error/throwable->map e)
                                          :timestamp         (System/currentTimeMillis)})
+        (log/warnf e "Error while executing child workflow with id %s" child-workflow-id)
         :continue))))

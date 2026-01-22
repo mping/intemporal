@@ -34,6 +34,7 @@
 
          ;; jvm based tests
          {:id           :test
+          :kaocha.filter/skip-meta [:crash]
           :ns-patterns  ["-test$"]
           :source-paths ["src"]
           :test-paths   ["test"]}

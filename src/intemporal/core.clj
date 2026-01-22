@@ -4,6 +4,7 @@
             [intemporal.internal.activity :as a]
             [intemporal.internal.runtime :as runtime]
             [intemporal.internal.execution :as exec]
+            [intemporal.internal.logging :as log]
             [intemporal.protocol :as p]
             [intemporal.store :as store]
             [intemporal.observer :as obs]))
@@ -25,41 +26,48 @@
         effective-timeout (or timeout-ms (:timeout-ms activity-info))
         effective-retry (or retry-policy (:retry-policy activity-info))]
     (fn [& args]
-      (ctx/check-cancelled!)
-      (let [ctx             (ctx/current-context)
-            seq-num         (ctx/next-seq!)
-            store           (ctx/current-store)
-            workflow-id     (ctx/current-workflow-id)
-            existing        (p/find-event store workflow-id :activity-completed seq-num)
-            existing-failed (p/find-event store workflow-id :activity-failed seq-num)]
-        (cond
-          ;; Replay: return cached result
-          existing
-          (:result existing)
+      (log/with-mdc {:activity activity-name}
 
-          ;; Replay: throw cached error
-          existing-failed
-          (throw (error/map->exception (:error existing-failed)))
+        (ctx/check-cancelled!)
+        (let [ctx             (ctx/current-context)
+              seq-num         (ctx/next-seq!)
+              store           (ctx/current-store)
+              workflow-id     (ctx/current-workflow-id)
+              existing        (p/find-event store workflow-id :activity-completed seq-num)
+              existing-failed (p/find-event store workflow-id :activity-failed seq-num)]
+          (cond
+            ;; Replay: return cached result
+            existing
+            (do
+              (log/tracef "Found existing result for activity")
+              (:result existing))
 
-          ;; Execute: need to run the activity
-          :else
-          (let [scheduled-event {:event-type    :activity-scheduled
-                                 :seq           seq-num
-                                 :activity-name activity-name
-                                 :args          (vec args)
-                                 :timeout-ms    effective-timeout
-                                 :retry-policy  (when effective-retry
-                                                  {:max-attempts (:max-attempts effective-retry)
-                                                   :backoff-ms   (:backoff-ms effective-retry)})
-                                 :timestamp     (System/currentTimeMillis)}]
-            (ctx/add-pending-event! scheduled-event)
-            (ctx/notify-observer p/on-activity-scheduled
-                                 (:workflow-id ctx) seq-num activity-name (vec args))
-            (throw (error/make-suspension :activity {:seq           seq-num
-                                                     :activity-name activity-name
-                                                     :args          (vec args)
-                                                     :timeout-ms    effective-timeout
-                                                     :retry-policy  effective-retry}))))))))
+            ;; Replay: throw cached error
+            existing-failed
+            (do
+              (log/tracef "Found existing error for activity")
+              (throw (error/map->exception (:error existing-failed))))
+
+            ;; Execute: need to run the activity
+            :else
+            (let [scheduled-event {:event-type    :activity-scheduled
+                                   :seq           seq-num
+                                   :activity-name activity-name
+                                   :args          (vec args)
+                                   :timeout-ms    effective-timeout
+                                   :retry-policy  (when effective-retry
+                                                    {:max-attempts (:max-attempts effective-retry)
+                                                     :backoff-ms   (:backoff-ms effective-retry)})
+                                   :timestamp     (System/currentTimeMillis)}]
+              (ctx/add-pending-event! scheduled-event)
+              (ctx/notify-observer p/on-activity-scheduled
+                                   (:workflow-id ctx) seq-num activity-name (vec args))
+              (log/tracef "Scheduling activity with sequence number %d and suspending" seq-num)
+              (throw (error/make-suspension :activity {:seq           seq-num
+                                                       :activity-name activity-name
+                                                       :args          (vec args)
+                                                       :timeout-ms    effective-timeout
+                                                       :retry-policy  effective-retry})))))))))
 
 ;; ============================================================================
 ;; Async Support
@@ -85,18 +93,22 @@
       (do
         ;; Advance seq counter to skip past all seqs consumed by this async
         (ctx/update-seq! existing-completed)
+        (log/tracef "Async already succeeded with sequence number %d, advancing sequence number" seq-num)
         (->AsyncHandle seq-num))
 
       ;; Already failed - advance seq past consumed numbers during replay
       existing-failed
       (do
         (ctx/update-seq! existing-failed)
+        (log/infof "Async already failed with sequence number %d, advancing sequence number" seq-num)
         (->AsyncHandle seq-num))
 
       ;; Already started but not completed - return handle (will block on join)
       ;; During replay, don't re-execute the thunk - just wait for completion event
       existing-started
-      (->AsyncHandle seq-num)
+      (do
+        (log/infof "Async already started with sequence number %d" seq-num)
+        (->AsyncHandle seq-num))
 
       ;; Need to start - record and try to capture what activity it needs
       :else
@@ -108,6 +120,7 @@
         (ctx/notify-observer p/on-async-started (:workflow-id ctx) seq-num)
         ;; Try to execute the thunk to see what activity it wants
         (try
+          (log/infof "Invoking thunk with sequence number %d" seq-num)
           (let [result (thunk)
                 ;; Capture the last seq number after thunk execution
                 end-seq (dec @(:seq-counter (ctx/current-context)))]
@@ -119,11 +132,14 @@
                                      :result     result
                                      :timestamp  (System/currentTimeMillis)})
             (ctx/notify-observer p/on-async-completed (:workflow-id ctx) start-seq result)
+            (log/tracef "Async completed successfully with sequence number %d and result %s" seq-num result)
             (->AsyncHandle start-seq))
           (catch Throwable e
             (if (error/suspension? e)
               ;; The thunk suspended on an activity - capture it for parallel execution
-              (let [suspension-info (error/suspension-data e)]
+              (let [suspension-info (error/suspension-data e)
+                    activity-name (:activity-name suspension-info)]
+                (log/tracef "Async suspended with sequence number %d for activity %s" seq-num activity-name)
                 (ctx/add-pending-async! {:handle-seq    start-seq
                                          :activity-name (:activity-name suspension-info)
                                          :activity-seq  (:seq suspension-info)
@@ -132,7 +148,10 @@
                                          :retry-policy  (:retry-policy suspension-info)})
                 ;; Return handle - we'll batch execute later
                 (->AsyncHandle start-seq))
-              (throw e))))))))
+              ;; else
+              (do
+                (log/tracef e "Async failed with sequence number %d" seq-num)
+                (throw e)))))))))
 
 (defn join
   "Wait for an async handle to complete.
@@ -147,7 +166,8 @@
         failed (p/find-event store workflow-id :async-failed handle-seq)]
     (cond
       completed
-      (:result completed)
+      (do
+        (:result completed))
 
       failed
       (throw (error/async-failed-exception handle-seq (:error failed)))
@@ -323,47 +343,57 @@
         ;; TODO fixme this could be passed via the `with-workflow-engine` macro
         observer (or observer (get engine :observer))
         wake-fn (fn wake-fn-impl []
-                  (try
-                    (when observer
-                      (p/on-workflow-resumed observer wf-id))
-                    (let [old-promise @resume-promise-atom
-                          new-promise (promise)
-                          ;_ (reset! resume-promise-atom new-promise)
-                          result (exec/run-workflow-internal engine wf-id workflow-fn args
-                                                       {:observer observer
-                                                        :max-iterations max-iterations
-                                                        :wake-fn wake-fn-impl})]
-                      (reset! resume-promise-atom new-promise)
-                      (deliver old-promise result))
-                    (catch Exception e
-                      (when-let [p @resume-promise-atom]
-                        (deliver p {:status :failed :error e})))))]
-    ;; Initialize with first promise
-    (reset! resume-promise-atom (promise))
-    (p/save-event store wf-id {:event-type :workflow-started
-                               :workflow-id wf-id
-                               :args (vec args)
-                               :timestamp (System/currentTimeMillis)})
-    (when observer
-      (p/on-workflow-started observer wf-id args))
-    (try
-      ;; Execute initial workflow run
-      (let [initial-result (exec/run-workflow-internal engine wf-id workflow-fn args
-                                                 {:observer observer
-                                                  :max-iterations max-iterations
-                                                  :wake-fn wake-fn})]
-        ;; Loop to handle multiple wait cycles
-        (loop [result initial-result]
-          ;; If workflow is waiting, block until wake-fn delivers next result
-          (if (#{:waiting-timer :waiting-signal :waiting-signal-timeout :waiting-async} (:status result))
-            ;; Capture the promise that wake-fn will deliver to
-            (let [next-promise @resume-promise-atom
-                  next-result @next-promise]
-              (recur next-result))
-            result)))
-      (catch Exception e
-        ;; If cancelled/failed before entering wait state, re-throw
-        (throw e)))))
+                  (log/with-mdc {:workflow-id wf-id}
+                    (try
+                      (when observer
+                        (p/on-workflow-resumed observer wf-id))
+                      (log/debugf "Waking workflow for resume")
+                      (let [old-promise @resume-promise-atom
+                            new-promise (promise)
+                            ;_ (reset! resume-promise-atom new-promise)
+                            result (exec/run-workflow-internal engine wf-id workflow-fn args
+                                                         {:observer observer
+                                                          :max-iterations max-iterations
+                                                          :wake-fn wake-fn-impl})]
+                        (reset! resume-promise-atom new-promise)
+                        (deliver old-promise result))
+                      (catch Exception e
+                        (when-let [p @resume-promise-atom]
+                          (deliver p {:status :failed :error e}))))))]
+
+    (log/with-mdc {:workflow-id wf-id}
+      ;; Initialize with first promise
+      (reset! resume-promise-atom (promise))
+      (p/save-event store wf-id {:event-type :workflow-started
+                                 :workflow-id wf-id
+                                 :args (vec args)
+                                 :timestamp (System/currentTimeMillis)})
+      (when observer
+        (p/on-workflow-started observer wf-id args))
+      (log/info "Workflow started")
+      (try
+        ;; Execute initial workflow run
+        (let [initial-result (exec/run-workflow-internal engine wf-id workflow-fn args
+                                                   {:observer observer
+                                                    :max-iterations max-iterations
+                                                    :wake-fn wake-fn})]
+          ;; Loop to handle multiple wait cycles
+          (loop [result initial-result]
+            ;; If workflow is waiting, block until wake-fn delivers next result
+            (log/infof "Got result %s with status %s" initial-result (:status initial-result))
+            (if (#{:waiting-timer :waiting-signal :waiting-signal-timeout :waiting-async} (:status result))
+              ;; Capture the promise that wake-fn will deliver to
+              (do
+                (log/infof "Workflow waiting for promise: %s" (:status result))
+                (let [next-promise @resume-promise-atom
+                      next-result  @next-promise]
+                  (recur next-result)))
+              ;; else
+              result)))
+        (catch Exception e
+          ;; If cancelled/failed before entering wait state, re-throw
+          (log/warnf e "Caught exception")
+          (throw e))))))
 
 (defn resume-workflow
   "Resume a waiting workflow (e.g., after signal delivery or timer).
@@ -386,6 +416,7 @@
       :or {max-iterations 1000}}]
   (when observer
     (p/on-workflow-resumed observer workflow-id))
+  (log/info "Workflow resumed")
   (exec/run-workflow-internal engine workflow-id workflow-fn args
                          {:observer observer
                           :max-iterations max-iterations}))
@@ -403,14 +434,18 @@
    - :signal-id - Custom signal ID for idempotency"
   [store workflow-id signal-name payload & {:keys [signal-id]}]
   (let [id (or signal-id (str (random-uuid)))]
-    (p/add-signal store workflow-id signal-name {:id id :payload payload})
+    (log/with-mdc {:workflow-id workflow-id}
+      (p/add-signal store workflow-id signal-name {:id id :payload payload})
+      (log/debugf "Adding signal %s" signal-name))
     {:signal-id id}))
 
 (defn cancel-workflow
   "Cancel a running workflow.
    The workflow will be cancelled at the next suspension point."
   [store workflow-id]
-  (p/mark-cancelled store workflow-id)
+  (log/with-mdc {:workflow-id workflow-id}
+    (p/mark-cancelled store workflow-id)
+    (log/debugf "Cancelling workflow"))
   {:cancelled true :workflow-id workflow-id})
 
 (defn get-workflow-history
@@ -437,19 +472,21 @@
    Returns a map with :store, :executor, :scheduler, :registry, and :observer.
 
    Options:
+   - :store - instance of protocols/IStore
    - :threads - Number of executor threads (default: 4)
    - :scheduler-threads - Number of scheduler threads (default: 2)
    - :default-timeout-ms - Default activity timeout (default: 30000)
    - :enable-logging - Enable logging observer (default: false)
    - :observer - Custom observer instance (overrides :enable-logging)"
-  [& {:keys [threads scheduler-threads default-timeout-ms enable-logging observer]
-      :or {threads 4
+  [& {:keys [store threads scheduler-threads default-timeout-ms enable-logging observer]
+      :or {store (store/->InMemoryStore (atom {}))
+           threads 4
            scheduler-threads 2
            default-timeout-ms 30000
            enable-logging false}}]
   (let [registry (a/make-registry)
         log-atom (when enable-logging (atom []))]
-    {:store (store/->InMemoryStore (atom {}))
+    {:store store
      :executor (runtime/make-vthreads-executor registry
                                        :threads threads
                                        :default-timeout-ms default-timeout-ms)
@@ -465,6 +502,7 @@
 (defn shutdown-engine
   "Shutdown all components of a workflow engine"
   [{:keys [executor scheduler]}]
+  (log/infof "Shutting down engine")
   (p/shutdown-executor executor)
   (p/shutdown-scheduler scheduler))
 
