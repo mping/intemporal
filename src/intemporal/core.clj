@@ -34,7 +34,9 @@
               store           (ctx/current-store)
               workflow-id     (ctx/current-workflow-id)
               existing        (p/find-event store workflow-id :activity-completed seq-num)
-              existing-failed (p/find-event store workflow-id :activity-failed seq-num)]
+              existing-failed (p/find-event store workflow-id :activity-failed seq-num)
+              err             (some-> (:error existing-failed) (error/map->exception))
+              interrupted?    (boolean (some-> err (error/interruption?)))]
           (cond
             ;; Replay: return cached result
             existing
@@ -43,10 +45,11 @@
               (:result existing))
 
             ;; Replay: throw cached error
-            existing-failed
+            ;; TODO decide how to handle interruptions, interrupt policy?
+            (and existing-failed #_(not interrupted?))
             (do
               (log/infof "Found existing error for activity")
-              (throw (error/map->exception (:error existing-failed))))
+              (throw err))
 
             ;; Execute: need to run the activity
             :else
@@ -59,6 +62,9 @@
                                                     {:max-attempts (:max-attempts effective-retry)
                                                      :backoff-ms   (:backoff-ms effective-retry)})
                                    :timestamp     (System/currentTimeMillis)}]
+              (when interrupted?
+                (log/infof "Activity was forcefully interrupted"))
+
               (ctx/add-pending-event! scheduled-event)
               (ctx/notify-observer p/on-activity-scheduled
                                    (:workflow-id ctx) seq-num activity-name (vec args))
@@ -501,10 +507,12 @@
 
 (defn shutdown-engine
   "Shutdown all components of a workflow engine"
-  [{:keys [executor scheduler]}]
-  (log/infof "Shutting down engine")
-  (p/shutdown-executor executor)
-  (p/shutdown-scheduler scheduler))
+  ([{:keys [executor scheduler] :as engine}]
+   (shutdown-engine engine 0))
+  ([{:keys [executor scheduler]} grace-period-secs]
+   (log/infof "Shutting down engine")
+   (p/shutdown-executor executor grace-period-secs)
+   (p/shutdown-scheduler scheduler grace-period-secs)))
 
 (defmacro with-workflow-engine
   "Execute body with a workflow engine, ensuring cleanup.

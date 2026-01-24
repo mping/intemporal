@@ -1,7 +1,7 @@
-(ns ^:crash intemporal.tests.crash.signal-based-test
-  "Crash recovery test using signal-based suspension.
-   This is the cleanest approach - workflow suspends waiting for a signal,
-   then we create a new engine and resume."
+(ns ^:crash intemporal.tests.crash.signal-wait-crash-test
+  "Crash recovery test demonstrating workflow persistence across process restart.
+   Tests that a simple workflow can be resumed after simulated crash,
+   demonstrating that completed activities are not re-executed."
   (:require [intemporal.core :as intemporal]
             [intemporal.store :as store]
             [intemporal.protocol :as p]
@@ -14,61 +14,71 @@
 (def execution-counter (atom 0))
 
 (defn tracked-activity [x]
-  "Activity that increments counter to track actual executions (not replays)"
+  "Simple activity that increments counter to track executions"
   (swap! execution-counter inc)
   (Thread/sleep 50)  ;; Simulate work
   (* x 2))
 
-(defn signal-crash-workflow [id num-activities crash-point]
-  "Workflow that suspends at crash-point waiting for 'resume' signal"
+(defn simple-workflow [id num-activities crash-point]
+  "Workflow that suspends at crash-point for testing"
   (let [stub (intemporal/stub #'tracked-activity)]
     (loop [i 0
            results []]
       (if (< i num-activities)
         (do
-          ;; Suspend at crash point - simulates process crash
+          ;; Simulate crash by waiting for signal at crash point
           (when (= i crash-point)
             (intemporal/wait-for-signal "resume"))
           (recur (inc i) (conj results (stub i))))
         {:id id :results results}))))
 
-(defn verify-history [store workflow-id expected-completed]
-  "Verify the event history contains expected number of completed activities"
+(defn verify-history [store workflow-id]
+  "Count completed activities in event history"
   (let [history (p/load-history store workflow-id)
         completed (filter #(= :activity-completed (:event-type %)) history)]
     (count completed)))
+
+(defn count-failed-activities [store workflow-id]
+  "Count failed activities in event history"
+  (let [history (p/load-history store workflow-id)
+        failed (filter #(= :activity-failed (:event-type %)) history)]
+    (count failed)))
 
 ;; ============================================================================
 ;; Tests
 ;; ============================================================================
 
-(deftest test-signal-based-crash-recovery
-  (testing "Workflow resumes correctly after signal-based suspension (simulated crash)"
+(deftest test-exception-inject-crash-recovery
+  (testing "Simple crash recovery - workflow resumes from suspension point"
     (reset! execution-counter 0)
 
     ;; Test configuration
-    (let [workflow-id "signal-crash-test-1"
+    (let [workflow-id "simple-crash-test-1"
           num-activities 5
           crash-point 3  ;; Suspend after completing activities 0, 1, 2
           ;; Create store that persists across "crash"
           persistent-store (store/->InMemoryStore (atom {}))]
 
       ;; ======================================================================
-      ;; Phase 1: Execute workflow until "crash" (suspension point)
+      ;; Phase 1: Execute workflow until suspension point ("crash")
       ;; ======================================================================
-      (testing "Phase 1: Execute until crash point"
+      (testing "Phase 1: Execute until crash point (signal wait)"
         (let [engine-1 (intemporal/make-workflow-engine
                          :store persistent-store
                          :threads 2)
-              result-1 (intemporal/start-workflow
-                         engine-1
-                         signal-crash-workflow
-                         [workflow-id num-activities crash-point]
-                         :workflow-id workflow-id)]
+              result-future-1 (future
+                                (intemporal/start-workflow
+                                  engine-1
+                                  simple-workflow
+                                  [workflow-id num-activities crash-point]
+                                  :workflow-id workflow-id))]
 
-          ;; Workflow should suspend waiting for signal
-          (is (= :waiting-signal (:status result-1))
-              "Workflow should suspend waiting for 'resume' signal")
+          ;; Give workflow time to start and reach suspension point
+          (Thread/sleep 200)
+
+          ;; Cancel the future to simulate crash
+          (future-cancel result-future-1)
+          (intemporal/shutdown-engine engine-1)
 
           ;; Verify: 3 activities executed (0, 1, 2)
           (is (= crash-point @execution-counter)
@@ -79,35 +89,31 @@
               (str "History should contain " crash-point " completed activity events"))))
 
       ;; ======================================================================
-      ;; Phase 2: Resume workflow after "crash" with new engine
+      ;; Phase 2: Resume workflow after simulated crash with new engine
       ;; ======================================================================
-      (testing "Phase 2: Resume after crash with new engine"
+      (testing "Phase 2: Resume after crash - activities not re-executed"
         (let [pre-resume-count @execution-counter
               ;; Create NEW engine with SAME store (simulates process restart)
               engine-2 (intemporal/make-workflow-engine
-                         :store persistent-store  ;; Same store!
-                         :threads 2)
-              ;; Resume workflow in background
-              resume-future (future
-                              (intemporal/resume-workflow
-                                engine-2
-                                workflow-id
-                                signal-crash-workflow
-                                [workflow-id num-activities crash-point]))]
+                         :store persistent-store
+                         :threads 2)]
 
-          ;; Send the "resume" signal to continue workflow
-          (Thread/sleep 100)  ;; Give resume time to start
+          ;; Send the "resume" signal BEFORE resuming workflow
           (intemporal/send-signal persistent-store workflow-id "resume" {:resumed true})
 
-          ;; Wait for workflow to complete
-          (let [result-2 @resume-future]
+          ;; Resume workflow - should complete now that signal is available
+          (let [result-2 (intemporal/resume-workflow
+                           engine-2
+                           workflow-id
+                           simple-workflow
+                           [workflow-id num-activities crash-point])]
 
             ;; Verify: Workflow completed successfully
             (is (= :completed (:status result-2))
                 "Resumed workflow should complete successfully")
 
             ;; Verify: Activities 0-2 were NOT re-executed (used cache)
-            ;; Only activities 3-4 should have executed
+            ;; Only activities 3-4 should have executed (2 new executions)
             (is (= num-activities @execution-counter)
                 (str "Should have " num-activities " total executions (not " @execution-counter ")"))
 

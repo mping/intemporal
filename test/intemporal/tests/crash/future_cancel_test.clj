@@ -58,15 +58,11 @@
                          :threads 2)
               ;; Start workflow in background future
               workflow-future (future
-                                (try
-                                  (intemporal/start-workflow
-                                    engine-1
-                                    future-crash-workflow
-                                    [workflow-id num-activities]
-                                    :workflow-id workflow-id)
-                                  (catch Exception e
-                                    ;; Future cancellation may throw
-                                    {:status :interrupted :error e})))]
+                                (intemporal/start-workflow
+                                  engine-1
+                                  future-crash-workflow
+                                  [workflow-id num-activities]
+                                  :workflow-id workflow-id))]
 
           ;; Wait for crash-after activities to complete
           (while (< @execution-counter crash-after)
@@ -75,11 +71,9 @@
           ;; Give it a bit more time to ensure activity is persisted
           (Thread/sleep 150)
 
-          ;; Simulate crash by canceling the future
+          ;; Cancel the future to simulate crash
           (future-cancel workflow-future)
-
-          ;; Wait a bit for cancellation to take effect
-          (Thread/sleep 100)
+          (intemporal/shutdown-engine engine-1)
 
           ;; Verify: At least crash-after activities executed
           (is (>= @execution-counter crash-after)
@@ -107,6 +101,7 @@
                          [workflow-id num-activities])]
 
           ;; Verify: Workflow completed successfully
+          (prn result-2)
           (is (= :completed (:status result-2))
               "Resumed workflow should complete successfully")
 

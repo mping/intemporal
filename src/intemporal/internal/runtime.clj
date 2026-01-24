@@ -1,6 +1,7 @@
 (ns intemporal.internal.runtime
   (:require [intemporal.internal.error :as error]
             [intemporal.internal.activity :as activity]
+            [intemporal.internal.logging :as log]
             [intemporal.protocol :as p])
   (:import (java.util.concurrent ArrayBlockingQueue ExecutorService Executors Future ScheduledExecutorService ScheduledFuture ThreadPoolExecutor ThreadPoolExecutor$CallerRunsPolicy TimeUnit TimeoutException)))
 
@@ -30,11 +31,18 @@
         (.cancel future false)
         (swap! pending-timers dissoc timer-key))))
 
-  (shutdown-scheduler [_]
+  (shutdown-scheduler [_ grace-period-secs]
     (doseq [[_ ^ScheduledFuture future] @pending-timers]
       (.cancel future false))
     (reset! pending-timers {})
-    (.shutdown pool)))
+    (try
+      (.shutdown pool)
+      (when-not (.awaitTermination pool grace-period-secs TimeUnit/SECONDS)
+        (.shutdownNow pool)
+        (when-not (.awaitTermination pool grace-period-secs TimeUnit/SECONDS)
+          (log/error "Could not terminate all threads")))
+      (catch InterruptedException e
+        (log/error e "Interrupted while shutting down pool")))))
 
 (defn make-scheduler
   "Create a new scheduler"
@@ -64,6 +72,8 @@
             (catch TimeoutException _
               (.cancel ^Future future true)
               (throw (error/activity-timeout-exception activity-name timeout)))
+            (catch InterruptedException e
+              (throw (error/activity-interrupted-exception activity-name (or (.getCause e) e))))
             (catch Exception e
               (throw (error/activity-failed-exception activity-name
                                                       (or (.getCause e) e)))))))))
@@ -129,7 +139,16 @@
                      :error  (error/throwable->map (or (.getCause e) e))})))
               futures))))
 
-  (shutdown-executor [_]
+  (shutdown-executor [_ grace-period-secs]
+    (try
+      (.shutdown pool)
+      (when-not (.awaitTermination pool grace-period-secs TimeUnit/SECONDS)
+        (.shutdownNow pool)
+        (when-not (.awaitTermination pool grace-period-secs TimeUnit/SECONDS)
+          (log/error "Could not terminate all threads")))
+      (catch InterruptedException e
+        (log/error e "Interrupted while shutting down pool")))
+    #_#_
     (.shutdown pool)
     (.awaitTermination pool 30 TimeUnit/SECONDS)))
 

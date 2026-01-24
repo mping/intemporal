@@ -26,6 +26,10 @@
        (instance? IExceptionInfo e)
        (::suspension (ex-data e))))
 
+(defn interruption? [e]
+  (and (instance? IExceptionInfo e)
+       (::activity-interrupted (ex-data e))))
+
 (defn suspension-type [e]
   (-> e ex-data :type))
 
@@ -45,6 +49,12 @@
            {::activity-timeout true
             :activity-name     activity-name
             :timeout-ms        timeout-ms}))
+
+(defn activity-interrupted-exception [activity-name cause]
+  (ex-info "Activity interrupted"
+           {::activity-interrupted true
+            :cause cause
+            :activity-name     activity-name}))
 
 (defn activity-failed-exception [activity-name cause]
   (ex-info "Activity failed"

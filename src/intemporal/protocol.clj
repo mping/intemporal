@@ -26,7 +26,7 @@
     "Execute an activity with given args and timeout")
   (execute-activities-parallel [executor activities]
     "Execute multiple activities in parallel, returns seq of results in same order")
-  (shutdown-executor [executor]
+  (shutdown-executor [executor grace-period-secs]
     "Shutdown the executor and release resources"))
 
 (defprotocol IScheduler
@@ -35,7 +35,7 @@
     "Schedule a timer to fire at given time, calls callback when ready")
   (cancel-timer [scheduler workflow-id seq-num]
     "Cancel a scheduled timer")
-  (shutdown-scheduler [scheduler]
+  (shutdown-scheduler [scheduler grace-period-secs]
     "Shutdown the scheduler"))
 
 (defprotocol IWorkflowObserver

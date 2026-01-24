@@ -12,9 +12,6 @@
        (doseq [k# (keys ~m)]
          (MDC/remove (name k#))))))
 
-(with-mdc {:workflow-id 1}
-  (l/info "XXX"))
-
 ;; level-specific macros
 
 (defmacro trace
