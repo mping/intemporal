@@ -36,13 +36,8 @@
   "Count completed activities in event history"
   (let [history (p/load-history store workflow-id)
         completed (filter #(= :activity-completed (:event-type %)) history)]
+    (clojure.pprint/print-table history)
     (count completed)))
-
-(defn count-failed-activities [store workflow-id]
-  "Count failed activities in event history"
-  (let [history (p/load-history store workflow-id)
-        failed (filter #(= :activity-failed (:event-type %)) history)]
-    (count failed)))
 
 ;; ============================================================================
 ;; Tests

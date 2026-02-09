@@ -3,7 +3,8 @@
             [intemporal.internal.context :as ctx]
             [intemporal.internal.error :as error]
             [intemporal.internal.logging :as log]
-            [intemporal.protocol :as p]))
+            [intemporal.protocol :as p])
+  (:import (java.util.concurrent RejectedExecutionException)))
 
 ;; ============================================================================
 ;; Workflow Execution Engine
@@ -45,44 +46,62 @@
   (if (nil? retry-policy)
     ;; No retry - execute once
     (let [start (System/currentTimeMillis)]
-      (log/infof "Executing activity with sequence number %d via executor %s" seq-num executor)
+      (log/infof "Executing activity via executor %s" executor)
       (-notify p/on-activity-started observer workflow-id seq-num activity-name)
       (try
         (let [result (p/execute-activity executor activity-name args timeout-ms)
               duration (- (System/currentTimeMillis) start)]
           (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
-          (log/infof "Activity succeeded with sequence number %d, result: %s" seq-num result)
+          (log/infof "Activity succeeded, result: %s" result)
           {:status :success
            :result result
            :duration duration})
-        (catch Exception e
-          (let [duration (- (System/currentTimeMillis) start)]
-            (-notify p/on-activity-failed observer workflow-id seq-num activity-name
-                                    (error/throwable->map e) duration)
-            (log/warnf e "Activity failed with sequence number %d" seq-num)
+        (catch RejectedExecutionException e
+          (let [duration (- (System/currentTimeMillis) start)
+                error     (error/activity-rejected-exception activity-name e)
+                error-map (error/throwable->map error)]
+            (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
+            (log/warnf e "Activity execution rejected")
             {:status :failed
-             :error (error/throwable->map e)
+             :error error-map
+             :duration duration}))
+        (catch Exception e
+          (let [duration (- (System/currentTimeMillis) start)
+                error-map (error/throwable->map e)]
+            (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
+            (log/warnf e "Activity failed")
+            {:status :failed
+             :error error-map
              :duration duration}))))
     ;; With retry
     (loop [attempt 1]
       (-notify p/on-activity-started observer workflow-id seq-num activity-name)
-      (log/infof "Executing activity with sequence number %d (attempt %d)" seq-num attempt)
+      (log/infof "Executing activity (attempt %d)" attempt)
       (let [start (System/currentTimeMillis)
             exec-result (try
-                          (log/infof "Executing activity with sequence number %d via executor %s" seq-num executor)
+                          (log/infof "Executing activity via executor %s" executor)
                           (let [result (p/execute-activity executor activity-name args timeout-ms)
                                 duration (- (System/currentTimeMillis) start)]
                             (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
-                            (log/infof "Activity succeeded with sequence number %d (attempt %d), result: %s" seq-num attempt result)
+                            (log/infof "Activity succeeded (attempt %d), result: %s" attempt result)
                             {:status   :success
                              :result   result
                              :duration duration
                              :attempts attempt})
+                          (catch RejectedExecutionException e
+                            (let [duration (- (System/currentTimeMillis) start)
+                                  error     (error/activity-rejected-exception activity-name e)
+                                  error-map (error/throwable->map error)]
+                              (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
+                              (log/warnf e "Activity execution rejected")
+                              {:status :failed
+                               :error error-map
+                               :duration duration}))
                           (catch Exception e
                             (let [duration (- (System/currentTimeMillis) start)
                                   error-map (error/throwable->map e)]
                               (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
-                              (log/warnf e "Activity failed with sequence number %d (attempt %d)" seq-num attempt)
+                              (log/warnf e "Activity failed (attempt %d)" attempt)
                               {:status :retry-or-fail
                                :error error-map
                                :exception e
@@ -106,7 +125,7 @@
 (defn process-pending-activity [store executor workflow-id
                                 {:keys [seq activity-name args timeout-ms retry-policy] :as suspension-data}
                                 pending-events observer]
-  (log/with-mdc {:activity activity-name}
+  (log/with-mdc {:activity activity-name :seqnum seq}
     (let [exec-result (execute-with-retry executor activity-name args timeout-ms
                                           retry-policy observer workflow-id seq)]
       ;; Save all pending events first
@@ -140,8 +159,8 @@
 
           ;; Create completion events for both activities and async handles
           completion-events
-              (mapcat (fn [{:keys [activity-name] :as async-info} result]
-                        (log/with-mdc {:activity activity-name}
+              (mapcat (fn [{:keys [activity-name activity-seq] :as async-info} result]
+                        (log/with-mdc {:activity activity-name :seqnum activity-seq}
                           (if (= :success (:status result))
                             (do
                               (-notify p/on-async-completed observer workflow-id (:handle-seq async-info) (:result result))
@@ -491,64 +510,71 @@
 
     (log/debugf "Internal loop %d of %d" iteration max-iterations)
 
-    ;; Check cancellation at start of each iteration
-    (if (p/is-cancelled? store workflow-id)
-      (let [error-map {:type "clojure.lang.ExceptionInfo"
-                       :message "Workflow cancelled"
-                       :data {:workflow-id workflow-id}}]
+    ;; Check if executor is shutting down - stop processing to avoid endless rejections
+    (if (p/shutdown? executor)
+      (do
+        (log/infof "Executor shutting down, suspending workflow")
+        {:status :suspended
+         :workflow-id workflow-id})
 
-        (-notify p/on-workflow-cancelled observer workflow-id)
-        (p/save-event store workflow-id {:event-type :workflow-failed
-                                         :error      error-map
-                                         :timestamp  (System/currentTimeMillis)})
+      ;; Check cancellation at start of each iteration
+      (if (p/is-cancelled? store workflow-id)
+        (let [error-map {:type "clojure.lang.ExceptionInfo"
+                         :message "Workflow cancelled"
+                         :data {:workflow-id workflow-id}}]
 
-        (log/info "Workflow cancelled, failing")
-        (-notify p/on-workflow-failed observer workflow-id error-map)
-        {:status :failed
-         :workflow-id workflow-id
-         :error error-map})
+          (-notify p/on-workflow-cancelled observer workflow-id)
+          (p/save-event store workflow-id {:event-type :workflow-failed
+                                           :error      error-map
+                                           :timestamp  (System/currentTimeMillis)})
 
-      (let [history (p/load-history store workflow-id)
-            ctx (make-workflow-context workflow-id history store registry observer)
-            exec-result (binding [ctx/*workflow-context* ctx]
-                          (log/debugf "Executing workflow function %s..." workflow-fn)
-                          (execute-workflow-fn workflow-fn args))]
+          (log/info "Workflow cancelled, failing")
+          (-notify p/on-workflow-failed observer workflow-id error-map)
+          {:status :failed
+           :workflow-id workflow-id
+           :error error-map})
+        ;; else
+        (let [history (p/load-history store workflow-id)
+              ctx (make-workflow-context workflow-id history store registry observer)
+              exec-result (binding [ctx/*workflow-context* ctx]
+                            (log/debugf "Executing workflow function %s..." workflow-fn)
+                            (execute-workflow-fn workflow-fn args))]
 
-        (log/debugf "Workflow function executed, got: %s" (:status exec-result))
-        (case (:status exec-result)
-          :completed
-          (finalize-completed store executor workflow-id
-                              (:pending-asyncs exec-result)
-                              (:pending-events exec-result)
-                              (:result exec-result)
-                              observer)
+          (log/debugf "Workflow function executed, got: %s" (:status exec-result))
+          (case (:status exec-result)
+            :completed
+            (finalize-completed store executor workflow-id
+                                (:pending-asyncs exec-result)
+                                (:pending-events exec-result)
+                                (:result exec-result)
+                                observer)
 
-          :cancelled
-          (finalize-cancelled store workflow-id
-                              (:pending-events exec-result)
-                              observer)
+            :cancelled
+            (finalize-cancelled store workflow-id
+                                (:pending-events exec-result)
+                                observer)
 
-          :suspended
-          (let [action (handle-suspension engine
-                                          workflow-id
-                                          (:suspension-type exec-result)
-                                          (:suspension-data exec-result)
-                                          (:pending-asyncs exec-result)
-                                          (:pending-events exec-result)
-                                          wake-fn
-                                          observer)]
-            (when (and observer (= action :continue))
-              (p/on-workflow-resumed observer workflow-id))
+            :suspended
+            (let [action (handle-suspension engine
+                                            workflow-id
+                                            (:suspension-type exec-result)
+                                            (:suspension-data exec-result)
+                                            (:pending-asyncs exec-result)
+                                            (:pending-events exec-result)
+                                            wake-fn
+                                            observer)]
+              (when (and observer (= action :continue))
+                (p/on-workflow-resumed observer workflow-id))
 
-            (if (= action :continue)
-              (recur (inc iteration))
-              (action->result action workflow-id)))
+              (if (= action :continue)
+                (recur (inc iteration))
+                (action->result action workflow-id)))
 
-          :failed
-          (finalize-failed store workflow-id
-                           (:pending-events exec-result)
-                           (:error exec-result)
-                           observer))))))
+            :failed
+            (finalize-failed store workflow-id
+                             (:pending-events exec-result)
+                             (:error exec-result)
+                             observer)))))))
 
 (defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
                                suspension-data pending-events observer]

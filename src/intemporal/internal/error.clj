@@ -30,6 +30,10 @@
   (and (instance? IExceptionInfo e)
        (::activity-interrupted (ex-data e))))
 
+(defn rejection? [e]
+  (and (instance? IExceptionInfo e)
+       (::rejected (ex-data e))))
+
 (defn suspension-type [e]
   (-> e ex-data :type))
 
@@ -44,6 +48,13 @@
        (instance? IExceptionInfo e)
        (::cancelled (ex-data e))))
 
+(defn activity-rejected-exception [activity-name cause]
+  (ex-info "Execution rejected"
+           {::rejected     true
+            :cause         cause
+            :activity-name activity-name}))
+
+
 (defn activity-timeout-exception [activity-name timeout-ms]
   (ex-info "Activity timed out"
            {::activity-timeout true
@@ -53,8 +64,8 @@
 (defn activity-interrupted-exception [activity-name cause]
   (ex-info "Activity interrupted"
            {::activity-interrupted true
-            :cause cause
-            :activity-name     activity-name}))
+            :cause                 cause
+            :activity-name         activity-name}))
 
 (defn activity-failed-exception [activity-name cause]
   (ex-info "Activity failed"

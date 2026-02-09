@@ -32,7 +32,19 @@
   "Count completed activities in event history"
   (let [history (p/load-history store workflow-id)
         completed (filter #(= :activity-completed (:event-type %)) history)]
+    (clojure.pprint/print-table history)
     (count completed)))
+
+(defn count-interrupted-or-rejected [store workflow-id]
+  "Count activities that were interrupted or rejected (due to shutdown)"
+  (let [history (p/load-history store workflow-id)
+        failed (filter #(= :activity-failed (:event-type %)) history)]
+    (count
+      (filter (fn [event]
+                (let [error-data (get-in event [:error :data])]
+                  (or (:intemporal.internal.error/activity-interrupted error-data)
+                      (:intemporal.internal.error/rejected error-data))))
+              failed))))
 
 ;; ============================================================================
 ;; Tests
@@ -101,14 +113,21 @@
                          [workflow-id num-activities])]
 
           ;; Verify: Workflow completed successfully
-          (prn result-2)
           (is (= :completed (:status result-2))
               "Resumed workflow should complete successfully")
 
-          ;; Verify: Activities were NOT re-executed
-          ;; Total executions should be num-activities (some from phase 1, rest from phase 2)
-          (is (<= @execution-counter num-activities)
-              (str "Should have at most " num-activities " total executions (found " @execution-counter ")"))
+          ;; Verify: Check for interrupted/rejected activities in history
+          (let [interrupted-or-rejected (count-interrupted-or-rejected persistent-store workflow-id)]
+            (println "Found" interrupted-or-rejected "interrupted/rejected activities in history")
+
+            ;; Verify: Activities were NOT re-executed
+            ;; Total executions should be num-activities (some from phase 1, rest from phase 2)
+            ;; UNLESS activities were interrupted/rejected during shutdown, which will be re-executed
+            (let [;; Expected max executions = num-activities + re-executions of interrupted/rejected
+                  expected-max (+ num-activities interrupted-or-rejected)]
+              (is (<= @execution-counter expected-max)
+                  (str "Should have at most " expected-max " total executions "
+                       "(5 activities + " interrupted-or-rejected " interrupted/rejected, found " @execution-counter ")"))))
 
           ;; Verify: Final result is correct
           (is (= {:id workflow-id

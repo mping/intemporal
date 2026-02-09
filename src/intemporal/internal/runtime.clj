@@ -42,7 +42,10 @@
         (when-not (.awaitTermination pool grace-period-secs TimeUnit/SECONDS)
           (log/error "Could not terminate all threads")))
       (catch InterruptedException e
-        (log/error e "Interrupted while shutting down pool")))))
+        (log/error e "Interrupted while shutting down pool"))))
+
+  (shutdown-scheduler? [_]
+    (.isTerminated pool)))
 
 (defn make-scheduler
   "Create a new scheduler"
@@ -147,10 +150,10 @@
         (when-not (.awaitTermination pool grace-period-secs TimeUnit/SECONDS)
           (log/error "Could not terminate all threads")))
       (catch InterruptedException e
-        (log/error e "Interrupted while shutting down pool")))
-    #_#_
-    (.shutdown pool)
-    (.awaitTermination pool 30 TimeUnit/SECONDS)))
+        (log/error e "Interrupted while shutting down pool"))))
+
+  (shutdown? [_]
+    (.isTerminated pool)))
 
 (defn create-bounded-executor
   "Creates a bounded ThreadPoolExecutor with virtual threads"

@@ -27,7 +27,9 @@
   (execute-activities-parallel [executor activities]
     "Execute multiple activities in parallel, returns seq of results in same order")
   (shutdown-executor [executor grace-period-secs]
-    "Shutdown the executor and release resources"))
+    "Shutdown the executor and release resources")
+  (shutdown? [executor]
+    "Indicates if the executor has shut down"))
 
 (defprotocol IScheduler
   "Protocol for scheduling timers"
@@ -36,7 +38,9 @@
   (cancel-timer [scheduler workflow-id seq-num]
     "Cancel a scheduled timer")
   (shutdown-scheduler [scheduler grace-period-secs]
-    "Shutdown the scheduler"))
+    "Shutdown the scheduler")
+  (shutdown-scheduler? [executor]
+    "Indicates if the executor has shut down"))
 
 (defprotocol IWorkflowObserver
   "Protocol for observing workflow execution"

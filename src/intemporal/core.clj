@@ -26,54 +26,60 @@
         effective-timeout (or timeout-ms (:timeout-ms activity-info))
         effective-retry (or retry-policy (:retry-policy activity-info))]
     (fn [& args]
-      (log/with-mdc {:activity activity-name}
+      (let [seq-num (ctx/next-seq!)]
+        (log/with-mdc {:activity activity-name :seqnum seq-num}
 
-        (ctx/check-cancelled!)
-        (let [ctx             (ctx/current-context)
-              seq-num         (ctx/next-seq!)
-              store           (ctx/current-store)
-              workflow-id     (ctx/current-workflow-id)
-              existing        (p/find-event store workflow-id :activity-completed seq-num)
-              existing-failed (p/find-event store workflow-id :activity-failed seq-num)
-              err             (some-> (:error existing-failed) (error/map->exception))
-              interrupted?    (boolean (some-> err (error/interruption?)))]
-          (cond
-            ;; Replay: return cached result
-            existing
-            (do
-              (log/infof "Found existing result for activity")
-              (:result existing))
+          (ctx/check-cancelled!)
+          (let [ctx             (ctx/current-context)
+                store           (ctx/current-store)
+                workflow-id     (ctx/current-workflow-id)
+                existing        (p/find-event store workflow-id :activity-completed seq-num)
+                existing-failed (p/find-event store workflow-id :activity-failed seq-num)
+                err             (some-> (:error existing-failed) (error/map->exception))
+                interrupted?    (boolean (some-> err (error/interruption?)))
+                rejected?       (boolean (some-> err (error/rejection?)))]
+            (cond
+              ;; Replay: return cached result
+              existing
+              (do
+                (log/infof "Found existing result for activity: %s" (pr-str (:result existing)))
+                (:result existing))
 
-            ;; Replay: throw cached error
-            ;; TODO decide how to handle interruptions, interrupt policy?
-            (and existing-failed #_(not interrupted?))
-            (do
-              (log/infof "Found existing error for activity")
-              (throw err))
+              ;; Replay: throw cached error
+              ;; TODO decide how to handle interruptions, interrupt policy?
+              (and existing-failed (not interrupted?) (not rejected?))
+              (do
+                (log/infof "Found existing error for activity")
+                (throw err))
 
-            ;; Execute: need to run the activity
-            :else
-            (let [scheduled-event {:event-type    :activity-scheduled
-                                   :seq           seq-num
-                                   :activity-name activity-name
-                                   :args          (vec args)
-                                   :timeout-ms    effective-timeout
-                                   :retry-policy  (when effective-retry
-                                                    {:max-attempts (:max-attempts effective-retry)
-                                                     :backoff-ms   (:backoff-ms effective-retry)})
-                                   :timestamp     (System/currentTimeMillis)}]
-              (when interrupted?
-                (log/infof "Activity was forcefully interrupted"))
+              ;; Execute: need to run the activity
+              ;; either due to rejection or interruption
+              :else
+              (let [scheduled-event {:event-type    :activity-scheduled
+                                     :seq           seq-num
+                                     :activity-name activity-name
+                                     :args          (vec args)
+                                     :timeout-ms    effective-timeout
+                                     :retry-policy  (when effective-retry
+                                                      {:max-attempts (:max-attempts effective-retry)
+                                                       :backoff-ms   (:backoff-ms effective-retry)})
+                                     :timestamp     (System/currentTimeMillis)}]
+                ;; interruptions are scheduled just the same
+                (when interrupted?
+                  (log/infof "Activity was interrupted: rescheduling"))
+                ;; rejections are scheduled just the same
+                (when rejected?
+                  (log/infof "Activity execution was rejected: rescheduling"))
 
-              (ctx/add-pending-event! scheduled-event)
-              (ctx/notify-observer p/on-activity-scheduled
-                                   (:workflow-id ctx) seq-num activity-name (vec args))
-              (log/infof "Scheduling activity with sequence number %d and suspending" seq-num)
-              (throw (error/make-suspension :activity {:seq           seq-num
-                                                       :activity-name activity-name
-                                                       :args          (vec args)
-                                                       :timeout-ms    effective-timeout
-                                                       :retry-policy  effective-retry})))))))))
+                (ctx/add-pending-event! scheduled-event)
+                (ctx/notify-observer p/on-activity-scheduled
+                                     (:workflow-id ctx) seq-num activity-name (vec args))
+                (log/infof "Scheduling activity suspension")
+                (throw (error/make-suspension :activity {:seq           seq-num
+                                                         :activity-name activity-name
+                                                         :args          (vec args)
+                                                         :timeout-ms    effective-timeout
+                                                         :retry-policy  effective-retry}))))))))))
 
 ;; ============================================================================
 ;; Async Support
@@ -92,28 +98,31 @@
         workflow-id (ctx/current-workflow-id)
         existing-completed (p/find-event store workflow-id :async-completed seq-num)
         existing-failed (p/find-event store workflow-id :async-failed seq-num)
-        existing-started (p/find-event store workflow-id :async-started seq-num)]
+        existing-started (p/find-event store workflow-id :async-started seq-num)
+        err             (some-> (:error existing-failed) (error/map->exception))
+        interrupted?    (boolean (some-> err (error/interruption?)))]
     (cond
       ;; Already completed - advance seq past consumed numbers during replay
       existing-completed
       (do
         ;; Advance seq counter to skip past all seqs consumed by this async
         (ctx/update-seq! existing-completed)
-        (log/tracef "Async already succeeded with sequence number %d, advancing sequence number" seq-num)
+        (log/tracef "Async already succeeded advancing sequence number")
         (->AsyncHandle seq-num))
 
       ;; Already failed - advance seq past consumed numbers during replay
-      existing-failed
+      ;; TODO decide how to handle interruptions, interrupt policy?
+      existing-failed #_(not interrupted?)
       (do
         (ctx/update-seq! existing-failed)
-        (log/infof "Async already failed with sequence number %d, advancing sequence number" seq-num)
+        (log/infof "Async already failed advancing sequence number")
         (->AsyncHandle seq-num))
 
       ;; Already started but not completed - return handle (will block on join)
       ;; During replay, don't re-execute the thunk - just wait for completion event
       existing-started
       (do
-        (log/infof "Async already started with sequence number %d" seq-num)
+        (log/infof "Async already started")
         (->AsyncHandle seq-num))
 
       ;; Need to start - record and try to capture what activity it needs
@@ -126,7 +135,7 @@
         (ctx/notify-observer p/on-async-started (:workflow-id ctx) seq-num)
         ;; Try to execute the thunk to see what activity it wants
         (try
-          (log/tracef "Invoking Async thunk with sequence number %d" seq-num)
+          (log/tracef "Invoking Async thunk")
           (let [result (thunk)
                 ;; Capture the last seq number after thunk execution
                 end-seq (dec @(:seq-counter (ctx/current-context)))]
@@ -138,14 +147,14 @@
                                      :result     result
                                      :timestamp  (System/currentTimeMillis)})
             (ctx/notify-observer p/on-async-completed (:workflow-id ctx) start-seq result)
-            (log/tracef "Async completed successfully with sequence number %d and result %s" seq-num result)
+            (log/tracef "Async completed successfully with result %s" result)
             (->AsyncHandle start-seq))
           (catch Throwable e
             (if (error/suspension? e)
               ;; The thunk suspended on an activity - capture it for parallel execution
               (let [suspension-info (error/suspension-data e)
                     activity-name (:activity-name suspension-info)]
-                (log/tracef "Async suspended with sequence number %d for activity %s" seq-num activity-name)
+                (log/tracef "Async suspended activity %s" activity-name)
                 (ctx/add-pending-async! {:handle-seq    start-seq
                                          :activity-name (:activity-name suspension-info)
                                          :activity-seq  (:seq suspension-info)
@@ -156,7 +165,7 @@
                 (->AsyncHandle start-seq))
               ;; else
               (do
-                (log/tracef e "Async failed with sequence number %d" seq-num)
+                (log/tracef e "Async failed")
                 (throw e)))))))))
 
 (defn join
@@ -300,12 +309,15 @@
         store (ctx/current-store)
         workflow-id (ctx/current-workflow-id)
         existing (p/find-event store workflow-id :child-workflow-completed seq-num)
-        existing-failed (p/find-event store workflow-id :child-workflow-failed seq-num)]
+        existing-failed (p/find-event store workflow-id :child-workflow-failed seq-num)
+        err             (some-> (:error existing-failed) (error/map->exception))
+        interrupted?    (boolean (some-> err (error/interruption?)))]
     (cond
       existing
       (:result existing)
 
-      existing-failed
+      ;; TODO decide how to handle interruptions, interrupt policy?
+      existing-failed #_(not interrupted?)
       (throw (error/map->exception (:error existing-failed)))
 
       :else
