@@ -67,6 +67,9 @@ bin/kaocha :test --focus intemporal.tests.signal-test
 # Run crash recovery tests
 bin/kaocha :test --focus intemporal.tests.crash.signal-wait-crash-test
 bin/kaocha :test --focus intemporal.tests.crash.future-cancel-test
+
+# Run tests via npx
+npx shadow-cljs compile node
 ```
 
 **Important**: Test namespaces use hyphens (e.g., `signal-wait-crash-test`), which map to underscored file names (`signal_wait_crash_test.clj`).

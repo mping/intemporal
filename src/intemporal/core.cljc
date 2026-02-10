@@ -387,6 +387,7 @@
                          {:observer observer
                           :max-iterations max-iterations}))
 
+
 (defn send-signal
   "Send a signal to a workflow.
 

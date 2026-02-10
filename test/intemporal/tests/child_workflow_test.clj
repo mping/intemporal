@@ -2,10 +2,7 @@
   (:require [intemporal.core :as intemporal]
             [intemporal.tests.utils :refer [with-result]]
             [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-            #?(:cljs [cljs.test :as t]))
-  #?(:cljs (:require-macros [intemporal.core :as intemporal]
-                             [intemporal.tests.utils :refer [with-result]])))
+            [matcher-combinators.test :refer [match?]]))
 
 (defn activity-fn [arg]
   [:processed arg])

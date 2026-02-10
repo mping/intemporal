@@ -24,11 +24,11 @@
   ```
   "
   [bindings & body]
-  (assert (vector? bindings) "First argument should be a binding of [res resbody]")
-  (let [[res resbody] bindings]
+  (assert (vector? bindings) "First argument should be a binding of [res resval]")
+  (let [[res resval] bindings]
     (macros/case
       :clj
-      `(let [~res (let [future# (future (do ~resbody))]
+      `(let [~res (let [future# (future (do ~resval))]
                     (try
                       (deref future# with-result-default-timeout (TimeoutException. "Operation timed out."))
                       (catch Exception e# e#)))]
@@ -37,10 +37,10 @@
       `(t/async done#
          (js/setTimeout
            (fn []
-             ;; force wrap resbody in a deferred
+             ;; force wrap resval in a deferred
              (p/finally (-> nil
                             (p/then (fn [_#]
-                                      (do ~resbody)))
+                                      (do ~resval)))
                             (p/timeout with-result-default-timeout))
                         (fn [res# err#]
                           (try

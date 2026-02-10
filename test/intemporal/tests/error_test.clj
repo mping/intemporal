@@ -5,10 +5,7 @@
             [intemporal.utils :as utils]
             [clojure.test :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]
-            [matcher-combinators.matchers :as m]
-            #?(:cljs [cljs.test :as t]))
-  #?(:cljs (:require-macros [intemporal.core :as intemporal]
-                             [intemporal.tests.utils :refer [with-result]])))
+            [matcher-combinators.matchers :as m]))
 
 (def attempt-counter (atom 0))
 
