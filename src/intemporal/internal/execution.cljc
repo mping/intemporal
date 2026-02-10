@@ -3,8 +3,11 @@
             [intemporal.internal.context :as ctx]
             [intemporal.internal.error :as error]
             [intemporal.internal.logging :as log]
+            [intemporal.utils :as utils]
             [intemporal.protocol :as p])
-  (:import (java.util.concurrent RejectedExecutionException)))
+  #?(:cljs (:require-macros [intemporal.internal.logging :as log]
+                            [intemporal.internal.execution :refer [-notify]]))
+  #?(:clj (:import (java.util.concurrent RejectedExecutionException))))
 
 ;; ============================================================================
 ;; Workflow Execution Engine
@@ -22,7 +25,7 @@
      :result (apply workflow-fn args)
      :pending-asyncs @(:pending-asyncs (ctx/current-context))
      :pending-events @(:pending-events (ctx/current-context))}
-    (catch Throwable e
+    (catch #?(:clj Throwable :cljs js/Error) e
       (cond
         (error/suspension? e)
         {:status :suspended
@@ -45,28 +48,29 @@
   [executor activity-name args timeout-ms retry-policy observer workflow-id seq-num]
   (if (nil? retry-policy)
     ;; No retry - execute once
-    (let [start (System/currentTimeMillis)]
+    (let [start (utils/current-time-ms)]
       (log/infof "Executing activity via executor %s" executor)
       (-notify p/on-activity-started observer workflow-id seq-num activity-name)
       (try
         (let [result (p/execute-activity executor activity-name args timeout-ms)
-              duration (- (System/currentTimeMillis) start)]
+              duration (- (utils/current-time-ms) start)]
           (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
           (log/infof "Activity succeeded, result: %s" result)
           {:status :success
            :result result
            :duration duration})
-        (catch RejectedExecutionException e
-          (let [duration (- (System/currentTimeMillis) start)
-                error     (error/activity-rejected-exception activity-name e)
-                error-map (error/throwable->map error)]
-            (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
-            (log/warnf e "Activity execution rejected")
-            {:status :failed
-             :error error-map
-             :duration duration}))
-        (catch Exception e
-          (let [duration (- (System/currentTimeMillis) start)
+        ;; this only makes sense for clj
+        #?(:clj (catch RejectedExecutionException e
+                  (let [duration (- (utils/current-time-ms) start)
+                        error     (error/activity-rejected-exception activity-name e)
+                        error-map (error/throwable->map error)]
+                    (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
+                    (log/warnf e "Activity execution rejected")
+                    {:status :failed
+                     :error error-map
+                     :duration duration})))
+        (catch #?(:clj Exception :cljs js/Error) e
+          (let [duration (- (utils/current-time-ms) start)
                 error-map (error/throwable->map e)]
             (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
             (log/warnf e "Activity failed")
@@ -77,28 +81,29 @@
     (loop [attempt 1]
       (-notify p/on-activity-started observer workflow-id seq-num activity-name)
       (log/infof "Executing activity (attempt %d)" attempt)
-      (let [start (System/currentTimeMillis)
+      (let [start (utils/current-time-ms)
             exec-result (try
                           (log/infof "Executing activity via executor %s" executor)
                           (let [result (p/execute-activity executor activity-name args timeout-ms)
-                                duration (- (System/currentTimeMillis) start)]
+                                duration (- (utils/current-time-ms) start)]
                             (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
                             (log/infof "Activity succeeded (attempt %d), result: %s" attempt result)
                             {:status   :success
                              :result   result
                              :duration duration
                              :attempts attempt})
-                          (catch RejectedExecutionException e
-                            (let [duration (- (System/currentTimeMillis) start)
-                                  error     (error/activity-rejected-exception activity-name e)
-                                  error-map (error/throwable->map error)]
-                              (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
-                              (log/warnf e "Activity execution rejected")
-                              {:status :failed
-                               :error error-map
-                               :duration duration}))
-                          (catch Exception e
-                            (let [duration (- (System/currentTimeMillis) start)
+                          ;; this only makes sense for clj
+                          #?(:clj (catch RejectedExecutionException e
+                                    (let [duration (- (utils/current-time-ms) start)
+                                          error     (error/activity-rejected-exception activity-name e)
+                                          error-map (error/throwable->map error)]
+                                      (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
+                                      (log/warnf e "Activity execution rejected")
+                                      {:status :failed
+                                       :error error-map
+                                       :duration duration})))
+                          (catch #?(:clj Exception :cljs js/Error) e
+                            (let [duration (- (utils/current-time-ms) start)
                                   error-map (error/throwable->map e)]
                               (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
                               (log/warnf e "Activity failed (attempt %d)" attempt)
@@ -114,8 +119,10 @@
           (if (a/should-retry? retry-policy (:exception exec-result) attempt)
             (let [backoff (a/calculate-backoff retry-policy attempt)]
               (log/debugf "Activity sleeping %s before retrying (attempt %d)" backoff attempt)
-              (Thread/sleep (long backoff))
-              (recur (inc attempt)))
+              #?(:clj (do (Thread/sleep (long backoff))
+                          (recur (inc attempt)))
+                 ;;; TODO FIXME
+                 :cljs (throw (ex-info "TODO: implement recur" {}))))
             ;; else
             {:status :failed
              :error (:error exec-result)
@@ -138,7 +145,7 @@
                               :result        (:result exec-result)
                               :duration-ms   (:duration exec-result)
                               :attempts      (:attempts exec-result)
-                              :timestamp     (System/currentTimeMillis)}
+                              :timestamp     (utils/current-time-ms)}
                              success? (assoc :result (:result exec-result))
                              (not success?) (assoc :error (:error exec-result)))]
         (p/save-event store workflow-id event)
@@ -155,7 +162,7 @@
     ;; Pass complete async-info including retry-policy, activity-seq, handle-seq
     (log/infof "Executing %d activities in parallel via executor %s" (count pending-asyncs) executor)
     (let [results (p/execute-activities-parallel executor pending-asyncs)
-          now (System/currentTimeMillis)
+          now (utils/current-time-ms)
 
           ;; Create completion events for both activities and async handles
           completion-events
@@ -198,7 +205,7 @@
 (defn process-timer [store scheduler workflow-id suspension-data pending-events
                       wake-fn observer]
   (let [{:keys [seq fire-at]} suspension-data
-        now (System/currentTimeMillis)]
+        now (utils/current-time-ms)]
     ;; Save pending events
     (p/save-events store workflow-id pending-events)
     (if (>= now fire-at)
@@ -214,7 +221,7 @@
                           (fn []
                             (p/save-event store workflow-id {:event-type :timer-fired
                                                              :seq        seq
-                                                             :timestamp  (System/currentTimeMillis)})
+                                                             :timestamp  (utils/current-time-ms)})
                             (-notify p/on-timer-fired observer workflow-id seq)
                             (when wake-fn (wake-fn))))
         :wait-timer))))
@@ -231,7 +238,7 @@
                                          :signal-name signal-name
                                          :signal-id   (:id signal-data)
                                          :payload     (:payload signal-data)
-                                         :timestamp   (System/currentTimeMillis)})
+                                         :timestamp   (utils/current-time-ms)})
         (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data))
         :continue)
       ;; ELSE Signal not yet available - register callback and wait
@@ -245,7 +252,7 @@
                                                                         :signal-name signal-name
                                                                         :signal-id   (:id signal-data)
                                                                         :payload     (:payload signal-data)
-                                                                        :timestamp   (System/currentTimeMillis)})
+                                                                        :timestamp   (utils/current-time-ms)})
                                        (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data)))
                                      ;; Unregister callback
                                      (p/unregister-signal-callback store workflow-id signal-name)
@@ -256,7 +263,7 @@
 (defn process-signal-with-timeout [store scheduler workflow-id suspension-data
                                     pending-events wake-fn observer]
   (let [{:keys [seq signal-name deadline]} suspension-data
-        now (System/currentTimeMillis)]
+        now (utils/current-time-ms)]
     (p/save-events store workflow-id pending-events)
     ;; Check if signal already available
     (if-let [signal-data (p/consume-signal store workflow-id signal-name)]
@@ -288,7 +295,7 @@
                                                                          :seq         seq
                                                                          :received    (some? signal-data?)
                                                                          :signal-name signal-name
-                                                                         :timestamp   (System/currentTimeMillis)}
+                                                                         :timestamp   (utils/current-time-ms)}
                                                                         (some? signal-data?) (assoc :payload (:payload signal-data?)))))
 
                               (when wake-fn (wake-fn))))
@@ -346,7 +353,7 @@
     (p/save-events store workflow-id pending-events))
   (p/save-event store workflow-id {:event-type :workflow-completed
                                    :result     result
-                                   :timestamp  (System/currentTimeMillis)})
+                                   :timestamp  (utils/current-time-ms)})
   (-notify p/on-workflow-completed observer workflow-id result)
   {:status :completed
    :workflow-id workflow-id
@@ -361,7 +368,7 @@
                    :data {:workflow-id workflow-id}}]
     (p/save-event store workflow-id {:event-type :workflow-failed
                                      :error error-map
-                                     :timestamp  (System/currentTimeMillis)})
+                                     :timestamp  (utils/current-time-ms)})
     (-notify p/on-workflow-cancelled observer workflow-id)
     (-notify p/on-workflow-failed observer workflow-id error-map)
     {:status :failed
@@ -375,7 +382,7 @@
   (let [error-map (error/throwable->map error)]
     (p/save-event store workflow-id {:event-type :workflow-failed
                                      :error      error-map
-                                     :timestamp  (System/currentTimeMillis)})
+                                     :timestamp  (utils/current-time-ms)})
     (-notify p/on-workflow-failed observer workflow-id error-map)
     {:status :failed
      :workflow-id workflow-id
@@ -488,7 +495,7 @@
         (ctx/add-pending-event! {:event-type :run-once-completed
                                  :seq seq-num
                                  :result result
-                                 :timestamp (System/currentTimeMillis)})
+                                 :timestamp (utils/current-time-ms)})
         result))))
 
 (defn run-workflow-internal
@@ -526,7 +533,7 @@
           (-notify p/on-workflow-cancelled observer workflow-id)
           (p/save-event store workflow-id {:event-type :workflow-failed
                                            :error      error-map
-                                           :timestamp  (System/currentTimeMillis)})
+                                           :timestamp  (utils/current-time-ms)})
 
           (log/info "Workflow cancelled, failing")
           (-notify p/on-workflow-failed observer workflow-id error-map)
@@ -593,7 +600,7 @@
                                              :seq               seq
                                              :child-workflow-id child-workflow-id
                                              :result            (:result result)
-                                             :timestamp         (System/currentTimeMillis)})
+                                             :timestamp         (utils/current-time-ms)})
             (log/infof "Child workflow with id %s completed" child-workflow-id)
             :continue)
           ;; ELSE
@@ -604,14 +611,14 @@
                                              :error             (or (:error result)
                                                                     {:status (:status result)
                                                                      :message (str "Child workflow ended with status: " (:status result))})
-                                             :timestamp         (System/currentTimeMillis)})
+                                             :timestamp         (utils/current-time-ms)})
             (log/infof "Child workflow with id %s failed, status: %s, error: %s" child-workflow-id (:status result) (:error result))
             :continue)))
-      (catch Exception e
+      (catch #?(:clj Exception :cljs js/Error) e
         (p/save-event store workflow-id {:event-type        :child-workflow-failed
                                          :seq               seq
                                          :child-workflow-id child-workflow-id
                                          :error             (error/throwable->map e)
-                                         :timestamp         (System/currentTimeMillis)})
+                                         :timestamp         (utils/current-time-ms)})
         (log/warnf e "Error while executing child workflow with id %s" child-workflow-id)
         :continue))))

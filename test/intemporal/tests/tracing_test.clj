@@ -11,7 +11,7 @@
    To view traces, ensure you have an OpenTelemetry collector running
    at http://localhost:4317 (or configure via OTEL_EXPORTER_OTLP_ENDPOINT)."
   (:require [intemporal.core :as intemporal]
-            [intemporal.observer :as obs]
+            [intemporal.observer.otel :as otel-obs]
             [clojure.test :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]))
 
@@ -40,7 +40,7 @@
 
 (deftest test-async-workflow
   (testing "Async workflow with OpenTelemetry tracing"
-    (let [otel-observer (obs/make-otel-observer)]
+    (let [otel-observer (otel-obs/make-otel-observer)]
       (intemporal/with-workflow-engine [engine {:threads 4 :observer otel-observer}]
         ;; Activities are automatically registered via stub call
         (let [result (intemporal/start-workflow engine

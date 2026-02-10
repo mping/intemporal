@@ -68,6 +68,6 @@
   (when-let [observer (:observer (current-context))]
     (try
       (apply event-fn observer args)
-      (catch Exception e
+      (catch #?(:clj Exception :cljs js/Error) e
         ;; Don't let observer errors break workflow
-        (println "Observer error:" (.getMessage e))))))
+        (println "Observer error:" (ex-message e))))))

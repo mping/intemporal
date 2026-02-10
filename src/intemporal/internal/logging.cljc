@@ -1,18 +1,37 @@
 (ns intemporal.internal.logging
-  (:require [clojure.tools.logging :as l :refer [logp logf]])
-  (:import (org.slf4j MDC)))
+  #?(:clj  (:require [net.cgrand.macrovich :as macros])
+                      ;[intemporal.workflow.internal :refer [trace! trace-async! add-event!]])
+     :cljs (:require-macros [net.cgrand.macrovich :as macros]))
+                            ;[intemporal.workflow.internal :refer [trace! trace-async! add-event!]]
+                            ;[intemporal.macros :refer [env-let defn-workflow stub-function stub-protocol]])))
+  #?(:clj (:import (org.slf4j MDC))))
 
 (defmacro with-mdc
   [m & body]
-  `(try
-     (doseq [[k# v#] ~m]
-       (MDC/put (name k#) (str v#)))
-     (do ~@body)
-     (finally
-       (doseq [k# (keys ~m)]
-         (MDC/remove (name k#))))))
+  (macros/case
+    :cljs
+    `(do ~@body)
+
+    :clj
+    `(try
+       (doseq [[k# v#] ~m]
+         (MDC/put (name k#) (str v#)))
+       (do ~@body)
+       (finally
+         (doseq [k# (keys ~m)]
+           (MDC/remove (name k#)))))))
 
 ;; level-specific macros
+
+(defn logp [& args]
+  (macros/case
+    :clj (apply println args)
+    :cljs (apply js/console.log args)))
+
+(defn logf [& args]
+  (macros/case
+    :clj (apply println args)
+    :cljs (apply js/console.log args)))
 
 (defmacro trace
   "Trace level logging using print-style args.

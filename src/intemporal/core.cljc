@@ -5,9 +5,12 @@
             [intemporal.internal.runtime :as runtime]
             [intemporal.internal.execution :as exec]
             [intemporal.internal.logging :as log]
+            [intemporal.internal.fns.start-workflow :as sw]
             [intemporal.protocol :as p]
             [intemporal.store :as store]
-            [intemporal.observer :as obs]))
+            [intemporal.observer :as obs]
+            [intemporal.utils :as utils])
+  #?(:cljs (:require-macros [intemporal.internal.logging :as log])))
 
 ;; ============================================================================
 ;; Core Workflow Operations
@@ -63,7 +66,7 @@
                                      :retry-policy  (when effective-retry
                                                       {:max-attempts (:max-attempts effective-retry)
                                                        :backoff-ms   (:backoff-ms effective-retry)})
-                                     :timestamp     (System/currentTimeMillis)}]
+                                     :timestamp     (utils/current-time-ms)}]
                 ;; interruptions are scheduled just the same
                 (when interrupted?
                   (log/infof "Activity was interrupted: rescheduling"))
@@ -129,7 +132,7 @@
       :else
       (let [start-event {:event-type :async-started
                          :seq        seq-num
-                         :timestamp  (System/currentTimeMillis)}
+                         :timestamp  (utils/current-time-ms)}
             start-seq seq-num]
         (ctx/add-pending-event! start-event)
         (ctx/notify-observer p/on-async-started (:workflow-id ctx) seq-num)
@@ -145,11 +148,11 @@
                                      :seq        start-seq
                                      :last-seq   end-seq
                                      :result     result
-                                     :timestamp  (System/currentTimeMillis)})
+                                     :timestamp  (utils/current-time-ms)})
             (ctx/notify-observer p/on-async-completed (:workflow-id ctx) start-seq result)
             (log/tracef "Async completed successfully with result %s" result)
             (->AsyncHandle start-seq))
-          (catch Throwable e
+          (catch #?(:clj Throwable :cljs js/Error) e
             (if (error/suspension? e)
               ;; The thunk suspended on an activity - capture it for parallel execution
               (let [suspension-info (error/suspension-data e)
@@ -224,7 +227,7 @@
                                      :seq seq-num
                                      :index completed-idx
                                      :result result
-                                     :timestamp (System/currentTimeMillis)})
+                                     :timestamp (utils/current-time-ms)})
             {:index completed-idx :result result})
           (throw (error/make-suspension :join-any-pending
                                         {:seq seq-num
@@ -267,7 +270,7 @@
                                     {:seq seq-num
                                      :signal-name signal-name
                                      :timeout-ms timeout-ms
-                                     :deadline (+ (System/currentTimeMillis) timeout-ms)})))))
+                                     :deadline (+ (utils/current-time-ms) timeout-ms)})))))
 
 ;; ================================================================
 ;; ============
@@ -285,12 +288,12 @@
         existing (p/find-event store workflow-id :timer-fired seq-num)]
     (if existing
       nil
-      (let [fire-at (+ (System/currentTimeMillis) ms)]
+      (let [fire-at (+ (utils/current-time-ms) ms)]
         (ctx/add-pending-event! {:event-type :timer-scheduled
                                  :seq seq-num
                                  :fire-at fire-at
                                  :duration-ms ms
-                                 :timestamp (System/currentTimeMillis)})
+                                 :timestamp (utils/current-time-ms)})
         (ctx/notify-observer p/on-timer-scheduled (:workflow-id ctx) seq-num fire-at)
         (throw (error/make-suspension :timer {:seq seq-num
                                               :fire-at fire-at}))))))
@@ -325,7 +328,7 @@
                              :seq               seq-num
                              :child-workflow-id child-wf-id
                              :args              (vec args)
-                             :timestamp         (System/currentTimeMillis)}]
+                             :timestamp         (utils/current-time-ms)}]
         (ctx/add-pending-event! scheduled-event)
         (throw (error/make-suspension :child-workflow
                                       {:seq               seq-num
@@ -352,66 +355,11 @@
    Options:
    - :workflow-id - Custom workflow ID (default: random UUID)
    - :observer - IWorkflowObserver for monitoring
-   - :max-iterations - Maximum replay iterations (default: 1000)"
-  [{:keys [store executor scheduler registry] :as engine} workflow-fn args
-   & {:keys [workflow-id observer max-iterations]
-      :or {max-iterations 1000}}]
-  (let [wf-id (or workflow-id (str (random-uuid)))
-        resume-promise-atom (atom nil)
-        ;; TODO fixme this could be passed via the `with-workflow-engine` macro
-        observer (or observer (get engine :observer))
-        wake-fn (fn wake-fn-impl []
-                  (log/with-mdc {:workflow-id wf-id}
-                    (try
-                      (when observer
-                        (p/on-workflow-resumed observer wf-id))
-                      (log/debugf "Waking workflow for resume")
-                      (let [old-promise @resume-promise-atom
-                            new-promise (promise)
-                            ;_ (reset! resume-promise-atom new-promise)
-                            result (exec/run-workflow-internal engine wf-id workflow-fn args
-                                                         {:observer observer
-                                                          :max-iterations max-iterations
-                                                          :wake-fn wake-fn-impl})]
-                        (reset! resume-promise-atom new-promise)
-                        (deliver old-promise result))
-                      (catch Exception e
-                        (when-let [p @resume-promise-atom]
-                          (deliver p {:status :failed :error e}))))))]
+   - :max-iterations - Maximum replay iterations (default: 1000)
 
-    (log/with-mdc {:workflow-id wf-id}
-      ;; Initialize with first promise
-      (reset! resume-promise-atom (promise))
-      (p/save-event store wf-id {:event-type :workflow-started
-                                 :workflow-id wf-id
-                                 :args (vec args)
-                                 :timestamp (System/currentTimeMillis)})
-      (when observer
-        (p/on-workflow-started observer wf-id args))
-      (log/info "Workflow started")
-      (try
-        ;; Execute initial workflow run
-        (let [initial-result (exec/run-workflow-internal engine wf-id workflow-fn args
-                                                   {:observer observer
-                                                    :max-iterations max-iterations
-                                                    :wake-fn wake-fn})]
-          ;; Loop to handle multiple wait cycles
-          (loop [result initial-result]
-            ;; If workflow is waiting, block until wake-fn delivers next result
-            (log/infof "Got result %s with status %s" (:result initial-result) (:status initial-result))
-            (if (#{:waiting-timer :waiting-signal :waiting-signal-timeout :waiting-async} (:status result))
-              ;; Capture the promise that wake-fn will deliver to
-              (do
-                (log/infof "Workflow waiting for promise: %s" (:status result))
-                (let [next-promise @resume-promise-atom
-                      next-result  @next-promise]
-                  (recur next-result)))
-              ;; else
-              result)))
-        (catch Exception e
-          ;; If cancelled/failed before entering wait state, re-throw
-          (log/warnf e "Caught exception")
-          (throw e))))))
+   Returns the result map on JVM (blocking). Returns a js/Promise on ClojureScript."
+  [engine workflow-fn args & opts]
+  (apply sw/start-workflow engine workflow-fn args opts))
 
 (defn resume-workflow
   "Resume a waiting workflow (e.g., after signal delivery or timer).

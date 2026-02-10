@@ -37,7 +37,8 @@
     ;; Check if there's a callback registered for this signal
     (when-let [callback (get-in @state [:workflows workflow-id :signal-callbacks signal-name])]
       ;; Invoke callback asynchronously
-      (future (callback)))
+      #?(:clj (future (callback))
+         :cljs (js/setTimeout callback 0)))
     signal-data)
 
   (consume-signal [_ workflow-id signal-name]

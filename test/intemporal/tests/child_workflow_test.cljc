@@ -1,7 +1,11 @@
 (ns intemporal.tests.child-workflow-test
   (:require [intemporal.core :as intemporal]
+            [intemporal.tests.utils :refer [with-result]]
             [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]))
+            [matcher-combinators.test :refer [match?]]
+            #?(:cljs [cljs.test :as t]))
+  #?(:cljs (:require-macros [intemporal.core :as intemporal]
+                             [intemporal.tests.utils :refer [with-result]])))
 
 (defn activity-fn [arg]
   [:processed arg])
@@ -38,8 +42,8 @@
 (deftest test-simple-child-workflow
   (testing "Parent workflow can run child workflow"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (let [result (intemporal/start-workflow engine
-                                              parent-flow [5])]
+      (with-result [result (intemporal/start-workflow engine
+                                                      parent-flow [5])]
         (is (match? {:status      :completed
                      :workflow-id string?
                      :result      {:parent-result [:processed 5]
@@ -49,8 +53,8 @@
 (deftest test-nested-child-workflows
   (testing "Child workflows can have their own child workflows"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (let [result (intemporal/start-workflow engine
-                                              nested-parent-flow [3])]
+      (with-result [result (intemporal/start-workflow engine
+                                                      nested-parent-flow [3])]
         (is (match? {:status :completed
                      :result {:parent-result [:processed 3]
                               :nested-child  {:child-result      [:processed 30]
@@ -66,14 +70,15 @@
                                 (try
                                   (intemporal/run-child-workflow failing-child [id])
                                   {:success true}
-                                  (catch Exception e
-                                    {:error (.getMessage e)})))
+                                  (catch #?(:clj Exception :cljs js/Error) e
+                                    {:error (ex-message e)})))
             ;; Parent should catch and handle child error
-            result            (intemporal/start-workflow engine
-                                                         parent-with-error [42])]
-        (is (match? {:status :completed
-                     :result {:error string?}}
-                    result))))))
+            ]
+        (with-result [result (intemporal/start-workflow engine
+                                                        parent-with-error [42])]
+          (is (match? {:status :completed
+                       :result {:error string?}}
+                      result)))))))
 
 (deftest test-multiple-child-workflows
   (testing "Parent can run multiple child workflows sequentially"
@@ -82,12 +87,12 @@
                                (let [c1 (intemporal/run-child-workflow child-flow [1])
                                      c2 (intemporal/run-child-workflow child-flow [2])
                                      c3 (intemporal/run-child-workflow child-flow [3])]
-                                 {:children [c1 c2 c3] :id id}))
-            result           (intemporal/start-workflow engine
+                                 {:children [c1 c2 c3] :id id}))]
+        (with-result [result (intemporal/start-workflow engine
                                                         multi-child-flow [99])]
-        (is (match? {:status :completed
-                     :result {:children [{:child-result [:processed 1]}
-                                         {:child-result [:processed 2]}
-                                         {:child-result [:processed 3]}]
-                              :id       99}}
-                    result))))))
+          (is (match? {:status :completed
+                       :result {:children [{:child-result [:processed 1]}
+                                           {:child-result [:processed 2]}
+                                           {:child-result [:processed 3]}]
+                                :id       99}}
+                      result)))))))

@@ -1,9 +1,14 @@
 (ns intemporal.tests.error-test
   (:require [intemporal.core :as intemporal]
             [intemporal.internal.activity :as a]
+            [intemporal.tests.utils :refer [with-result]]
+            [intemporal.utils :as utils]
             [clojure.test :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]
-            [matcher-combinators.matchers :as m]))
+            [matcher-combinators.matchers :as m]
+            #?(:cljs [cljs.test :as t]))
+  #?(:cljs (:require-macros [intemporal.core :as intemporal]
+                             [intemporal.tests.utils :refer [with-result]])))
 
 (def attempt-counter (atom 0))
 
@@ -26,8 +31,8 @@
   (testing "Activity succeeds after retries"
     (intemporal/with-workflow-engine [engine {:threads 2}]
       (reset! attempt-counter 0)
-      (let [result (intemporal/start-workflow engine
-                                              retry-flow [42])]
+      (with-result [result (intemporal/start-workflow engine
+                                                      retry-flow [42])]
         (is (match? {:status      :completed
                      :workflow-id string?
                      :result      {:result 126}}
@@ -45,8 +50,8 @@
 (deftest test-activity-retry-exhausted
   (testing "Activity fails after exhausting retries"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (let [result (intemporal/start-workflow engine
-                                              failing-retry-flow [99])]
+      (with-result [result (intemporal/start-workflow engine
+                                                      failing-retry-flow [99])]
         (is (match? {:status      :failed
                      :workflow-id string?
                      :error       (m/embeds {:message "Activity failed"
@@ -59,14 +64,14 @@
   (let [failing (intemporal/stub #'always-fails-activity)]
     (try
       {:result (failing id) :error false}
-      (catch Exception e
-        {:result nil :error true :message (.getMessage e)}))))
+      (catch #?(:clj Exception :cljs js/Error) e
+        {:result nil :error true :message (ex-message e)}))))
 
 (deftest test-workflow-error-handling
   (testing "Workflow can catch and handle activity errors"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (let [result (intemporal/start-workflow engine
-                                              error-handling-flow [123])]
+      (with-result [result (intemporal/start-workflow engine
+                                                      error-handling-flow [123])]
         (is (match? {:status      :completed
                      :workflow-id string?
                      :result      {:result  nil
@@ -78,8 +83,8 @@
   (testing "Activity without retry policy fails immediately"
     (intemporal/with-workflow-engine [engine {:threads 2}]
       ;; Register without retry policy
-      (let [result (intemporal/start-workflow engine
-                                              failing-retry-flow [456])]
+      (with-result [result (intemporal/start-workflow engine
+                                                      failing-retry-flow [456])]
         (is (match? {:status      :failed
                      :workflow-id string?
                      :error       (m/embeds {:message "Activity failed"
@@ -100,21 +105,21 @@
   (testing "Retry policy applies exponential backoff"
     (intemporal/with-workflow-engine [engine {:threads 2}]
       (reset! attempt-counter 0)
-      (let [start-time (System/currentTimeMillis)
-            result     (intemporal/start-workflow engine retry-flow2 [42])
-            elapsed    (- (System/currentTimeMillis) start-time)]
-        (is (match? {:status      :completed
-                     :workflow-id string?
-                     :result      {:result 126}}
-                    result))
-        ;; With backoff 10ms, 20ms, we expect at least 30ms
-        (is (>= elapsed 30))))))
+      (let [start-time (utils/current-time-ms)]
+        (with-result [result (intemporal/start-workflow engine retry-flow2 [42])]
+          (let [elapsed (- (utils/current-time-ms) start-time)]
+            (is (match? {:status      :completed
+                         :workflow-id string?
+                         :result      {:result 126}}
+                        result))
+            ;; With backoff 10ms, 20ms, we expect at least 30ms
+            (is (>= elapsed 30))))))))
 
 (deftest test-error-details-preserved
   (testing "Error details are preserved in workflow result"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (let [result (intemporal/start-workflow engine
-                                              failing-retry-flow [789])]
+      (with-result [result (intemporal/start-workflow engine
+                                                      failing-retry-flow [789])]
         (is (match? {:status      :failed
                      :workflow-id string?
                      :error       (m/embeds {:message "Activity failed"
