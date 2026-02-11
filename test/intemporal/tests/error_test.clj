@@ -61,7 +61,7 @@
   (let [failing (intemporal/stub #'always-fails-activity)]
     (try
       {:result (failing id) :error false}
-      (catch #?(:clj Exception :cljs js/Error) e
+      (catch Exception e
         {:result nil :error true :message (ex-message e)}))))
 
 (deftest test-workflow-error-handling

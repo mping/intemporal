@@ -67,7 +67,7 @@
                                 (try
                                   (intemporal/run-child-workflow failing-child [id])
                                   {:success true}
-                                  (catch #?(:clj Exception :cljs js/Error) e
+                                  (catch Exception e
                                     {:error (ex-message e)})))
             ;; Parent should catch and handle child error
             ]

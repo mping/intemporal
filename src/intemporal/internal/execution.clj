@@ -5,9 +5,7 @@
             [intemporal.internal.logging :as log]
             [intemporal.utils :as utils]
             [intemporal.protocol :as p])
-  #?(:cljs (:require-macros [intemporal.internal.logging :as log]
-                            [intemporal.internal.execution :refer [-notify]]))
-  #?(:clj (:import (java.util.concurrent RejectedExecutionException))))
+  (:import (java.util.concurrent RejectedExecutionException)))
 
 ;; ============================================================================
 ;; Workflow Execution Engine
@@ -25,7 +23,7 @@
      :result (apply workflow-fn args)
      :pending-asyncs @(:pending-asyncs (ctx/current-context))
      :pending-events @(:pending-events (ctx/current-context))}
-    (catch #?(:clj Throwable :cljs js/Error) e
+    (catch Throwable e
       (cond
         (error/suspension? e)
         {:status :suspended
@@ -59,8 +57,7 @@
           {:status :success
            :result result
            :duration duration})
-        ;; this only makes sense for clj
-        #?(:clj (catch RejectedExecutionException e
+        (catch RejectedExecutionException e
                   (let [duration (- (utils/current-time-ms) start)
                         error     (error/activity-rejected-exception activity-name e)
                         error-map (error/throwable->map error)]
@@ -68,8 +65,8 @@
                     (log/warnf e "Activity execution rejected")
                     {:status :failed
                      :error error-map
-                     :duration duration})))
-        (catch #?(:clj Exception :cljs js/Error) e
+                     :duration duration}))
+        (catch Exception e
           (let [duration (- (utils/current-time-ms) start)
                 error-map (error/throwable->map e)]
             (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
@@ -92,8 +89,7 @@
                              :result   result
                              :duration duration
                              :attempts attempt})
-                          ;; this only makes sense for clj
-                          #?(:clj (catch RejectedExecutionException e
+                          (catch RejectedExecutionException e
                                     (let [duration (- (utils/current-time-ms) start)
                                           error     (error/activity-rejected-exception activity-name e)
                                           error-map (error/throwable->map error)]
@@ -101,8 +97,8 @@
                                       (log/warnf e "Activity execution rejected")
                                       {:status :failed
                                        :error error-map
-                                       :duration duration})))
-                          (catch #?(:clj Exception :cljs js/Error) e
+                                       :duration duration}))
+                          (catch Exception e
                             (let [duration (- (utils/current-time-ms) start)
                                   error-map (error/throwable->map e)]
                               (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
@@ -119,10 +115,8 @@
           (if (a/should-retry? retry-policy (:exception exec-result) attempt)
             (let [backoff (a/calculate-backoff retry-policy attempt)]
               (log/debugf "Activity sleeping %s before retrying (attempt %d)" backoff attempt)
-              #?(:clj (do (Thread/sleep (long backoff))
-                          (recur (inc attempt)))
-                 ;;; TODO FIXME
-                 :cljs (throw (ex-info "TODO: implement recur" {}))))
+              (do (Thread/sleep (long backoff))
+                  (recur (inc attempt))))
             ;; else
             {:status :failed
              :error (:error exec-result)
@@ -614,7 +608,7 @@
                                              :timestamp         (utils/current-time-ms)})
             (log/infof "Child workflow with id %s failed, status: %s, error: %s" child-workflow-id (:status result) (:error result))
             :continue)))
-      (catch #?(:clj Exception :cljs js/Error) e
+      (catch Exception e
         (p/save-event store workflow-id {:event-type        :child-workflow-failed
                                          :seq               seq
                                          :child-workflow-id child-workflow-id

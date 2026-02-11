@@ -50,6 +50,14 @@ The codebase is organized into several layers:
 
 ## Development Commands
 
+### Grep
+
+Ensure you run grep with `--color=never`
+
+```
+grep --color=never
+```
+
 ### Running Tests
 
 ```bash
