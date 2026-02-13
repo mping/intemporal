@@ -10,22 +10,25 @@
 ;; Helper Functions
 ;; ============================================================================
 
-(defn- promise-timeout
-  "Create a promise that resolves with {:timeout true} after ms milliseconds"
-  [ms]
-  (js/Promise.
-    (fn [resolve _reject]
-      (js/setTimeout
-        #(resolve {::timeout true})
-        ms))))
-
 (defn- promise-with-timeout
   "Execute promise-fn with optional timeout. If timeout-ms is provided,
-   races the promise against a timeout promise."
+   races the promise against a timeout promise.
+   Clears the timeout timer when the race settles to avoid keeping the
+   Node.js event loop alive."
   [promise-fn timeout-ms]
   (if timeout-ms
-    (js/Promise.race
-      #js [promise-fn (promise-timeout timeout-ms)])
+    (let [timer-id (atom nil)
+          timeout-p (js/Promise.
+                      (fn [resolve _]
+                        (reset! timer-id
+                          (js/setTimeout #(resolve {::timeout true}) timeout-ms))))]
+      (-> (js/Promise.race #js [promise-fn timeout-p])
+          (.then (fn [result]
+                   (when-let [id @timer-id] (js/clearTimeout id))
+                   result))
+          (.catch (fn [err]
+                    (when-let [id @timer-id] (js/clearTimeout id))
+                    (throw err)))))
     promise-fn))
 
 (defn- async-sleep

@@ -13,9 +13,6 @@
   (let [act (intemporal/stub noop-activity)]
     (act id)))
 
-(log/with-mdc {:a 1}
-  (log/info "XXX"))
-
 (deftest test-simple-workflow
   (testing "simplest possible workflow"
     (let [engine (intemporal/make-workflow-engine :threads 2)]
