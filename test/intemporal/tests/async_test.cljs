@@ -3,8 +3,7 @@
             [cljs.test :as t :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]
             [intemporal.tests.utils :as tu])
-  (:require-macros [intemporal.core :as intemporal :refer [with-workflow-engine]]
-                   [intemporal.tests.utils :refer [with-result]]))
+  (:require-macros [intemporal.tests.utils :refer [with-result]]))
 
 (defn slow-activity [x]
   (println (str "slow activity START with " x))
@@ -44,8 +43,7 @@
 
 (deftest test-async-workflow
   (testing "Async workflow"
-    (with-workflow-engine [engine {:threads 4 :enable-logging true}]
-      ;; Activities are automatically registered via stub call
+    (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)]
       (with-result [result (intemporal/start-workflow engine my-parallel-flow [999])]
         (is (match? {:status :completed
                      :result {:args 999, :slow 0, :prom4 4, :results [2 4 6 4], :id 999}}
@@ -54,11 +52,9 @@
 
 (deftest test-race-workflow
   (testing "Async race workflow"
-    (with-workflow-engine [engine {:threads 4 :enable-logging true}]
-      ;; Activities are automatically registered via stub call
+    (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)]
       (with-result [result (intemporal/start-workflow engine my-race-flow [999])]
         (is (match? {:status :completed
                      :result {:race-result {:index 0, :result 200}
                               :id 999}}
                     result))))))
-

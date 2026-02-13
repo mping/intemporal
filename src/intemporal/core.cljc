@@ -10,7 +10,9 @@
             [intemporal.store :as store]
             [intemporal.observer :as obs]
             [intemporal.utils :as utils])
-  #?(:cljs (:require-macros [intemporal.internal.logging :as log])))
+  #?(:clj  (:require [net.cgrand.macrovich :as macros])
+     :cljs (:require-macros [net.cgrand.macrovich :as macros]
+                            [intemporal.internal.logging :as log])))
 
 ;; ============================================================================
 ;; Core Workflow Operations
@@ -482,8 +484,20 @@
    (with-workflow-engine [engine {:threads 4}]
      (start-workflow (:store engine) ...))"
   [[binding opts] & body]
-  `(let [~binding (make-workflow-engine ~@(mapcat identity opts))]
-     (try
-       ~@body
-       (finally
-         (shutdown-engine ~binding)))))
+  (macros/case
+    :clj
+    `(let [~binding (make-workflow-engine ~@(mapcat identity opts))]
+       (try
+         ~@body
+         (finally
+           (shutdown-engine ~binding))))
+    :cljs
+    ;; In CLJS, try/finally is synchronous so shutdown-engine fires before the
+    ;; async body resolves, cancelling pending timers/activities.
+    ;; Returns a promise with shutdown chained via p/finally.
+    ;; with-result owns the t/async boundary and chains done# after assertions.
+    `(let [~binding (make-workflow-engine ~@(mapcat identity opts))]
+       (-> (do ~@body)
+           (promesa.core/finally
+             (fn []
+               (shutdown-engine ~binding)))))))

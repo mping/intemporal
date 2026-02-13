@@ -34,18 +34,11 @@
                       (catch Exception e# e#)))]
          ~@body)
       :cljs
-      `(t/async done#
-         (js/setTimeout
-           (fn []
-             ;; force wrap resval in a deferred
-             (p/finally (-> nil
-                            (p/then (fn [_#]
-                                      (do ~resval)))
-                            (p/timeout with-result-default-timeout))
-                        (fn [res# err#]
-                          (try
-                            (let [~res (or res# err#)]
-                              (do ~@body))
-                            (finally
-                              (done#)))))
-             0))))))
+      (let [done (gensym "done")]
+        `(~'cljs.test/async ~done
+           (-> (p/resolved nil)
+               (p/then (fn [_#] ~resval))
+               (p/timeout with-result-default-timeout)
+               (p/then (fn [~res] ~@body))
+               (p/catch (fn [err#] (let [~res err#] ~@body)))
+               (p/finally (fn [] (~done)))))))))

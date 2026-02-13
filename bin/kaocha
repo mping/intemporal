@@ -2,7 +2,7 @@
 
 [ -d "node_modules/ws" ] || npm install ws
 
-JAVA_OPTS="${JAVA_OPTS:--agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 -Dio.netty.tryUnsafe=false}"
+#JAVA_OPTS="${JAVA_OPTS:--agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 -Dio.netty.tryUnsafe=false}"
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   FDB_OPTS="-J-DFDB_LIBRARY_PATH_FDB_C=/usr/local/lib/libfdb_c.dylib -J-DFDB_LIBRARY_PATH_FDB_JAVA=/usr/local/lib/libfdb_java.jnilib"
