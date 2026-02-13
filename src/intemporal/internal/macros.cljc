@@ -1,11 +1,13 @@
 (ns intemporal.internal.macros
-  (:require [cljs.analyzer.api :as api])
-            ;[md5.core :as md5])
-  #?(:clj  (:require [net.cgrand.macrovich :as macros])
-                     ;[intemporal.workflow.internal :refer [trace! trace-async! add-event!]])
+  (:require [cljs.analyzer.api :as api]
+            [promesa.core :as p])
+  ;[md5.core :as md5])
+  #?(:clj  (:require [intemporal.internal.context :as ctx]
+                     [net.cgrand.macrovich :as macros])
+     ;[intemporal.workflow.internal :refer [trace! trace-async! add-event!]])
      :cljs (:require-macros [net.cgrand.macrovich :as macros])))
-                            ;[intemporal.workflow.internal :refer [trace! trace-async! add-event!]]
-                            ;[intemporal.macros :refer [env-let defn-workflow stub-function stub-protocol]])))
+;[intemporal.workflow.internal :refer [trace! trace-async! add-event!]]
+;[intemporal.macros :refer [env-let defn-workflow stub-function stub-protocol]])))
 
 (def cljs-available?
   #?(:cljs
@@ -25,7 +27,7 @@
   long as side-effects are run via activities."
   [sym argv & body]
   (let [wname (symbol (str sym "-"))]
-        ;sig   (md5/string->md5-hex (str body))]
+    ;sig   (md5/string->md5-hex (str body))]
     ;; TODO save signature
     `(do
        (defn- ~wname ~argv (do ~@body))
@@ -74,12 +76,12 @@
                `(~sname [this# ~@args]
                   (let [aid#      '~qname
                         act-opts# ~(first opts)
-                        sym# (symbol aid#)
+                        sym#      (symbol aid#)
                         ;aid# ;; >> doesn't work!
                         ;; protos are not reified like in clj https://clojurescript.org/about/differences#_protocols
                         ;; we create a "fake" fvar that can be invokeable just like the real thing
-                        f# (fn [& impl+args#] (apply ~qname impl+args#))
-                        args# [~@args]]))))))
+                        f#        (fn [& impl+args#] (apply ~qname impl+args#))
+                        args#     [~@args]]))))))
 
     :clj
     #_{:clj-kondo/ignore [:unresolved-symbol]}
@@ -103,6 +105,6 @@
              `(~sname [this# ~@args]
                 (let [aid#      '~qname
                       act-opts# ~(first opts)
-                      sym# (symbol aid#)
-                      f# (var-get (requiring-resolve aid#))
-                      args# [~@args]])))))))
+                      sym#      (symbol aid#)
+                      f#        (var-get (requiring-resolve aid#))
+                      args#     [~@args]])))))))

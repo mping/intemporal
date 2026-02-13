@@ -165,8 +165,9 @@
                       timeout (or timeout-ms default-timeout-ms)]
                   (if (nil? act)
                     (js/Promise.reject
-                      (ex-info "Activity not found"
-                               {:activity-name activity-name}))
+                      (ex-info (str "Activity xxx not found " (keys @registry-atom)) {:activity-name activity-name :known-activities (keys @registry-atom)})
+                      #_(ex-info "Activity not found"
+                                 {:activity-name activity-name}))
                     ;; Execute with optional retry
                     (execute-activity-with-retry
                       (:fn act)

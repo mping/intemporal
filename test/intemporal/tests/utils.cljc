@@ -2,10 +2,14 @@
   #?(:cljs (:require [intemporal.store :as store]
                      [promesa.core :as p]
                      [cljs.test :as t]
-                     [cljs.pprint :as pprint]))
+                     [cljs.pprint :as pprint]
+                     [taoensso.telemere :as telemere]
+                     [taoensso.telemere.utils :as tutils]))
   #?(:clj (:require [promesa.core :as p]
                     [net.cgrand.macrovich :as macros]
-                    [clojure.pprint :as pprint]))
+                    [clojure.pprint :as pprint]
+                    [taoensso.telemere :as telemere]
+                    [taoensso.telemere.utils :as tutils]))
   #?(:cljs (:require-macros [net.cgrand.macrovich :as macros]
                             [intemporal.tests.utils :refer [with-result]]))
   #?(:clj (:import [java.util.concurrent TimeoutException])))
@@ -42,3 +46,17 @@
                (p/then (fn [~res] ~@body))
                (p/catch (fn [err#] (let [~res err#] ~@body)))
                (p/finally (fn [] (~done)))))))))
+
+(defn setup-telemere []
+  ;#?(:clj (clojure.pprint/pprint (telemere/check-interop)))
+  (telemere/set-min-level! :trace)
+  (telemere/remove-handler! ::custom)
+  (telemere/add-handler! ::custom
+                         (telemere/handler:console
+                           {:output-fn
+                            (tutils/format-signal-fn
+                              {:content-fn (taoensso.telemere.utils/signal-content-fn {:incl-keys #{:thread}})})})))
+
+(def with-trace-logging
+  #?(:cljs {:before setup-telemere}
+     :clj  (fn with-trace-logging [f] (setup-telemere) (f))))

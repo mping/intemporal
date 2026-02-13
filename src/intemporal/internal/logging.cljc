@@ -1,118 +1,53 @@
 (ns intemporal.internal.logging
-  #?(:clj  (:require [net.cgrand.macrovich :as macros])
-                      ;[intemporal.workflow.internal :refer [trace! trace-async! add-event!]])
-     :cljs (:require-macros [net.cgrand.macrovich :as macros]))
-                            ;[intemporal.workflow.internal :refer [trace! trace-async! add-event!]]
-                            ;[intemporal.macros :refer [env-let defn-workflow stub-function stub-protocol]])))
-  #?(:clj (:import (org.slf4j MDC))))
+  (:require [taoensso.telemere :as t]
+            #?(:cljs [goog.string :as gstring])
+            #?(:cljs [goog.string.format])))
 
 (defmacro with-mdc
+  "Evaluates body with given map merged into telemere's signal context."
   [m & body]
-  (macros/case
-    :cljs
-    `(do ~@body)
+  ;; (t/log! {:level :debug :data {:sym (:sym task)}} ["Found replay event for task with id" (:id task)]))
+  `(t/with-ctx {:data ~m} ~@body))
 
-    :clj
-    `(try
-       (doseq [[k# v#] ~m]
-         (MDC/put (name k#) (str v#)))
-       (do ~@body)
-       (finally
-         (doseq [k# (keys ~m)]
-           (MDC/remove (name k#)))))))
+(defn- fmt [s args]
+  #?(:clj  (apply format s args)
+     :cljs (apply gstring/format s args)))
 
-;; level-specific macros
+;; Print-style: (info msg) or (info throwable msg)
+(defn trace  [& args] (t/log! :trace (last args)))
+(defn debug  [& args] (t/log! :debug (last args)))
+(defn info   [& args] (t/log! :info  (last args)))
+(defn warn   [& args] (t/log! :warn  (last args)))
+(defn error  [& args] (t/log! :error (last args)))
+(defn fatal  [& args] (t/log! :fatal (last args)))
 
-(defn logp [& args]
-  (macros/case
-    :clj (apply println args)
-    :cljs (apply js/console.log args)))
+;; Format-style: (infof fmt args...) or (infof throwable fmt args...)
+(defn tracef [& args]
+  (if (string? (first args))
+    (t/log! :trace (fmt (first args) (rest args)))
+    (t/log! {:level :trace :error (first args)} (fmt (second args) (nnext args)))))
 
-(defn logf [& args]
-  (macros/case
-    :clj (apply println args)
-    :cljs (apply js/console.log args)))
+(defn debugf [& args]
+  (if (string? (first args))
+    (t/log! :debug (fmt (first args) (rest args)))
+    (t/log! {:level :debug :error (first args)} (fmt (second args) (nnext args)))))
 
-(defmacro trace
-  "Trace level logging using print-style args.
-  Use the 'logging.readable' namespace to avoid wrapping args in pr-str."
-  {:arglists '([message & more] [throwable message & more])}
-  [& args]
-  `(logp :trace ~@args))
+(defn infof [& args]
+  (if (string? (first args))
+    (t/log! :info (fmt (first args) (rest args)))
+    (t/log! {:level :info :error (first args)} (fmt (second args) (nnext args)))))
 
-(defmacro debug
-  "Debug level logging using print-style args.
-  Use the 'logging.readable' namespace to avoid wrapping args in pr-str."
-  {:arglists '([message & more] [throwable message & more])}
-  [& args]
-  `(logp :debug ~@args))
+(defn warnf [& args]
+  (if (string? (first args))
+    (t/log! :warn (fmt (first args) (rest args)))
+    (t/log! {:level :warn :error (first args)} (fmt (second args) (nnext args)))))
 
-(defmacro info
-  "Info level logging using print-style args.
-  Use the 'logging.readable' namespace to avoid wrapping args in pr-str."
-  {:arglists '([message & more] [throwable message & more])}
-  [& args]
-  `(logp :info ~@args))
+(defn errorf [& args]
+  (if (string? (first args))
+    (t/log! :error (fmt (first args) (rest args)))
+    (t/log! {:level :error :error (first args)} (fmt (second args) (nnext args)))))
 
-(defmacro warn
-  "Warn level logging using print-style args.
-  Use the 'logging.readable' namespace to avoid wrapping args in pr-str."
-  {:arglists '([message & more] [throwable message & more])}
-  [& args]
-  `(logp :warn ~@args))
-
-(defmacro error
-  "Error level logging using print-style args.
-  Use the 'logging.readable' namespace to avoid wrapping args in pr-str."
-  {:arglists '([message & more] [throwable message & more])}
-  [& args]
-  `(logp :error ~@args))
-
-(defmacro fatal
-  "Fatal level logging using print-style args.
-  Use the 'logging.readable' namespace to avoid wrapping args in pr-str."
-  {:arglists '([message & more] [throwable message & more])}
-  [& args]
-  `(logp :fatal ~@args))
-
-(defmacro tracef
-  "Trace level logging using format.
-  Use the 'logging.readable' namespace to avoid wrapping args in pr-str."
-  {:arglists '([fmt & fmt-args] [throwable fmt & fmt-args])}
-  [& args]
-  `(logf :trace ~@args))
-
-(defmacro debugf
-  "Debug level logging using format.
-  Use the 'logging.readable' namespace to avoid wrapping args in pr-str."
-  {:arglists '([fmt & fmt-args] [throwable fmt & fmt-args])}
-  [& args]
-  `(logf :debug ~@args))
-
-(defmacro infof
-  "Info level logging using format.
-  Use the 'logging.readable' namespace to avoid wrapping args in pr-str."
-  {:arglists '([fmt & fmt-args] [throwable fmt & fmt-args])}
-  [& args]
-  `(logf :info ~@args))
-
-(defmacro warnf
-  "Warn level logging using format.
-  Use the 'logging.readable' namespace to avoid wrapping args in pr-str."
-  {:arglists '([fmt & fmt-args] [throwable fmt & fmt-args])}
-  [& args]
-  `(logf :warn ~@args))
-
-(defmacro errorf
-  "Error level logging using format.
-  Use the 'logging.readable' namespace to avoid wrapping args in pr-str."
-  {:arglists '([fmt & fmt-args] [throwable fmt & fmt-args])}
-  [& args]
-  `(logf :error ~@args))
-
-(defmacro fatalf
-  "Fatal level logging using format.
-  Use the 'logging.readable' namespace to avoid wrapping args in pr-str."
-  {:arglists '([fmt & fmt-args] [throwable fmt & fmt-args])}
-  [& args]
-  `(logf :fatal ~@args))
+(defn fatalf [& args]
+  (if (string? (first args))
+    (t/log! :fatal (fmt (first args) (rest args)))
+    (t/log! {:level :fatal :error (first args)} (fmt (second args) (nnext args)))))

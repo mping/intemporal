@@ -43,7 +43,6 @@
                       (catch Exception e
                         (when-let [p @resume-promise-atom]
                           (deliver p {:status :failed :error e}))))))]
-
     (log/with-mdc {:workflow-id wf-id}
       ;; Initialize with first promise
       (reset! resume-promise-atom (promise))

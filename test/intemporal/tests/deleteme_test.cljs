@@ -1,14 +1,20 @@
 (ns intemporal.tests.deleteme-test
-  (:require [cljs.test :refer [deftest is testing async]]
+  (:require [cljs.test :as t :refer [deftest is testing async]]
             [intemporal.core :as intemporal]
-            [intemporal.tests.utils :refer [with-result]])
+            [intemporal.internal.logging :as log]
+            [intemporal.tests.utils :refer [with-trace-logging]])
   (:require-macros [intemporal.tests.utils :refer [with-result]]))
+
+(t/use-fixtures :once with-trace-logging)
 
 (defn noop-activity [x] x)
 
 (defn noop-flow [id]
-  (let [act (intemporal/stub #'noop-activity)]
+  (let [act (intemporal/stub noop-activity)]
     (act id)))
+
+(log/with-mdc {:a 1}
+  (log/info "XXX"))
 
 (deftest test-simple-workflow
   (testing "simplest possible workflow"

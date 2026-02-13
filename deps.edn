@@ -2,7 +2,7 @@
  :test-paths ["test"]
 
  :deps       {org.clojure/clojure                      {:mvn/version "1.12.1"}
-              org.clojure/tools.logging                {:mvn/version "1.2.4"}
+              com.taoensso/telemere                    {:mvn/version "1.2.1"}
               thheller/shadow-cljs                     {:mvn/version "2.28.11"}
               com.github.steffan-westcott/clj-otel-api {:mvn/version "0.2.10"}
               ;; cljs (TODO test only?)

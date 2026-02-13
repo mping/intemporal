@@ -1,8 +1,32 @@
-(ns intemporal.internal.activity)
+(ns intemporal.internal.activity
+  #?(:cljs (:require [clojure.string :as str])))
 
 ;; ============================================================================
 ;; Activity Registry
 ;; ============================================================================
+
+(defn- fn-name
+  "Get a stable, qualified name string from a function.
+   On JVM: uses var metadata when available, otherwise class name.
+   On CLJS: demangles the JS function .name property (e.g. ns$fn_name -> ns/fn-name)."
+  [f]
+  #?(:clj  (str (symbol f))
+     :cljs (let [raw (.-name f)]
+             (if (and raw (not (str/blank? raw)))
+               ;; JS mangled name: intemporal$tests$deleteme_test$noop_activity
+               ;; Split on $ to get segments, last is fn name, rest is ns
+               (let [parts (str/split raw #"\$")]
+                 (if (> (count parts) 1)
+                   (let [ns-parts (butlast parts)
+                         fn-part  (last parts)
+                         ;; underscores in ns segments -> hyphens
+                         ns-str   (str/join "." (map #(str/replace % "_" "-") ns-parts))
+                         fn-str   (str/replace fn-part "_" "-")]
+                     (str ns-str "/" fn-str))
+                   ;; Single segment - no namespace
+                   (str/replace raw "_" "-")))
+               ;; Anonymous fn - generate a name
+               (str (gensym "activity-"))))))
 
 (defn make-registry
   "Create a new activity registry"
@@ -15,7 +39,7 @@
   (let [activity-name (or name
                           (if (var? f)
                             (str (symbol f))
-                            (str (gensym "activity-"))))
+                            (fn-name f)))
         resolved-fn (if (var? f) @f f)]
     (swap! registry assoc activity-name
            {:fn resolved-fn
@@ -32,7 +56,7 @@
 (defn ensure-registered! [registry f]
   (let [activity-name (if (var? f)
                         (str (symbol f))
-                        (str (symbol f)))]
+                        (fn-name f))]
     (when-not (contains? @registry activity-name)
       (register-activity! registry f :name activity-name))
     activity-name))
