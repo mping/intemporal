@@ -1,10 +1,8 @@
 (ns intemporal.doc
-  (:require [intemporal.store :as s]
-            [intemporal.workflow :as w]
+  (:require [intemporal.core :as intemporal]
             [promesa.core :as p]
             [hiccups.runtime :as hiccupsrt])
-  (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]
-                   [hiccups.core :as hiccups :refer [html]]))
+  (:require-macros [hiccups.core :as hiccups :refer [html]]))
 ;;;;
 ;; main code
 
@@ -12,7 +10,7 @@
   [a :nested])
 
 (defn activity-fn [a]
-  (let [f (stub-function nested-fn)]
+  #_(let [f (intemporal/stub nested-fn)]
     (f :sub)))
 
 (defprotocol MyActivities
@@ -22,8 +20,8 @@
   MyActivities
   (foo [this a] (println "record was called:" ) [a :child]))
 
-(defn-workflow my-workflow [i]
-  (let [sf (stub-function activity-fn)
+(defn my-workflow [i]
+  (let [sf (intemporal/stub activity-fn)
         pr (stub-protocol MyActivities {})
 
         sres (sf [1])
@@ -34,8 +32,6 @@
             v1
             v2))))
 
-(def mstore (s/make-store))
-(def stop-worker (w/start-worker! mstore {:protocols {`MyActivities (->MyActivitiesImpl)}}))
 ;;;;
 ;; workflow registration
 
@@ -64,11 +60,9 @@
                  tbody])]
     (set-html! id tbl)))
 
-
-(defn render-tables! [the-store]
-  (let [tasks (s/list-tasks mstore)
-        events (->> (s/list-events mstore)
-                    (sort-by :id))]
+(defn render-tables! [engine wf-id]
+  (let [history (intemporal/get-workflow-history (:store engine) wf-id)]
+    #_#_#_#_
     (render-table! "tasks" tasks)
     (render-table! "events" events)
     (js/console.table (clj->js tasks))
@@ -77,15 +71,15 @@
 ;;;;
 ;; bootstrap
 (defn init []
-  (let [res (w/with-env {:store mstore}
-               (my-workflow 1))]
+  (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)
+        res    (intemporal/start-workflow engine my-workflow [1] :workflow-id "my-wflow")]
 
     ;; set-results!
     (-> res
         (p/then (fn [r]
-                  (js/console.log "res" r)
+                  (js/console.log "res" (clj->js r))
                   (set-results! (prn-str r))
-                  (render-tables! mstore)))
+                  (render-tables! engine "my-wflow")))
 
         (p/catch (fn [r]
                    (js/console.error "error" r)

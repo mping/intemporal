@@ -1,7 +1,7 @@
 (ns intemporal.tests.async-test
-  (:require [intemporal.core :as intemporal]
-            [cljs.test :as t :refer [deftest is testing]]
+  (:require [cljs.test :as t :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]
+            [intemporal.core :as intemporal]
             [intemporal.tests.utils :as tu])
   (:require-macros [intemporal.tests.utils :refer [with-result]]))
 

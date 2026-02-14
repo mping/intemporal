@@ -35,9 +35,9 @@ if(cljs.core.truth_(temp__5823__auto__)){
 var pred_fn = temp__5823__auto__;
 return (pred_fn.cljs$core$IFn$_invoke$arity$1 ? pred_fn.cljs$core$IFn$_invoke$arity$1(super_val) : pred_fn.call(null,super_val));
 } else {
-var G__43302 = sub_val;
-var G__43302__$1 = (((G__43302 instanceof cljs.core.Keyword))?G__43302.fqn:null);
-switch (G__43302__$1) {
+var G__28967 = sub_val;
+var G__28967__$1 = (((G__28967 instanceof cljs.core.Keyword))?G__28967.fqn:null);
+switch (G__28967__$1) {
 case "submap/nx":
 return cljs.core.keyword_identical_QMARK_(super_val,new cljs.core.Keyword("taoensso.truss","nx","taoensso.truss/nx",1464090303));
 
@@ -79,7 +79,8 @@ taoensso.truss._STAR_ctx_STAR_ = null;
  * Private, don't use.
  */
 taoensso.truss.ex_info_STAR_ = (function taoensso$truss$ex_info_STAR_(ns,coords,msg,data_map,cause){
-var data_map__$1 = (cljs.core.truth_(coords)?cljs.core.conj.cljs$core$IFn$_invoke$arity$2(new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"ns","ns",441598760),ns,new cljs.core.Keyword(null,"coords","coords",-599429112),coords], null),data_map):cljs.core.conj.cljs$core$IFn$_invoke$arity$2(new cljs.core.PersistentArrayMap(null, 1, [new cljs.core.Keyword(null,"ns","ns",441598760),ns], null),data_map));
+var data_map__$1 = (((ns == null))?data_map:(cljs.core.truth_(coords)?cljs.core.conj.cljs$core$IFn$_invoke$arity$2(new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"ns","ns",441598760),ns,new cljs.core.Keyword(null,"coords","coords",-599429112),coords], null),data_map):cljs.core.conj.cljs$core$IFn$_invoke$arity$2(new cljs.core.PersistentArrayMap(null, 1, [new cljs.core.Keyword(null,"ns","ns",441598760),ns], null),data_map)
+));
 var data_map__$2 = (function (){var temp__5823__auto__ = taoensso.truss._STAR_ctx_STAR_;
 if(cljs.core.truth_(temp__5823__auto__)){
 var ctx = temp__5823__auto__;
@@ -116,12 +117,18 @@ if((update_map_or_fn == null)){
 return old_ctx;
 } else {
 if(cljs.core.map_QMARK_(update_map_or_fn)){
-return cljs.core.conj.cljs$core$IFn$_invoke$arity$2(old_ctx,update_map_or_fn);
+return cljs.core.conj.cljs$core$IFn$_invoke$arity$2((function (){var or__5025__auto__ = old_ctx;
+if(cljs.core.truth_(or__5025__auto__)){
+return or__5025__auto__;
+} else {
+return cljs.core.PersistentArrayMap.EMPTY;
+}
+})(),update_map_or_fn);
 } else {
 if(cljs.core.ifn_QMARK_(update_map_or_fn)){
 return (update_map_or_fn.cljs$core$IFn$_invoke$arity$1 ? update_map_or_fn.cljs$core$IFn$_invoke$arity$1(old_ctx) : update_map_or_fn.call(null,old_ctx));
 } else {
-return taoensso.truss.unexpected_arg_BANG__STAR_("taoensso.truss",new cljs.core.PersistentVector(null, 2, 5, cljs.core.PersistentVector.EMPTY_NODE, [194,5], null),update_map_or_fn,new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"param","param",2013631823),new cljs.core.Symbol(null,"update-map-or-fn","update-map-or-fn",1067081399,null),new cljs.core.Keyword(null,"context","context",-830191113),new cljs.core.Symbol("taoensso.truss","update-ctx","taoensso.truss/update-ctx",2138642429,null),new cljs.core.Keyword(null,"expected","expected",1583670997),new cljs.core.PersistentHashSet(null, new cljs.core.PersistentArrayMap(null, 3, [null,"null",new cljs.core.Symbol(null,"map","map",-1282745308,null),"null",new cljs.core.Symbol(null,"fn","fn",465265323,null),"null"], null), null)], null));
+return taoensso.truss.unexpected_arg_BANG__STAR_("taoensso.truss",new cljs.core.PersistentVector(null, 2, 5, cljs.core.PersistentVector.EMPTY_NODE, [195,5], null),update_map_or_fn,new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"param","param",2013631823),new cljs.core.Symbol(null,"update-map-or-fn","update-map-or-fn",1067081399,null),new cljs.core.Keyword(null,"context","context",-830191113),new cljs.core.Symbol("taoensso.truss","update-ctx","taoensso.truss/update-ctx",2138642429,null),new cljs.core.Keyword(null,"expected","expected",1583670997),new cljs.core.PersistentHashSet(null, new cljs.core.PersistentArrayMap(null, 3, [null,"null",new cljs.core.Symbol(null,"map","map",-1282745308,null),"null",new cljs.core.Symbol(null,"fn","fn",465265323,null),"null"], null), null)], null));
 
 }
 }
@@ -144,8 +151,8 @@ while(true){
 var temp__5823__auto__ = cljs.core.ex_cause(error);
 if(cljs.core.truth_(temp__5823__auto__)){
 var cause = temp__5823__auto__;
-var G__43555 = cause;
-error = G__43555;
+var G__29702 = cause;
+error = G__29702;
 continue;
 } else {
 return error;
@@ -195,8 +202,8 @@ return null;
  *   Returns vector cause chain of given platform error.
  */
 taoensso.truss.ex_chain = (function taoensso$truss$ex_chain(var_args){
-var G__43328 = arguments.length;
-switch (G__43328) {
+var G__29025 = arguments.length;
+switch (G__29025) {
 case 1:
 return taoensso.truss.ex_chain.cljs$core$IFn$_invoke$arity$1((arguments[(0)]));
 
@@ -224,10 +231,10 @@ while(true){
 var temp__5823__auto__ = cljs.core.ex_cause(error);
 if(cljs.core.truth_(temp__5823__auto__)){
 var cause = temp__5823__auto__;
-var G__43558 = cljs.core.conj.cljs$core$IFn$_invoke$arity$2(acc,(xf.cljs$core$IFn$_invoke$arity$1 ? xf.cljs$core$IFn$_invoke$arity$1(cause) : xf.call(null,cause)));
-var G__43559 = cause;
-acc = G__43558;
-error = G__43559;
+var G__29732 = cljs.core.conj.cljs$core$IFn$_invoke$arity$2(acc,(xf.cljs$core$IFn$_invoke$arity$1 ? xf.cljs$core$IFn$_invoke$arity$1(cause) : xf.call(null,cause)));
+var G__29733 = cause;
+acc = G__29732;
+error = G__29733;
 continue;
 } else {
 return acc;
@@ -289,8 +296,8 @@ return null;
  *   This is a low-level util, see also `throws`, `throws?`.
  */
 taoensso.truss.matching_error = (function taoensso$truss$matching_error(var_args){
-var G__43352 = arguments.length;
-switch (G__43352) {
+var G__29188 = arguments.length;
+switch (G__29188) {
 case 1:
 return taoensso.truss.matching_error.cljs$core$IFn$_invoke$arity$1((arguments[(0)]));
 
@@ -314,9 +321,9 @@ return error;
 }));
 
 (taoensso.truss.matching_error.cljs$core$IFn$_invoke$arity$2 = (function (kind,error){
-var temp__5825__auto__ = (((kind instanceof cljs.core.Keyword))?(function (){var G__43361 = kind;
-var G__43361__$1 = (((G__43361 instanceof cljs.core.Keyword))?G__43361.fqn:null);
-switch (G__43361__$1) {
+var temp__5825__auto__ = (((kind instanceof cljs.core.Keyword))?(function (){var G__29198 = kind;
+var G__29198__$1 = (((G__29198 instanceof cljs.core.Keyword))?G__29198.fqn:null);
+switch (G__29198__$1) {
 case "default":
 case "all-but-critical":
 return (!((error == null)));
@@ -336,11 +343,11 @@ return (!((error == null)));
 
 break;
 default:
-throw taoensso.truss.ex_info_STAR_("taoensso.truss",new cljs.core.PersistentVector(null, 2, 5, cljs.core.PersistentVector.EMPTY_NODE, [405,21], null),"Unexpected Truss `matching-error` `kind` keyword",new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"given","given",716253602),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),kind,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(kind)], null),new cljs.core.Keyword(null,"expected","expected",1583670997),new cljs.core.PersistentHashSet(null, new cljs.core.PersistentArrayMap(null, 4, [new cljs.core.Keyword(null,"default","default",-1987822328),"null",new cljs.core.Keyword(null,"all","all",892129742),"null",new cljs.core.Keyword(null,"common","common",-1822281391),"null",new cljs.core.Keyword(null,"ex-info","ex-info",2114560529),"null"], null), null)], null),null);
+throw taoensso.truss.ex_info_STAR_("taoensso.truss",new cljs.core.PersistentVector(null, 2, 5, cljs.core.PersistentVector.EMPTY_NODE, [406,21], null),"Unexpected Truss `matching-error` `kind` keyword",new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"given","given",716253602),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),kind,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(kind)], null),new cljs.core.Keyword(null,"expected","expected",1583670997),new cljs.core.PersistentHashSet(null, new cljs.core.PersistentArrayMap(null, 4, [new cljs.core.Keyword(null,"default","default",-1987822328),"null",new cljs.core.Keyword(null,"all","all",892129742),"null",new cljs.core.Keyword(null,"common","common",-1822281391),"null",new cljs.core.Keyword(null,"ex-info","ex-info",2114560529),"null"], null), null)], null),null);
 
 }
-})():(cljs.core.truth_(taoensso.truss.error_QMARK_(kind))?cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(kind,error):((cljs.core.fn_QMARK_(kind))?(kind.cljs$core$IFn$_invoke$arity$1 ? kind.cljs$core$IFn$_invoke$arity$1(error) : kind.call(null,error)):((cljs.core.set_QMARK_(kind))?taoensso.truss.impl.rsome((function (p1__43343_SHARP_){
-return taoensso.truss.matching_error.cljs$core$IFn$_invoke$arity$2(p1__43343_SHARP_,error);
+})():(cljs.core.truth_(taoensso.truss.error_QMARK_(kind))?cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(kind,error):((cljs.core.fn_QMARK_(kind))?(kind.cljs$core$IFn$_invoke$arity$1 ? kind.cljs$core$IFn$_invoke$arity$1(error) : kind.call(null,error)):((cljs.core.set_QMARK_(kind))?taoensso.truss.impl.rsome((function (p1__29172_SHARP_){
+return taoensso.truss.matching_error.cljs$core$IFn$_invoke$arity$2(p1__29172_SHARP_,error);
 }),kind):(error instanceof kind)
 ))));
 if(cljs.core.truth_(temp__5825__auto__)){
@@ -358,8 +365,8 @@ if((pattern == null)){
 return true;
 } else {
 if(cljs.core.set_QMARK_(pattern)){
-return taoensso.truss.impl.rsome((function (p1__43347_SHARP_){
-return taoensso.truss.matching_error.cljs$core$IFn$_invoke$arity$3(kind,p1__43347_SHARP_,error);
+return taoensso.truss.impl.rsome((function (p1__29175_SHARP_){
+return taoensso.truss.matching_error.cljs$core$IFn$_invoke$arity$3(kind,p1__29175_SHARP_,error);
 }),pattern);
 } else {
 if(typeof pattern === 'string'){
@@ -377,7 +384,7 @@ return taoensso.truss.submap_QMARK_(data,pattern);
 return null;
 }
 } else {
-return taoensso.truss.unexpected_arg_BANG__STAR_("taoensso.truss",new cljs.core.PersistentVector(null, 2, 5, cljs.core.PersistentVector.EMPTY_NODE, [427,17], null),pattern,new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"param","param",2013631823),new cljs.core.Symbol(null,"pattern","pattern",1882666950,null),new cljs.core.Keyword(null,"context","context",-830191113),new cljs.core.Symbol("taoensso.truss","matching-error","taoensso.truss/matching-error",557680092,null),new cljs.core.Keyword(null,"expected","expected",1583670997),new cljs.core.PersistentHashSet(null, new cljs.core.PersistentArrayMap(null, 5, [null,"null",new cljs.core.Symbol(null,"set","set",1945134081,null),"null",new cljs.core.Symbol(null,"map","map",-1282745308,null),"null",new cljs.core.Symbol(null,"re-pattern","re-pattern",1047705161,null),"null",new cljs.core.Symbol(null,"string","string",-349010059,null),"null"], null), null)], null));
+return taoensso.truss.unexpected_arg_BANG__STAR_("taoensso.truss",new cljs.core.PersistentVector(null, 2, 5, cljs.core.PersistentVector.EMPTY_NODE, [428,17], null),pattern,new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"param","param",2013631823),new cljs.core.Symbol(null,"pattern","pattern",1882666950,null),new cljs.core.Keyword(null,"context","context",-830191113),new cljs.core.Symbol("taoensso.truss","matching-error","taoensso.truss/matching-error",557680092,null),new cljs.core.Keyword(null,"expected","expected",1583670997),new cljs.core.PersistentHashSet(null, new cljs.core.PersistentArrayMap(null, 5, [null,"null",new cljs.core.Symbol(null,"set","set",1945134081,null),"null",new cljs.core.Symbol(null,"map","map",-1282745308,null),"null",new cljs.core.Symbol(null,"re-pattern","re-pattern",1047705161,null),"null",new cljs.core.Symbol(null,"string","string",-349010059,null),"null"], null), null)], null));
 
 }
 }
@@ -404,11 +411,11 @@ return null;
 
 (taoensso.truss.matching_error.cljs$lang$maxFixedArity = 3);
 
-var get_default_error_fn_43574 = (function (base_data){
+var get_default_error_fn_29781 = (function (base_data){
 var msg = cljs.core.get.cljs$core$IFn$_invoke$arity$3(base_data,new cljs.core.Keyword("error","msg","error/msg",-1549923468),"Error thrown during reduction");
 var base_data__$1 = cljs.core.dissoc.cljs$core$IFn$_invoke$arity$2(base_data,new cljs.core.Keyword("error","msg","error/msg",-1549923468));
 return (function taoensso$truss$default_error_fn(data,cause){
-throw taoensso.truss.ex_info_STAR_("taoensso.truss",new cljs.core.PersistentVector(null, 2, 5, cljs.core.PersistentVector.EMPTY_NODE, [470,20], null),msg,cljs.core.conj.cljs$core$IFn$_invoke$arity$2(base_data__$1,data),cause);
+throw taoensso.truss.ex_info_STAR_(null,null,msg,cljs.core.conj.cljs$core$IFn$_invoke$arity$2(base_data__$1,data),cause);
 });
 });
 /**
@@ -422,8 +429,8 @@ throw taoensso.truss.ex_info_STAR_("taoensso.truss",new cljs.core.PersistentVect
  *  See also `catching-xform`.
  */
 taoensso.truss.catching_rf = (function taoensso$truss$catching_rf(var_args){
-var G__43391 = arguments.length;
-switch (G__43391) {
+var G__29301 = arguments.length;
+switch (G__29301) {
 case 1:
 return taoensso.truss.catching_rf.cljs$core$IFn$_invoke$arity$1((arguments[(0)]));
 
@@ -439,40 +446,40 @@ throw (new Error(["Invalid arity: ",cljs.core.str.cljs$core$IFn$_invoke$arity$1(
 });
 
 (taoensso.truss.catching_rf.cljs$core$IFn$_invoke$arity$1 = (function (rf){
-return taoensso.truss.catching_rf.cljs$core$IFn$_invoke$arity$2(get_default_error_fn_43574(new cljs.core.PersistentArrayMap(null, 1, [new cljs.core.Keyword(null,"rf","rf",2002878243),rf], null)),rf);
+return taoensso.truss.catching_rf.cljs$core$IFn$_invoke$arity$2(get_default_error_fn_29781(new cljs.core.PersistentArrayMap(null, 1, [new cljs.core.Keyword(null,"rf","rf",2002878243),rf], null)),rf);
 }));
 
 (taoensso.truss.catching_rf.cljs$core$IFn$_invoke$arity$2 = (function (error_fn,rf){
-var error_fn__$1 = ((cljs.core.map_QMARK_(error_fn))?get_default_error_fn_43574(error_fn):error_fn);
+var error_fn__$1 = ((cljs.core.map_QMARK_(error_fn))?get_default_error_fn_29781(error_fn):error_fn);
 return (function() {
 var taoensso$truss$catching_rf = null;
 var taoensso$truss$catching_rf__0 = (function (){
 try{return (rf.cljs$core$IFn$_invoke$arity$0 ? rf.cljs$core$IFn$_invoke$arity$0() : rf.call(null));
-}catch (e43407){var t = e43407;
-var G__43408 = new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"rf","rf",2002878243),rf,new cljs.core.Keyword(null,"call","call",-519999866),cljs.core.list(new cljs.core.Symbol(null,"rf","rf",-651557526,null))], null);
-var G__43409 = t;
-return (error_fn__$1.cljs$core$IFn$_invoke$arity$2 ? error_fn__$1.cljs$core$IFn$_invoke$arity$2(G__43408,G__43409) : error_fn__$1.call(null,G__43408,G__43409));
+}catch (e29328){var t = e29328;
+var G__29332 = new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"rf","rf",2002878243),rf,new cljs.core.Keyword(null,"call","call",-519999866),cljs.core.list(new cljs.core.Symbol(null,"rf","rf",-651557526,null))], null);
+var G__29333 = t;
+return (error_fn__$1.cljs$core$IFn$_invoke$arity$2 ? error_fn__$1.cljs$core$IFn$_invoke$arity$2(G__29332,G__29333) : error_fn__$1.call(null,G__29332,G__29333));
 }});
 var taoensso$truss$catching_rf__1 = (function (acc){
 try{return (rf.cljs$core$IFn$_invoke$arity$1 ? rf.cljs$core$IFn$_invoke$arity$1(acc) : rf.call(null,acc));
-}catch (e43410){var t = e43410;
-var G__43411 = new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"rf","rf",2002878243),rf,new cljs.core.Keyword(null,"call","call",-519999866),cljs.core.list(new cljs.core.Symbol(null,"rf","rf",-651557526,null),new cljs.core.Symbol(null,"acc","acc",-1815869457,null)),new cljs.core.Keyword(null,"args","args",1315556576),new cljs.core.PersistentArrayMap(null, 1, [new cljs.core.Keyword(null,"acc","acc",838566312),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),acc,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(acc)], null)], null)], null);
-var G__43412 = t;
-return (error_fn__$1.cljs$core$IFn$_invoke$arity$2 ? error_fn__$1.cljs$core$IFn$_invoke$arity$2(G__43411,G__43412) : error_fn__$1.call(null,G__43411,G__43412));
+}catch (e29345){var t = e29345;
+var G__29349 = new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"rf","rf",2002878243),rf,new cljs.core.Keyword(null,"call","call",-519999866),cljs.core.list(new cljs.core.Symbol(null,"rf","rf",-651557526,null),new cljs.core.Symbol(null,"acc","acc",-1815869457,null)),new cljs.core.Keyword(null,"args","args",1315556576),new cljs.core.PersistentArrayMap(null, 1, [new cljs.core.Keyword(null,"acc","acc",838566312),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),acc,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(acc)], null)], null)], null);
+var G__29350 = t;
+return (error_fn__$1.cljs$core$IFn$_invoke$arity$2 ? error_fn__$1.cljs$core$IFn$_invoke$arity$2(G__29349,G__29350) : error_fn__$1.call(null,G__29349,G__29350));
 }});
 var taoensso$truss$catching_rf__2 = (function (acc,in$){
 try{return (rf.cljs$core$IFn$_invoke$arity$2 ? rf.cljs$core$IFn$_invoke$arity$2(acc,in$) : rf.call(null,acc,in$));
-}catch (e43413){var t = e43413;
-var G__43415 = new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"rf","rf",2002878243),rf,new cljs.core.Keyword(null,"call","call",-519999866),cljs.core.list(new cljs.core.Symbol(null,"rf","rf",-651557526,null),new cljs.core.Symbol(null,"acc","acc",-1815869457,null),new cljs.core.Symbol(null,"in","in",109346662,null)),new cljs.core.Keyword(null,"args","args",1315556576),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"acc","acc",838566312),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),acc,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(acc)], null),new cljs.core.Keyword(null,"in","in",-1531184865),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),in$,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(in$)], null)], null)], null);
-var G__43416 = t;
-return (error_fn__$1.cljs$core$IFn$_invoke$arity$2 ? error_fn__$1.cljs$core$IFn$_invoke$arity$2(G__43415,G__43416) : error_fn__$1.call(null,G__43415,G__43416));
+}catch (e29364){var t = e29364;
+var G__29368 = new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"rf","rf",2002878243),rf,new cljs.core.Keyword(null,"call","call",-519999866),cljs.core.list(new cljs.core.Symbol(null,"rf","rf",-651557526,null),new cljs.core.Symbol(null,"acc","acc",-1815869457,null),new cljs.core.Symbol(null,"in","in",109346662,null)),new cljs.core.Keyword(null,"args","args",1315556576),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"acc","acc",838566312),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),acc,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(acc)], null),new cljs.core.Keyword(null,"in","in",-1531184865),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),in$,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(in$)], null)], null)], null);
+var G__29369 = t;
+return (error_fn__$1.cljs$core$IFn$_invoke$arity$2 ? error_fn__$1.cljs$core$IFn$_invoke$arity$2(G__29368,G__29369) : error_fn__$1.call(null,G__29368,G__29369));
 }});
 var taoensso$truss$catching_rf__3 = (function (acc,k,v){
 try{return (rf.cljs$core$IFn$_invoke$arity$3 ? rf.cljs$core$IFn$_invoke$arity$3(acc,k,v) : rf.call(null,acc,k,v));
-}catch (e43417){var t = e43417;
-var G__43419 = new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"rf","rf",2002878243),rf,new cljs.core.Keyword(null,"call","call",-519999866),cljs.core.list(new cljs.core.Symbol(null,"rf","rf",-651557526,null),new cljs.core.Symbol(null,"acc","acc",-1815869457,null),new cljs.core.Symbol(null,"k","k",-505765866,null),new cljs.core.Symbol(null,"v","v",1661996586,null)),new cljs.core.Keyword(null,"args","args",1315556576),new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"acc","acc",838566312),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),acc,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(acc)], null),new cljs.core.Keyword(null,"k","k",-2146297393),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),k,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(k)], null),new cljs.core.Keyword(null,"v","v",21465059),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),v,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(v)], null)], null)], null);
-var G__43420 = t;
-return (error_fn__$1.cljs$core$IFn$_invoke$arity$2 ? error_fn__$1.cljs$core$IFn$_invoke$arity$2(G__43419,G__43420) : error_fn__$1.call(null,G__43419,G__43420));
+}catch (e29374){var t = e29374;
+var G__29375 = new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"rf","rf",2002878243),rf,new cljs.core.Keyword(null,"call","call",-519999866),cljs.core.list(new cljs.core.Symbol(null,"rf","rf",-651557526,null),new cljs.core.Symbol(null,"acc","acc",-1815869457,null),new cljs.core.Symbol(null,"k","k",-505765866,null),new cljs.core.Symbol(null,"v","v",1661996586,null)),new cljs.core.Keyword(null,"args","args",1315556576),new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"acc","acc",838566312),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),acc,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(acc)], null),new cljs.core.Keyword(null,"k","k",-2146297393),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),k,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(k)], null),new cljs.core.Keyword(null,"v","v",21465059),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"value","value",305978217),v,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(v)], null)], null)], null);
+var G__29376 = t;
+return (error_fn__$1.cljs$core$IFn$_invoke$arity$2 ? error_fn__$1.cljs$core$IFn$_invoke$arity$2(G__29375,G__29376) : error_fn__$1.call(null,G__29375,G__29376));
 }});
 taoensso$truss$catching_rf = function(acc,k,v){
 switch(arguments.length){
@@ -509,8 +516,8 @@ return taoensso$truss$catching_rf;
  *    <...>)
  */
 taoensso.truss.catching_xform = (function taoensso$truss$catching_xform(var_args){
-var G__43430 = arguments.length;
-switch (G__43430) {
+var G__29395 = arguments.length;
+switch (G__29395) {
 case 2:
 return taoensso.truss.catching_xform.cljs$core$IFn$_invoke$arity$2((arguments[(0)]),(arguments[(1)]));
 
@@ -538,13 +545,13 @@ return cljs.core.comp.cljs$core$IFn$_invoke$arity$2(taoensso.truss.catching_rf,x
 (taoensso.truss.catching_xform.cljs$lang$maxFixedArity = 2);
 
 taoensso.truss.sys_newline = "\n";
-var legacy_ex_data_QMARK__43582 = false;
+var legacy_ex_data_QMARK__29853 = false;
 /**
  * Returns an appropriate `truss/ex-info` for given failed assertion info map.
  */
 taoensso.truss.failed_assertion_ex_info = (function taoensso$truss$failed_assertion_ex_info(var_args){
-var G__43445 = arguments.length;
-switch (G__43445) {
+var G__29442 = arguments.length;
+switch (G__29442) {
 case 1:
 return taoensso.truss.failed_assertion_ex_info.cljs$core$IFn$_invoke$arity$1((arguments[(0)]));
 
@@ -560,26 +567,26 @@ throw (new Error(["Invalid arity: ",cljs.core.str.cljs$core$IFn$_invoke$arity$1(
 });
 
 (taoensso.truss.failed_assertion_ex_info.cljs$core$IFn$_invoke$arity$1 = (function (failed_assertion_info){
-return taoensso.truss.failed_assertion_ex_info.cljs$core$IFn$_invoke$arity$2(legacy_ex_data_QMARK__43582,failed_assertion_info);
+return taoensso.truss.failed_assertion_ex_info.cljs$core$IFn$_invoke$arity$2(legacy_ex_data_QMARK__29853,failed_assertion_info);
 }));
 
 (taoensso.truss.failed_assertion_ex_info.cljs$core$IFn$_invoke$arity$2 = (function (legacy_ex_data_QMARK___$1,failed_assertion_info){
-var map__43462 = failed_assertion_info;
-var map__43462__$1 = cljs.core.__destructure_map(map__43462);
-var inst = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43462__$1,new cljs.core.Keyword(null,"inst","inst",645962501));
-var ns = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43462__$1,new cljs.core.Keyword(null,"ns","ns",441598760));
-var coords = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43462__$1,new cljs.core.Keyword(null,"coords","coords",-599429112));
-var pred = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43462__$1,new cljs.core.Keyword(null,"pred","pred",1927423397));
-var arg_form = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43462__$1,new cljs.core.Keyword(null,"arg-form","arg-form",1400564013));
-var arg_val = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43462__$1,new cljs.core.Keyword(null,"arg-val","arg-val",1802419280));
-var data = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43462__$1,new cljs.core.Keyword(null,"data","data",-232669377));
-var error = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43462__$1,new cljs.core.Keyword(null,"error","error",-978969032));
+var map__29454 = failed_assertion_info;
+var map__29454__$1 = cljs.core.__destructure_map(map__29454);
+var inst = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29454__$1,new cljs.core.Keyword(null,"inst","inst",645962501));
+var ns = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29454__$1,new cljs.core.Keyword(null,"ns","ns",441598760));
+var coords = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29454__$1,new cljs.core.Keyword(null,"coords","coords",-599429112));
+var pred = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29454__$1,new cljs.core.Keyword(null,"pred","pred",1927423397));
+var arg_form = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29454__$1,new cljs.core.Keyword(null,"arg-form","arg-form",1400564013));
+var arg_val = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29454__$1,new cljs.core.Keyword(null,"arg-val","arg-val",1802419280));
+var data = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29454__$1,new cljs.core.Keyword(null,"data","data",-232669377));
+var error = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29454__$1,new cljs.core.Keyword(null,"error","error",-978969032));
 var undefined_arg_QMARK_ = cljs.core.keyword_identical_QMARK_(arg_val,new cljs.core.Keyword("truss","exception","truss/exception",1369199181));
 var coords_str = (function (){var temp__5825__auto__ = coords;
 if(cljs.core.truth_(temp__5825__auto__)){
-var vec__43475 = temp__5825__auto__;
-var line = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__43475,(0),null);
-var column = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__43475,(1),null);
+var vec__29471 = temp__5825__auto__;
+var line = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__29471,(0),null);
+var column = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__29471,(1),null);
 if(cljs.core.truth_(column)){
 return ["[",cljs.core.str.cljs$core$IFn$_invoke$arity$1(line),",",cljs.core.str.cljs$core$IFn$_invoke$arity$1(column),"]"].join('');
 } else {
@@ -597,9 +604,9 @@ return [msg,taoensso.truss.sys_newline,"Error evaluating arg: ",cljs.core.str.cl
 return [msg,taoensso.truss.sys_newline,"Error evaluating pred: ",cljs.core.str.cljs$core$IFn$_invoke$arity$1(error_msg)].join('');
 }
 })():msg);
-return taoensso.truss.ex_info_STAR_("taoensso.truss",new cljs.core.PersistentVector(null, 2, 5, cljs.core.PersistentVector.EMPTY_NODE, [547,8], null),msg__$1,(cljs.core.truth_(legacy_ex_data_QMARK___$1)?new cljs.core.PersistentArrayMap(null, 8, [new cljs.core.Keyword(null,"dt","dt",-368444759),(new Date()),new cljs.core.Keyword(null,"loc","loc",-584284901),(function (){var vec__43482 = coords;
-var line = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__43482,(0),null);
-var column = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__43482,(1),null);
+return taoensso.truss.ex_info_STAR_(null,null,msg__$1,(cljs.core.truth_(legacy_ex_data_QMARK___$1)?new cljs.core.PersistentArrayMap(null, 8, [new cljs.core.Keyword(null,"dt","dt",-368444759),(new Date()),new cljs.core.Keyword(null,"loc","loc",-584284901),(function (){var vec__29490 = coords;
+var line = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__29490,(0),null);
+var column = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__29490,(1),null);
 return new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"ns","ns",441598760),ns,new cljs.core.Keyword(null,"line","line",212345235),line,new cljs.core.Keyword(null,"column","column",2078222095),column], null);
 })(),new cljs.core.Keyword(null,"msg","msg",-1386103444),msg__$1,new cljs.core.Keyword(null,"pred","pred",1927423397),pred,new cljs.core.Keyword(null,"data","data",-232669377),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"arg","arg",-1747261837),data,new cljs.core.Keyword(null,"dynamic","dynamic",704819571),taoensso.truss._STAR_ctx_STAR_], null),new cljs.core.Keyword(null,"env","env",-1815813235),new cljs.core.PersistentArrayMap(null, 1, [new cljs.core.Keyword(null,"*assert*","*assert*",-160895053),cljs.core._STAR_assert_STAR_], null),new cljs.core.Keyword(null,"error","error",-978969032),error,new cljs.core.Keyword(null,"arg","arg",-1747261837),new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"form","form",-1624062471),arg_form,new cljs.core.Keyword(null,"value","value",305978217),arg_val,new cljs.core.Keyword(null,"type","type",1174270348),((undefined_arg_QMARK_)?new cljs.core.Keyword("truss","exception","truss/exception",1369199181):cljs.core.type(arg_val))], null)], null):taoensso.truss.impl.assoc_some.cljs$core$IFn$_invoke$arity$2(new cljs.core.PersistentArrayMap(null, 4, [new cljs.core.Keyword(null,"inst","inst",645962501),(new Date()),new cljs.core.Keyword(null,"ns","ns",441598760),ns,new cljs.core.Keyword(null,"pred","pred",1927423397),pred,new cljs.core.Keyword(null,"arg","arg",-1747261837),new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"form","form",-1624062471),arg_form,new cljs.core.Keyword(null,"value","value",305978217),arg_val,new cljs.core.Keyword(null,"type","type",1174270348),((undefined_arg_QMARK_)?new cljs.core.Keyword("truss","exception","truss/exception",1369199181):cljs.core.type(arg_val))], null)], null),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"coords","coords",-599429112),coords,new cljs.core.Keyword(null,"data","data",-232669377),data], null))),error);
 }));
@@ -635,12 +642,12 @@ taoensso.truss.failed_assertion_BANG_ = (function taoensso$truss$failed_assertio
 var temp__5823__auto__ = taoensso.truss._STAR_failed_assertion_handler_STAR_;
 if(cljs.core.truth_(temp__5823__auto__)){
 var handler = temp__5823__auto__;
-var G__43488 = (function (){var undefined_arg_QMARK_ = (arg_val instanceof taoensso.truss.impl.ArgEvalError);
+var G__29554 = (function (){var undefined_arg_QMARK_ = (arg_val instanceof taoensso.truss.impl.ArgEvalError);
 return (new taoensso.truss.impl.FailedAssertionInfo(ns,(cljs.core.truth_(line)?(cljs.core.truth_(column)?new cljs.core.PersistentVector(null, 2, 5, cljs.core.PersistentVector.EMPTY_NODE, [line,column], null):new cljs.core.PersistentVector(null, 1, 5, cljs.core.PersistentVector.EMPTY_NODE, [line], null)):null),pred,arg_form,((undefined_arg_QMARK_)?new cljs.core.Keyword("truss","exception","truss/exception",1369199181):arg_val),(function (){var temp__5825__auto__ = data_fn;
 if(cljs.core.truth_(temp__5825__auto__)){
 var df = temp__5825__auto__;
 try{return (df.cljs$core$IFn$_invoke$arity$0 ? df.cljs$core$IFn$_invoke$arity$0() : df.call(null));
-}catch (e43491){var _ = e43491;
+}catch (e29557){var _ = e29557;
 return new cljs.core.Keyword("truss","exception","truss/exception",1369199181);
 }} else {
 return null;
@@ -648,7 +655,7 @@ return null;
 })(),(((error === taoensso.truss.impl.FalsePredError))?null:((undefined_arg_QMARK_)?error.ex:error
 )),null,null,null));
 })();
-return (handler.cljs$core$IFn$_invoke$arity$1 ? handler.cljs$core$IFn$_invoke$arity$1(G__43488) : handler.call(null,G__43488));
+return (handler.cljs$core$IFn$_invoke$arity$1 ? handler.cljs$core$IFn$_invoke$arity$1(G__29554) : handler.call(null,G__29554));
 } else {
 return arg_val;
 }
@@ -660,19 +667,19 @@ return arg_val;
 taoensso.truss.legacy_error_fn = (function taoensso$truss$legacy_error_fn(f){
 if(cljs.core.truth_(f)){
 return (function (failed_assertion_info){
-var G__43509 = (new cljs.core.Delay((function (){
-var map__43511 = failed_assertion_info;
-var map__43511__$1 = cljs.core.__destructure_map(map__43511);
-var ns = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43511__$1,new cljs.core.Keyword(null,"ns","ns",441598760));
-var coords = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43511__$1,new cljs.core.Keyword(null,"coords","coords",-599429112));
-var pred = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43511__$1,new cljs.core.Keyword(null,"pred","pred",1927423397));
-var arg_form = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43511__$1,new cljs.core.Keyword(null,"arg-form","arg-form",1400564013));
-var arg_val = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43511__$1,new cljs.core.Keyword(null,"arg-val","arg-val",1802419280));
-var data = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43511__$1,new cljs.core.Keyword(null,"data","data",-232669377));
-var error = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__43511__$1,new cljs.core.Keyword(null,"error","error",-978969032));
-var vec__43513 = coords;
-var line = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__43513,(0),null);
-var column = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__43513,(1),null);
+var G__29581 = (new cljs.core.Delay((function (){
+var map__29588 = failed_assertion_info;
+var map__29588__$1 = cljs.core.__destructure_map(map__29588);
+var ns = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29588__$1,new cljs.core.Keyword(null,"ns","ns",441598760));
+var coords = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29588__$1,new cljs.core.Keyword(null,"coords","coords",-599429112));
+var pred = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29588__$1,new cljs.core.Keyword(null,"pred","pred",1927423397));
+var arg_form = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29588__$1,new cljs.core.Keyword(null,"arg-form","arg-form",1400564013));
+var arg_val = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29588__$1,new cljs.core.Keyword(null,"arg-val","arg-val",1802419280));
+var data = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29588__$1,new cljs.core.Keyword(null,"data","data",-232669377));
+var error = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__29588__$1,new cljs.core.Keyword(null,"error","error",-978969032));
+var vec__29589 = coords;
+var line = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__29589,(0),null);
+var column = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__29589,(1),null);
 var msg_ = (new cljs.core.Delay((function (){
 var msg = ["Invariant failed at ",cljs.core.str.cljs$core$IFn$_invoke$arity$1(ns),(cljs.core.truth_(line)?["[",cljs.core.str.cljs$core$IFn$_invoke$arity$1(line),(cljs.core.truth_(column)?[",",cljs.core.str.cljs$core$IFn$_invoke$arity$1(column)].join(''):null),"]"].join(''):null),": ",cljs.core.str.cljs$core$IFn$_invoke$arity$1((new cljs.core.List(null,pred,(new cljs.core.List(null,arg_form,null,(1),null)),(2),null)))].join('');
 if(cljs.core.truth_(error)){
@@ -688,7 +695,7 @@ return msg;
 }),null));
 return taoensso.truss.impl.assoc_some.cljs$core$IFn$_invoke$arity$2(new cljs.core.PersistentArrayMap(null, 6, [new cljs.core.Keyword(null,"msg_","msg_",-1925147000),msg_,new cljs.core.Keyword(null,"dt","dt",-368444759),(new Date()),new cljs.core.Keyword(null,"pred","pred",1927423397),pred,new cljs.core.Keyword(null,"arg","arg",-1747261837),new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"form","form",-1624062471),arg_form,new cljs.core.Keyword(null,"value","value",305978217),arg_val,new cljs.core.Keyword(null,"type","type",1174270348),cljs.core.type(arg_val)], null),new cljs.core.Keyword(null,"env","env",-1815813235),new cljs.core.PersistentArrayMap(null, 1, [new cljs.core.Keyword(null,"*assert*","*assert*",-160895053),cljs.core._STAR_assert_STAR_], null),new cljs.core.Keyword(null,"loc","loc",-584284901),new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"ns","ns",441598760),ns,new cljs.core.Keyword(null,"line","line",212345235),line,new cljs.core.Keyword(null,"column","column",2078222095),column], null)], null),new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"data","data",-232669377),taoensso.truss.impl.assoc_some.cljs$core$IFn$_invoke$arity$2(null,new cljs.core.PersistentArrayMap(null, 2, [new cljs.core.Keyword(null,"dynamic","dynamic",704819571),taoensso.truss._STAR_ctx_STAR_,new cljs.core.Keyword(null,"arg","arg",-1747261837),data], null)),new cljs.core.Keyword(null,"err","err",-2089457205),error], null));
 }),null));
-return (f.cljs$core$IFn$_invoke$arity$1 ? f.cljs$core$IFn$_invoke$arity$1(G__43509) : f.call(null,G__43509));
+return (f.cljs$core$IFn$_invoke$arity$1 ? f.cljs$core$IFn$_invoke$arity$1(G__29581) : f.call(null,G__29581));
 });
 } else {
 return null;

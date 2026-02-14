@@ -1,6 +1,7 @@
 (ns intemporal.internal.fns.start-workflow
   (:require [intemporal.internal.execution :as exec]
             [intemporal.internal.logging :as log]
+            [intemporal.internal.activity :as a]
             [intemporal.protocol :as p]
             [intemporal.utils :as utils]))
 
@@ -19,10 +20,13 @@
    Options:
    - :workflow-id - Custom workflow ID (default: random UUID)
    - :observer - IWorkflowObserver for monitoring
-   - :max-iterations - Maximum replay iterations (default: 1000)"
+   - :max-iterations - Maximum replay iterations (default: 1000)
+   - :protocols - Map of {Protocol Implementation} to register activities"
   [{:keys [store executor scheduler registry] :as engine} workflow-fn args
-   & {:keys [workflow-id observer max-iterations]
+   & {:keys [workflow-id observer max-iterations protocols]
       :or {max-iterations 1000}}]
+  (doseq [[proto impl] protocols]
+    (a/register-protocol-activities! registry proto impl))
   (let [wf-id (or workflow-id (str (random-uuid)))
         resume-promise-atom (atom nil)
         observer (or observer (get engine :observer))

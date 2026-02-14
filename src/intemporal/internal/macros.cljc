@@ -74,14 +74,8 @@
                          args  (rest (first arglist))]]
                ;; implement ~sname
                `(~sname [this# ~@args]
-                  (let [aid#      '~qname
-                        act-opts# ~(first opts)
-                        sym#      (symbol aid#)
-                        ;aid# ;; >> doesn't work!
-                        ;; protos are not reified like in clj https://clojurescript.org/about/differences#_protocols
-                        ;; we create a "fake" fvar that can be invokeable just like the real thing
-                        f#        (fn [& impl+args#] (apply ~qname impl+args#))
-                        args#     [~@args]]))))))
+                  (let [f#        (intemporal.core/stub (var ~qname))]
+                    (f# ~@args)))))))
 
     :clj
     #_{:clj-kondo/ignore [:unresolved-symbol]}
@@ -103,8 +97,5 @@
                        args  (rest (first arglist))]]
              ;; implement ~sname
              `(~sname [this# ~@args]
-                (let [aid#      '~qname
-                      act-opts# ~(first opts)
-                      sym#      (symbol aid#)
-                      f#        (var-get (requiring-resolve aid#))
-                      args#     [~@args]])))))))
+                (let [f# (intemporal.core/stub (var ~qname))]
+                  (f# ~@args))))))))

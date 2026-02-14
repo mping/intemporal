@@ -9,7 +9,8 @@
             [intemporal.protocol :as p]
             [intemporal.store :as store]
             [intemporal.observer :as obs]
-            [intemporal.utils :as utils])
+            [intemporal.utils :as utils]
+            [intemporal.internal.macros :as im])
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
                             [intemporal.internal.logging :as log])))
@@ -431,6 +432,12 @@
                        first)]
     (when completed
       (:result completed))))
+
+(defmacro stub-protocol
+  "Stub a protocol definition by looking up its methods and wrapping them in activities.
+   Requires that the protocol implementation was passed to start-workflow via :protocols."
+  [proto & opts]
+  `(im/stub-protocol ~proto ~@opts))
 
 ;; ============================================================================
 ;; Convenience Functions

@@ -47,6 +47,28 @@
             :retry-policy retry-policy})
     activity-name))
 
+(defn register-protocol-activities!
+  "Register all methods of a protocol as activities, using the provided implementation."
+  [registry protocol implementation]
+  #?(:clj
+     (let [proto-map (if (var? protocol) @protocol protocol)
+           pvar      (:var proto-map)
+           ;; #'ns/Name -> ns
+           pns       (namespace (symbol (subs (str pvar) 2)))
+           sigs      (:sigs proto-map)]
+       (doseq [[msym _] sigs]
+         (let [mname    (name msym)
+               fullname (str pns "/" mname)
+               ;; Resolve the actual protocol method function
+               mfn      (requiring-resolve (symbol fullname))]
+           (register-activity! registry
+                               (fn [& args]
+                                 (apply mfn implementation args))
+                               :name fullname))))
+     :cljs
+     ;; protocol-based registration in CLJS requires more metadata than available at runtime usually
+     (throw (ex-info "register-protocol-activities! not implemented for CLJS" {}))))
+
 (defn get-activity-info [registry activity-name]
   (get @registry activity-name))
 
