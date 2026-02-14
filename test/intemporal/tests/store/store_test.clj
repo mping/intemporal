@@ -1,6 +1,5 @@
 (ns intemporal.tests.store.store-test
   (:require [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
             [clojure.test :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]))
 

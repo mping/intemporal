@@ -115,8 +115,8 @@
           (if (a/should-retry? retry-policy (:exception exec-result) attempt)
             (let [backoff (a/calculate-backoff retry-policy attempt)]
               (log/debugf "Activity sleeping %s before retrying (attempt %d)" backoff attempt)
-              (do (Thread/sleep (long backoff))
-                  (recur (inc attempt))))
+              (Thread/sleep (long backoff))
+              (recur (inc attempt)))
             ;; else
             {:status :failed
              :error (:error exec-result)

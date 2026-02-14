@@ -4,7 +4,7 @@
            intemporal.macros/env-let clojure.core/let
            intemporal.macros/with-failure clojure.core/let
            intemporal.store.foundationdb/with-tx clojure.core/with-open
-           intemporal.test-utils/with-result clojure.core/let
+           intemporal.tests.utils/with-result clojure.core/let
 
            intemporal.core/with-workflow-engine clojure.core/let
 

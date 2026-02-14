@@ -1,5 +1,5 @@
 (ns intemporal.internal.error
-  (:require [clojure.string :as str])
+  #?(:cljs (:require [clojure.string :as str]))
   #?(:clj (:import (clojure.lang IExceptionInfo))))
 
 

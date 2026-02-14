@@ -1,13 +1,9 @@
 (ns intemporal.tests.utils
-  #?(:cljs (:require [intemporal.store :as store]
-                     [promesa.core :as p]
-                     [cljs.test :as t]
-                     [cljs.pprint :as pprint]
+  #?(:cljs (:require [promesa.core :as p]
                      [taoensso.telemere :as telemere]
                      [taoensso.telemere.utils :as tutils]))
   #?(:clj (:require [promesa.core :as p]
                     [net.cgrand.macrovich :as macros]
-                    [clojure.pprint :as pprint]
                     [taoensso.telemere :as telemere]
                     [taoensso.telemere.utils :as tutils]))
   #?(:cljs (:require-macros [net.cgrand.macrovich :as macros]

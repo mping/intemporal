@@ -5,6 +5,7 @@
   (:require [intemporal.core :as intemporal]
             [intemporal.store :as store]
             [intemporal.protocol :as p]
+            [clojure.pprint :as pprint]
             [clojure.test :refer [deftest is testing]]))
 
 ;; ============================================================================
@@ -13,14 +14,16 @@
 
 (def execution-counter (atom 0))
 
-(defn tracked-activity [x]
+(defn tracked-activity
   "Activity that increments counter to track actual executions (not replays)"
+  [x]
   (swap! execution-counter inc)
   (Thread/sleep 100)  ;; Longer sleep to ensure we can interrupt
   (* x 2))
 
-(defn future-crash-workflow [id num-activities]
+(defn future-crash-workflow
   "Simple workflow that executes activities sequentially"
+  [id num-activities]
   (let [stub (intemporal/stub #'tracked-activity)]
     (loop [i 0
            results []]
@@ -28,15 +31,17 @@
         (recur (inc i) (conj results (stub i)))
         {:id id :results results}))))
 
-(defn verify-history [store workflow-id]
+(defn verify-history
   "Count completed activities in event history"
+  [store workflow-id]
   (let [history (p/load-history store workflow-id)
         completed (filter #(= :activity-completed (:event-type %)) history)]
-    (clojure.pprint/print-table history)
+    (pprint/print-table history)
     (count completed)))
 
-(defn count-interrupted-or-rejected [store workflow-id]
+(defn count-interrupted-or-rejected
   "Count activities that were interrupted or rejected (due to shutdown)"
+  [store workflow-id]
   (let [history (p/load-history store workflow-id)
         failed (filter #(= :activity-failed (:event-type %)) history)]
     (count

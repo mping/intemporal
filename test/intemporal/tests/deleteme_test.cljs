@@ -1,7 +1,6 @@
 (ns intemporal.tests.deleteme-test
-  (:require [cljs.test :as t :refer [deftest is testing async]]
+  (:require [cljs.test :as t :refer [deftest is testing]]
             [intemporal.core :as intemporal]
-            [intemporal.internal.logging :as log]
             [intemporal.tests.utils :refer [with-trace-logging]])
   (:require-macros [intemporal.tests.utils :refer [with-result]]))
 

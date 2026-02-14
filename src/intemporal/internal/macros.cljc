@@ -1,9 +1,7 @@
 (ns intemporal.internal.macros
-  (:require [cljs.analyzer.api :as api]
-            [promesa.core :as p])
+  (:require [cljs.analyzer.api :as api])
   ;[md5.core :as md5])
-  #?(:clj  (:require [intemporal.internal.context :as ctx]
-                     [net.cgrand.macrovich :as macros])
+  #?(:clj  (:require [net.cgrand.macrovich :as macros])
      ;[intemporal.workflow.internal :refer [trace! trace-async! add-event!]])
      :cljs (:require-macros [net.cgrand.macrovich :as macros])))
 ;[intemporal.workflow.internal :refer [trace! trace-async! add-event!]]

@@ -187,8 +187,7 @@
         failed (p/find-event store workflow-id :async-failed handle-seq)]
     (cond
       completed
-      (do
-        (:result completed))
+      (:result completed)
 
       failed
       (throw (error/async-failed-exception handle-seq (:error failed)))

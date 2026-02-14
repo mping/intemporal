@@ -13,12 +13,6 @@
 ;; Workflow Execution Engine
 ;; ============================================================================
 
-(defmacro ^:private -notify
-  "Utility macro to dispatch events to an observer"
-  [proto-fn observer & args]
-  `(when ~observer
-     (~proto-fn ~observer ~@args)))
-
 (defn execute-workflow-fn [workflow-fn args]
   (try
     {:status :completed

@@ -1,5 +1,5 @@
 (ns ^:integration intemporal.tests.store.jdbc-test
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [clojure.test :refer [deftest testing]]
             [intemporal.store.jdbc :as jdbc-store]
             [intemporal.tests.store.test-suite :as suite]
             [next.jdbc :as jdbc]))

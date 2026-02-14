@@ -5,6 +5,7 @@
   (:require [intemporal.core :as intemporal]
             [intemporal.store :as store]
             [intemporal.protocol :as p]
+            [clojure.pprint :as pprint]
             [clojure.test :refer [deftest is testing]]))
 
 ;; ============================================================================
@@ -13,14 +14,16 @@
 
 (def execution-counter (atom 0))
 
-(defn tracked-activity [x]
+(defn tracked-activity
   "Simple activity that increments counter to track executions"
+  [x]
   (swap! execution-counter inc)
   (Thread/sleep 50)  ;; Simulate work
   (* x 2))
 
-(defn simple-workflow [id num-activities crash-point]
+(defn simple-workflow
   "Workflow that suspends at crash-point for testing"
+  [id num-activities crash-point]
   (let [stub (intemporal/stub #'tracked-activity)]
     (loop [i 0
            results []]
@@ -32,11 +35,12 @@
           (recur (inc i) (conj results (stub i))))
         {:id id :results results}))))
 
-(defn verify-history [store workflow-id]
+(defn verify-history
   "Count completed activities in event history"
+  [store workflow-id]
   (let [history (p/load-history store workflow-id)
         completed (filter #(= :activity-completed (:event-type %)) history)]
-    (clojure.pprint/print-table history)
+    (pprint/print-table history)
     (count completed)))
 
 ;; ============================================================================

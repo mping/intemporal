@@ -9,15 +9,15 @@
 
 (defn comprehensive-workflow [initial-value]
   (let [activity-stub (intemporal/stub #'test-activity)
-        activity-result (activity-stub initial-value)]
-    (let [async-handle (intemporal/async #(activity-stub (inc initial-value)))
-          async-result (intemporal/join async-handle)]
-      (intemporal/sleep 50)
-      (let [signal-data (intemporal/wait-for-signal "approval")]
-        {:activity-result activity-result
-         :async-result async-result
-         :signal-data signal-data
-         :initial-value initial-value}))))
+        activity-result (activity-stub initial-value)
+        async-handle (intemporal/async #(activity-stub (inc initial-value)))
+        async-result (intemporal/join async-handle)]
+    (intemporal/sleep 50)
+    (let [signal-data (intemporal/wait-for-signal "approval")]
+      {:activity-result activity-result
+       :async-result async-result
+       :signal-data signal-data
+       :initial-value initial-value})))
 
 (defn run-store-tests [store]
   (testing "Basic store operations"
