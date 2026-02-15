@@ -1,11 +1,33 @@
 (ns intemporal.store.jdbc
   (:require [intemporal.protocol :as p]
+            [migratus.core :as migratus]
             [next.jdbc :as jdbc]
             [next.jdbc.prepare :as prepare]
             [next.jdbc.result-set :as rs]
             [cheshire.core :as json])
   (:import (org.postgresql.util PGobject)
            (java.sql PreparedStatement)))
+
+(comment
+  (let [cfg {:store         :database
+             :migration-dir "migrations/postgres"
+             :db            {:jdbcUrl "jdbc:postgresql://localhost:5432/root?user=root&password=root"}}]
+    (migratus/rollback cfg)
+    (migratus/migrate cfg))
+
+  ;(migratus/create cfg "initial-schema"))
+  "")
+
+(defn- migrate! [jdbc-url]
+  (let [kind (cond
+               (.startsWith jdbc-url "jdbc:postgresql") :postgres
+               (.startsWith jdbc-url "jdbc:mariadb") :mariadb
+               (.startsWith jdbc-url "jdbc:mysql") :mysql
+               :else (throw (ex-info (format "Unknown jdbc url %s; only postgres and mysql/mariadb supported") {:jdbc-url jdbc-url})))
+        cfg  {:store         :database
+              :migration-dir (str "migrations/" kind)
+              :db            {:jdbcUrl jdbc-url}}]
+    (migratus/migrate cfg)))
 
 ;; ============================================================================
 ;; JSONB Handling for next.jdbc
@@ -40,30 +62,6 @@
 ;; Schema
 ;; ============================================================================
 
-(defn create-schema! [ds]
-  (jdbc/execute! ds ["
-CREATE TABLE IF NOT EXISTS intemporal_workflows (
-    id TEXT PRIMARY KEY,
-    cancelled BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);"])
-  (jdbc/execute! ds ["
-CREATE TABLE IF NOT EXISTS intemporal_history (
-    id SERIAL PRIMARY KEY,
-    workflow_id TEXT REFERENCES intemporal_workflows(id) ON DELETE CASCADE,
-    seq INTEGER,
-    event_type TEXT,
-    data JSONB,
-    UNIQUE (workflow_id, seq)
-);"])
-  (jdbc/execute! ds ["
-CREATE TABLE IF NOT EXISTS intemporal_signals (
-    id SERIAL PRIMARY KEY,
-    workflow_id TEXT REFERENCES intemporal_workflows(id) ON DELETE CASCADE,
-    signal_name TEXT,
-    payload JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);"]))
 
 ;; ============================================================================
 ;; Postgres Store Implementation
@@ -91,9 +89,9 @@ CREATE TABLE IF NOT EXISTS intemporal_signals (
                            workflow-id])
         ;; Insert events
         (doseq [event events]
-          (let [seq-num (:seq event)
+          (let [seq-num    (:seq event)
                 event-type (name (:event-type event))
-                data (dissoc event :event-type)]
+                data       (dissoc event :event-type)]
             (jdbc/execute! tx ["INSERT INTO intemporal_history (workflow_id, seq, event_type, data)
                                 VALUES (?, ?, ?, ?)
                                 ON CONFLICT (workflow_id, seq) DO UPDATE SET event_type = EXCLUDED.event_type, data = EXCLUDED.data"
@@ -122,7 +120,7 @@ CREATE TABLE IF NOT EXISTS intemporal_signals (
                          workflow-id])
       (jdbc/execute! tx ["INSERT INTO intemporal_signals (workflow_id, signal_name, payload) VALUES (?, ?, ?)"
                          workflow-id signal-name signal-data]))
-    
+
     ;; Trigger callback if registered
     (when-let [callback (get-in @callbacks [workflow-id signal-name])]
       (future (callback)))
@@ -157,8 +155,8 @@ CREATE TABLE IF NOT EXISTS intemporal_signals (
 
   (get-workflow-status [this workflow-id]
     (let [wf-row (jdbc/execute-one! datasource
-                                   ["SELECT cancelled FROM intemporal_workflows WHERE id = ?"
-                                    workflow-id])]
+                                    ["SELECT cancelled FROM intemporal_workflows WHERE id = ?"
+                                     workflow-id])]
       (cond
         (nil? wf-row) :not-found
         (:intemporal_workflows/cancelled wf-row) :cancelled
@@ -171,5 +169,10 @@ CREATE TABLE IF NOT EXISTS intemporal_signals (
                       :workflow-failed :failed
                       :running))))))))
 
-(defn make-jdbc-store [datasource]
-  (->JdbcStore datasource (atom {})))
+;; TODO use more complete opts
+(defn make-jdbc-store
+  "Creates a new jdbc store"
+  [jdbc-url]
+  (migrate! jdbc-url)
+  (let [ds (hikari-cp.core/make-datasource {:jdbc-url jdbc-url})]
+    (->JdbcStore ds (atom {}))))

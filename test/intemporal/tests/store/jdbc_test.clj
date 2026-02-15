@@ -18,17 +18,7 @@
 
 (deftest jdbc-store-test
   (testing "JDBC Store Implementation"
-    (try
-      (ensure-database!)
-      (let [ds (jdbc/get-datasource db-spec)]
-        ;; Initialize schema
-        (jdbc-store/create-schema! ds)
+    (ensure-database!)
+    (let [store (jdbc-store/make-jdbc-store db-spec)]
+      (suite/run-store-tests store))))
 
-        ;; Run shared suite
-        (let [store (jdbc-store/make-jdbc-store ds)]
-          (suite/run-store-tests store)))
-      (catch Exception e
-        (if (and (instance? java.sql.SQLException e)
-                 (re-find #"Connection refused" (.getMessage e)))
-          (println "Skipping JDBC Store tests: PostgreSQL not available at" db-spec)
-          (throw e))))))

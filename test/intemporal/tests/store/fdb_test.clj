@@ -6,14 +6,9 @@
 
 (deftest fdb-store-test
   (testing "FoundationDB Store Implementation"
-    (try
-      (let [db (cfdb/select-api-version 730)
-            db (cfdb/open db)]
+    (let [db (cfdb/select-api-version 730)
+          db (cfdb/open db)]
 
-        ;; Run shared suite
-        (let [store (fdb-store/make-fdb-store db "intemporal-tests")]
-          (suite/run-store-tests store)))
-      (catch Exception e
-        (if (re-find #"FoundationDB" (.getMessage e))
-          (println "Skipping FoundationDB Store tests: FDB not available")
-          (throw e))))))
+      ;; Run shared suite
+      (let [store (fdb-store/make-fdb-store db "intemporal-tests")]
+        (suite/run-store-tests store)))))
