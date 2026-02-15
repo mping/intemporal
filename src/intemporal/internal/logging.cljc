@@ -2,9 +2,7 @@
   (:require [clojure.string :as str]
             [taoensso.telemere :as t]
             #?(:cljs [goog.string :as gstring])
-            #?(:cljs [goog.string.format]))
-  #?(:clj  (:require [net.cgrand.macrovich :as macros])
-     :cljs (:require-macros [net.cgrand.macrovich :as macros])))
+            #?(:cljs [goog.string.format])))
 
 (defmacro with-mdc
   "Evaluates body with given map merged into telemere's signal context."
@@ -17,7 +15,7 @@
      :cljs (apply gstring/format s args)))
 
 (defmacro expand-log [level & args]
-  (let [err-type (macros/case :clj 'Throwable :cljs 'js/Error)]
+  (let [err-type (if (:ns &env) 'js/Error 'Throwable)]
     `(let [args# [~@args]
            [err# msgs#] (if (instance? ~err-type (first args#))
                           [(first args#) (rest args#)]
@@ -28,7 +26,7 @@
        (t/log! {:level ~level :msg msg# :error err#}))))
 
 (defmacro expand-logf [level & args]
-  (let [err-type (macros/case :clj 'Throwable :cljs 'js/Error)]
+  (let [err-type (if (:ns &env) 'js/Error 'Throwable)]
     `(let [args# [~@args]
            [err# fmt# fmt-args#] (if (instance? ~err-type (first args#))
                                    [(first args#) (second args#) (drop 2 args#)]
