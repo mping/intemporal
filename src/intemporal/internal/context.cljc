@@ -79,11 +79,10 @@
 ;; Context-Aware Macros, cljs only
 ;; ============================================================================
 
-;; TODO: ensure these are cljs only
-
 (defmacro blet
   "Like p/let, but automatically propagates *workflow-context*."
   [bindings & body]
+  #_{:clj-kondo/ignore [:unresolved-symbol]}
   (macros/case
     :clj (throw (IllegalArgumentException. "CLJS only"))
     :cljs

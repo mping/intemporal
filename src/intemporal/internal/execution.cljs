@@ -8,7 +8,7 @@
             [promesa.core :as prom])
   (:require-macros [intemporal.internal.logging :as log]
                    [intemporal.internal.execution :refer [-notify]]
-                   [intemporal.internal.context :refer [blet bthen bfinally]]))
+                   [intemporal.internal.context :refer [blet bthen]]))
 
 ;; ============================================================================
 ;; Workflow Execution Engine
@@ -529,6 +529,7 @@
   [{:keys [store executor scheduler registry] :as engine} workflow-id workflow-fn args
    {:keys [observer max-iterations wake-fn]
     :or {max-iterations 1000}}]
+  #_{:clj-kondo/ignore [:loop-without-recur]}
   (prom/loop [iteration 0]
     (when (>= iteration max-iterations)
       (throw (ex-info "Max iterations exceeded" {:workflow-id workflow-id

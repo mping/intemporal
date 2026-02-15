@@ -25,7 +25,7 @@
                (.startsWith jdbc-url "jdbc:postgresql") :postgres
                (.startsWith jdbc-url "jdbc:mariadb") :mariadb
                (.startsWith jdbc-url "jdbc:mysql") :mysql
-               :else (throw (ex-info (format "Unknown jdbc url %s; only postgres and mysql/mariadb supported") {:jdbc-url jdbc-url})))
+               :else (throw (ex-info "Unknown jdbc url %s; only postgres and mysql/mariadb supported" {:jdbc-url jdbc-url})))
         cfg  {:store         :database
               :migration-dir (str "migrations/" kind)
               :db            {:jdbcUrl jdbc-url}}]

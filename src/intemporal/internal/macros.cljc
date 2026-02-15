@@ -18,32 +18,6 @@
 ;;;;
 ;; userland
 
-(defmacro defn-workflow
-  "Defines a workflow. Workflows are functions that are resillient to crashes, as
-  long as side-effects are run via activities."
-  [sym argv & body]
-  (let [wname (symbol (str sym "-"))]
-    ;sig   (md5/string->md5-hex (str body))]
-    ;; TODO save signature
-    `(do
-       (defn- ~wname ~argv (do ~@body))
-       (defn ~sym ~argv
-         ;; TODO: fixme: task id generator must be deterministic for a given workflow
-         (let [id#   (or (random-uuid))
-               fvar# #'~wname
-               ;; #'my-workflown-fn- => my-workflow-fn
-               orig# (subs (str fvar#) 2 (dec (count (str fvar#))))])))))
-
-(defmacro stub-function
-  "Stubs `f`, wrapping it in an activity-aware function."
-  [f]
-  `(fn [& argv#]
-     (let [fvar# (var ~f)]
-       ;; TODO we can use &form to determine eg checksum of activity
-
-       ;; prepare call
-       (let []))))
-
 (defmacro stub-protocol
   "Stub a protocol definition. Opts are currently unused.
   Example: `(stub-protocol EventHandler {:some-opts true})`"
