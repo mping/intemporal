@@ -4,7 +4,8 @@
             [intemporal.protocol :as p]
             [intemporal.utils :as utils]
             [promesa.core :as prom])
-  (:require-macros [intemporal.internal.logging :as log]))
+  (:require-macros [intemporal.internal.logging :as log]
+                   [intemporal.internal.context :refer [bthen]]))
 
 (defn- waiting-status? [result]
   (#{:waiting-timer :waiting-signal :waiting-signal-timeout :waiting-async}
@@ -46,7 +47,7 @@
                       {:observer       observer
                        :max-iterations max-iterations
                        :wake-fn        run-step})
-                    (prom/then (fn [result]
+                    (bthen (fn [result]
                                  (when-not (waiting-status? result)
                                    (prom/resolve! d result))))
                     (prom/catch js/Error
@@ -91,7 +92,7 @@
                                                      {:observer       observer
                                                       :max-iterations max-iterations
                                                       :wake-fn        wake-fn-impl})
-                         (prom/then (fn [result]
+                         (bthen (fn [result]
                                       (when (and on-complete (not (waiting-status? result)))
                                         (on-complete result))))
                          (prom/catch js/Error
@@ -109,7 +110,7 @@
                                       {:observer       observer
                                        :max-iterations max-iterations
                                        :wake-fn        wake-fn})
-          (prom/then (fn [result]
+          (bthen (fn [result]
                        (when (and on-complete (not (waiting-status? result)))
                          (on-complete result))
                        result))

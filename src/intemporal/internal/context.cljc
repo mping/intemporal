@@ -1,6 +1,7 @@
 (ns intemporal.internal.context
   (:require [intemporal.internal.error :as error]
-            [intemporal.protocol :as p]))
+            [intemporal.protocol :as p]
+            [promesa.core]))
 
 
 ;; ============================================================================
@@ -71,3 +72,46 @@
       (catch #?(:clj Exception :cljs js/Error) e
         ;; Don't let observer errors break workflow
         (println "Observer error:" (ex-message e))))))
+
+;; ============================================================================
+;; Context-Aware Macros, cljs only
+;; ============================================================================
+
+;; TODO: ensure these are cljs only
+
+(defmacro blet
+  "Like p/let, but automatically propagates *workflow-context*."
+  [bindings & body]
+  (let [ctx-sym (gensym "workflow-ctx")]
+    `(let [~ctx-sym *workflow-context*] ;; 1. Capture outside
+       (promesa.core/let
+         ~(vec (interleave
+                 (take-nth 2 bindings)
+                 (map (fn [expr]
+                        ;; 2. Restore inside every binding step (Right-Hand Side)
+                        `(binding [*workflow-context* ~ctx-sym]
+                           ~expr))
+                      (take-nth 2 (rest bindings)))))
+         ;; 3. Restore inside the final body
+         (binding [*workflow-context* ~ctx-sym]
+           ~@body)))))
+
+(defmacro bthen
+  "Like p/then, but automatically propagates *workflow-context*."
+  [promise f]
+  (let [ctx-sym (gensym "workflow-ctx")]
+    `(let [~ctx-sym *workflow-context*]
+       (promesa.core/then ~promise
+         (fn [res#]
+           (binding [*workflow-context* ~ctx-sym]
+             (~f res#)))))))
+
+(defmacro bfinally
+  "Like p/finally, but automatically propagates *workflow-context*."
+  [promise f]
+  (let [ctx-sym (gensym "workflow-ctx")]
+    `(let [~ctx-sym *workflow-context*]
+       (promesa.core/finally ~promise
+         (fn [& args#]
+           (binding [*workflow-context* ~ctx-sym]
+             (apply ~f args#)))))))

@@ -1,13 +1,10 @@
 (ns intemporal.store.fdb
   (:require [intemporal.protocol :as p]
-            [me.vedang.clj-fdb.FDB :as cfdb]
             [me.vedang.clj-fdb.core :as fdb-core]
             [me.vedang.clj-fdb.transaction :as ftr]
             [me.vedang.clj-fdb.subspace.subspace :as fsub]
-            [taoensso.telemere :as t]
             [cheshire.core :as json])
-  (:import [com.apple.foundationdb FDB FDBTransaction KeyValue]
-           [com.apple.foundationdb.tuple Tuple]))
+  (:import [com.apple.foundationdb.tuple Tuple]))
 
 ;; ============================================================================
 ;; Serialization Helpers

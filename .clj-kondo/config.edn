@@ -6,6 +6,10 @@
            intemporal.store.foundationdb/with-tx clojure.core/with-open
            intemporal.tests.utils/with-result clojure.core/let
 
+           intemporal.internal.context/blet clojure.core/let
+           intemporal.tests.utils/bthen promesa.core/then
+           intemporal.tests.utils/finally promesa.core/finally
+
            intemporal.core/with-workflow-engine clojure.core/let
 
            promesa.core/let clojure.core/let

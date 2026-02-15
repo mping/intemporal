@@ -4,7 +4,8 @@
             [cljs.test :as t :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]
             [promesa.core :as p])
-  (:require-macros [intemporal.tests.utils :refer [with-result]]))
+  (:require-macros [intemporal.tests.utils :refer [with-result]]
+                   [intemporal.internal.context :refer [blet]]))
 
 (defn activity-fn [arg]
   [:processed arg])
@@ -47,7 +48,7 @@
   (testing "Timer workflow is deterministic on replay"
     (let [engine (intemporal/make-workflow-engine :threads 2)]
       (with-result [[result1 result2]
-                    (p/let [r1 (intemporal/start-workflow engine
+                    (blet [r1 (intemporal/start-workflow engine
                                                           timed-flow [100]
                                                           :workflow-id "timer-replay-test")
                             r2 (intemporal/resume-workflow engine "timer-replay-test"

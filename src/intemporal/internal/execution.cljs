@@ -7,35 +7,75 @@
             [intemporal.protocol :as p]
             [promesa.core :as prom])
   (:require-macros [intemporal.internal.logging :as log]
-                   [intemporal.internal.execution :refer [-notify]]))
+                   [intemporal.internal.execution :refer [-notify]]
+                   [intemporal.internal.context :refer [blet bthen bfinally]]))
 
 ;; ============================================================================
 ;; Workflow Execution Engine
 ;; ============================================================================
 
 (defn execute-workflow-fn [workflow-fn args]
-  (try
-    {:status :completed
-     :result (apply workflow-fn args)
-     :pending-asyncs @(:pending-asyncs (ctx/current-context))
-     :pending-events @(:pending-events (ctx/current-context))}
-    (catch js/Error e
-      (cond
-        (error/suspension? e)
-        {:status :suspended
-         :suspension-type (error/suspension-type e)
-         :suspension-data (error/suspension-data e)
-         :pending-asyncs @(:pending-asyncs (ctx/current-context))
-         :pending-events @(:pending-events (ctx/current-context))}
+  ;; Capture context so async callbacks (from p/let, etc.) can access it
+  ;; after the dynamic binding scope has exited
+  (let [ctx            (ctx/current-context)
+        pending-asyncs (:pending-asyncs ctx)
+        pending-events (:pending-events ctx)
+        wrap-ctx       (fn [f]
+                         (fn [v]
+                           (binding [ctx/*workflow-context* ctx]
+                             (f v))))]
+    (try
+      (let [result (apply workflow-fn args)]
+        (if (prom/promise? result)
+          ;; Workflow returned a Promise (e.g. from p/let) - resolve it.
+          ;; Re-bind context in callbacks so that any code inside the promise
+          ;; chain (e.g. stub calls inside p/let) can access the workflow context.
+          (-> result
+              (bthen (fn [resolved]
+                       {:status :completed
+                        :result resolved
+                        :pending-asyncs @pending-asyncs
+                        :pending-events @pending-events}))
+              (prom/catch (wrap-ctx
+                            (fn [e]
+                              (cond
+                                (error/suspension? e)
+                                {:status :suspended
+                                 :suspension-type (error/suspension-type e)
+                                 :suspension-data (error/suspension-data e)
+                                 :pending-asyncs @pending-asyncs
+                                 :pending-events @pending-events}
 
-        (error/cancelled-exception? e)
-        {:status :cancelled
-         :pending-events @(:pending-events (ctx/current-context))}
+                                (error/cancelled-exception? e)
+                                {:status :cancelled
+                                 :pending-events @pending-events}
 
-        :else
-        {:status :failed
-         :error e
-         :pending-events @(:pending-events (ctx/current-context))}))))
+                                :else
+                                {:status :failed
+                                 :error e
+                                 :pending-events @pending-events})))))
+          ;; Synchronous result
+          {:status :completed
+           :result result
+           :pending-asyncs @pending-asyncs
+           :pending-events @pending-events}))
+      (catch js/Error e
+        (cond
+          (error/suspension? e)
+          {:status :suspended
+           :suspension-type (error/suspension-type e)
+           :suspension-data (error/suspension-data e)
+           :pending-asyncs @pending-asyncs
+           :pending-events @pending-events}
+
+          (error/cancelled-exception? e)
+          {:status :cancelled
+           :pending-events @pending-events}
+
+          :else
+          {:status :failed
+           :error e
+           :pending-events @pending-events})))))
 
 (defn- execute-once
   "Execute activity once, returns a promise of result map."
@@ -43,7 +83,7 @@
   (let [start (utils/current-time-ms)]
     (log/infof "Executing activity via executor %s" executor)
     (-notify p/on-activity-started observer workflow-id seq-num activity-name)
-    (-> (prom/let [result (p/execute-activity executor activity-name args timeout-ms)
+    (-> (blet [result (p/execute-activity executor activity-name args timeout-ms)
                    duration (- (utils/current-time-ms) start)]
           (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
           (log/infof "Activity succeeded, result: %s" result)
@@ -66,7 +106,7 @@
   (-notify p/on-activity-started observer workflow-id seq-num activity-name)
   (log/infof "Executing activity (attempt %d)" attempt)
   (let [start (utils/current-time-ms)]
-    (-> (prom/let [result (p/execute-activity executor activity-name args timeout-ms)
+    (-> (blet [result (p/execute-activity executor activity-name args timeout-ms)
                    duration (- (utils/current-time-ms) start)]
           (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
           (log/infof "Activity succeeded (attempt %d), result: %s" attempt result)
@@ -84,7 +124,7 @@
                :error     error-map
                :exception e
                :duration  duration})))
-        (prom/then
+        (bthen
           (fn [exec-result]
             (case (:status exec-result)
               :success
@@ -95,10 +135,10 @@
                 (let [backoff (a/calculate-backoff retry-policy attempt)]
                   (log/debugf "Activity sleeping %s before retrying (attempt %d)" backoff attempt)
                   (-> (prom/delay backoff)
-                      (prom/then (fn [_]
-                                   (execute-with-retry-loop executor activity-name args timeout-ms
-                                                            retry-policy observer workflow-id seq-num
-                                                            (inc attempt))))))
+                      (bthen (fn [_]
+                               (execute-with-retry-loop executor activity-name args timeout-ms
+                                                        retry-policy observer workflow-id seq-num
+                                                        (inc attempt))))))
                 {:status :failed
                  :error (:error exec-result)
                  :duration (:duration exec-result)
@@ -116,7 +156,7 @@
                                 {:keys [seq activity-name args timeout-ms retry-policy] :as suspension-data}
                                 pending-events observer]
   (log/with-mdc {:activity activity-name :seqnum seq}
-    (prom/let [exec-result (execute-with-retry executor activity-name args timeout-ms
+    (blet [exec-result (execute-with-retry executor activity-name args timeout-ms
                                                retry-policy observer workflow-id seq)]
       ;; Save all pending events first
       (p/save-events store workflow-id pending-events)
@@ -144,7 +184,7 @@
       (p/save-events store workflow-id pending-events)
 
       (log/infof "Executing %d activities in parallel via executor %s" (count pending-asyncs) executor)
-      (prom/let [results (p/execute-activities-parallel executor pending-asyncs)]
+      (blet [results (p/execute-activities-parallel executor pending-asyncs)]
         (let [now (utils/current-time-ms)
               completion-events
               (mapcat (fn [{:keys [activity-name activity-seq] :as async-info} result]
@@ -286,7 +326,7 @@
   (let [{:keys [handle-seq]} suspension-data]
     ;; First, process any pending asyncs that haven't been executed yet
     (if (seq pending-asyncs)
-      (prom/let [_ (process-pending-asyncs-parallel store executor workflow-id
+      (blet [_ (process-pending-asyncs-parallel store executor workflow-id
                                                     pending-asyncs pending-events observer)]
         :continue)
       ;; else
@@ -322,7 +362,7 @@
 (defn finalize-completed
   "Save completion events and return result. Returns a promise."
   [store executor workflow-id pending-asyncs pending-events result observer]
-  (prom/let [_ (if (seq pending-asyncs)
+  (blet [_ (if (seq pending-asyncs)
                  (process-pending-asyncs-parallel store executor workflow-id
                                                   pending-asyncs pending-events observer)
                  (do
@@ -395,7 +435,7 @@
     (case suspension-type
       :activity
       (if (seq pending-asyncs-list)
-        (prom/let [_ (process-pending-asyncs-parallel store executor workflow-id
+        (blet [_ (process-pending-asyncs-parallel store executor workflow-id
                                                       pending-asyncs-list
                                                       pending-events-list
                                                       observer)]
@@ -437,7 +477,7 @@
                             observer)
 
       :join-any-pending
-      (prom/let [_ (when (seq pending-asyncs-list)
+      (blet [_ (when (seq pending-asyncs-list)
                      (process-pending-asyncs-parallel store executor workflow-id
                                                       pending-asyncs-list
                                                       pending-events-list
@@ -525,43 +565,47 @@
                                        :protocols (:protocols engine))
               exec-result (binding [ctx/*workflow-context* ctx]
                             (log/debugf "Executing workflow function %s..." workflow-fn)
-                            (execute-workflow-fn workflow-fn args))]
+                            (execute-workflow-fn workflow-fn args))
+              dispatch (fn [exec-result]
+                         (log/debugf "Workflow function executed, got: %s" (:status exec-result))
+                         (case (:status exec-result)
+                           :completed
+                           (finalize-completed store executor workflow-id
+                                               (:pending-asyncs exec-result)
+                                               (:pending-events exec-result)
+                                               (:result exec-result)
+                                               observer)
 
-          (log/debugf "Workflow function executed, got: %s" (:status exec-result))
-          (case (:status exec-result)
-            :completed
-            (finalize-completed store executor workflow-id
-                                (:pending-asyncs exec-result)
-                                (:pending-events exec-result)
-                                (:result exec-result)
-                                observer)
+                           :cancelled
+                           (finalize-cancelled store workflow-id
+                                               (:pending-events exec-result)
+                                               observer)
 
-            :cancelled
-            (finalize-cancelled store workflow-id
-                                (:pending-events exec-result)
-                                observer)
+                           :suspended
+                           (blet [action (handle-suspension engine
+                                                                workflow-id
+                                                                (:suspension-type exec-result)
+                                                                (:suspension-data exec-result)
+                                                                (:pending-asyncs exec-result)
+                                                                (:pending-events exec-result)
+                                                                wake-fn
+                                                                observer)]
+                             (when (and observer (= action :continue))
+                               (p/on-workflow-resumed observer workflow-id))
 
-            :suspended
-            (prom/let [action (handle-suspension engine
-                                                 workflow-id
-                                                 (:suspension-type exec-result)
-                                                 (:suspension-data exec-result)
-                                                 (:pending-asyncs exec-result)
-                                                 (:pending-events exec-result)
-                                                 wake-fn
-                                                 observer)]
-              (when (and observer (= action :continue))
-                (p/on-workflow-resumed observer workflow-id))
+                             (if (= action :continue)
+                               (prom/recur (inc iteration))
+                               (action->result action workflow-id)))
 
-              (if (= action :continue)
-                (prom/recur (inc iteration))
-                (action->result action workflow-id)))
-
-            :failed
-            (finalize-failed store workflow-id
-                             (:pending-events exec-result)
-                             (:error exec-result)
-                             observer)))))))
+                           :failed
+                           (finalize-failed store workflow-id
+                                            (:pending-events exec-result)
+                                            (:error exec-result)
+                                            observer)))]
+          ;; exec-result may be a Promise if workflow-fn returned a Promise (e.g. from p/let)
+          (if (prom/promise? exec-result)
+            (bthen exec-result dispatch)
+            (dispatch exec-result)))))))
 
 (defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
                                suspension-data pending-events observer]
@@ -569,7 +613,7 @@
     (p/save-events store workflow-id pending-events)
     (-> (run-workflow-internal engine child-workflow-id workflow-fn args
                                {:observer observer :max-iterations 1000})
-        (prom/then
+        (bthen
           (fn [result]
             (if (= :completed (:status result))
               (do

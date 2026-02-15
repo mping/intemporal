@@ -3,7 +3,8 @@
             [promesa.core :as p]
             [hiccups.runtime :as hiccupsrt])
   (:require-macros [hiccups.core :as hiccups :refer [html]]
-                   [intemporal.core :refer [stub-protocol]]))
+                   [intemporal.core :refer [stub-protocol]]
+                   [intemporal.internal.context :refer [blet bthen]]))
 ;;;;
 ;; main code
 
@@ -28,9 +29,11 @@
 
         sres (sf [1])
         pres (foo pr :X)]
-    (conj [:root]
-          sres
-          pres)))
+    (blet [v1 sres
+            v2 pres]
+      (conj [:root]
+            v1
+            v2))))
 
 ;;;;
 ;; workflow registration
@@ -77,7 +80,7 @@
 
     ;; set-results!
     (-> res
-        (p/then (fn [r]
+        (bthen (fn [r]
                   (js/console.log "res" (clj->js r))
                   (set-results! (prn-str r))
                   (render-tables! engine "my-wflow")))

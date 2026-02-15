@@ -4,7 +4,8 @@
             [cljs.test :as t :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]
             [promesa.core :as p])
-  (:require-macros [intemporal.tests.utils :refer [with-result]]))
+  (:require-macros [intemporal.tests.utils :refer [with-result]]
+                   [intemporal.internal.context :refer [blet]]))
 
 (defn activity-fn [arg]
   [:processed arg])
@@ -74,7 +75,7 @@
       (intemporal/send-signal (:store engine) wf-id "approval" {:user "bob"})
       ;; First workflow run consumes first signal, then second
       (with-result [[result1 result2]
-                    (p/let [r1 (intemporal/start-workflow engine signal-flow [100]
+                    (blet [r1 (intemporal/start-workflow engine signal-flow [100]
                                                           :workflow-id wf-id)
                             r2 (intemporal/resume-workflow engine wf-id
                                                            signal-flow [100])]

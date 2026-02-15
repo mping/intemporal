@@ -5,10 +5,11 @@
             [matcher-combinators.test :refer [match?]]
             [matcher-combinators.matchers :as m]
             [promesa.core :as p])
-  (:require-macros [intemporal.tests.utils :refer [with-result]]))
+  (:require-macros [intemporal.tests.utils :refer [with-result]]
+                   [intemporal.internal.context :refer [bthen]]))
 
 (defn slow-activity [x]
-  (p/then (p/delay 100) (fn [_] (* x 2))))
+  (bthen (p/delay 100) (fn [_] (* x 2))))
 
 ;; Long-running workflow
 (defn long-flow [id]

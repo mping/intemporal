@@ -2,12 +2,8 @@
   (:require [cljs.analyzer.api :as api]
             [intemporal.internal.context :as ctx]
             [intemporal.internal.activity :as act])
-  ;[md5.core :as md5])
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
-     ;[intemporal.workflow.internal :refer [trace! trace-async! add-event!]])
      :cljs (:require-macros [net.cgrand.macrovich :as macros])))
-;[intemporal.workflow.internal :refer [trace! trace-async! add-event!]]
-;[intemporal.macros :refer [env-let defn-workflow stub-function stub-protocol]])))
 
 (def cljs-available?
   #?(:cljs
@@ -66,27 +62,28 @@
                                                    (name sig)
                                                    (str (namespace proto) "/" (name sig)))]]
                                [(name sig) arglist (symbol invname) (symbol qname) (str (:name resolved))])
-                             (doall))]
-        (let [protocols-sym (gensym "protocols")
-              registry-sym (gensym "registry")
-              impl-sym     (gensym "impl")]
-          `(let [~protocols-sym (:protocols (ctx/current-context))
-                 ~registry-sym (:registry (ctx/current-context))]
-             ;; Register protocol methods with impl wrapper before stub can register raw dispatch fns
-             ~@(for [[mname arglist invname qname pname] sig+args]
-                 `(when-let [~impl-sym (get ~protocols-sym ~proto)]
-                    (act/register-activity!
-                      ~registry-sym
-                      (fn [& args#] (apply ~invname ~impl-sym args#))
-                      :name ~(str qname))))
-             (reify ~proto
-               ~@(for [[mname arglist invname qname pname] sig+args
-                       :let [sname (symbol mname)
-                             args  (rest (first arglist))]]
-                   ;; implement ~sname
-                   `(~sname [this# ~@args]
-                      (let [f#        (intemporal.core/stub (var ~qname))]
-                        (f# ~@args)))))))))
+                             (doall))
+
+            protocols-sym (gensym "protocols")
+            registry-sym (gensym "registry")
+            impl-sym     (gensym "impl")]
+        `(let [~protocols-sym (:protocols (ctx/current-context))
+               ~registry-sym (:registry (ctx/current-context))]
+           ;; Register protocol methods with impl wrapper before stub can register raw dispatch fns
+           ~@(for [[mname arglist invname qname pname] sig+args]
+               `(when-let [~impl-sym (get ~protocols-sym ~proto)]
+                  (act/register-activity!
+                    ~registry-sym
+                    (fn [& args#] (apply ~invname ~impl-sym args#))
+                    :name ~(str qname))))
+           (reify ~proto
+             ~@(for [[mname arglist invname qname pname] sig+args
+                     :let [sname (symbol mname)
+                           args  (rest (first arglist))]]
+                 ;; implement ~sname
+                 `(~sname [this# ~@args]
+                    (let [f# (intemporal.core/stub (var ~qname))]
+                      (f# ~@args))))))))
 
     :clj
     #_{:clj-kondo/ignore [:unresolved-symbol]}
@@ -110,3 +107,7 @@
              `(~sname [this# ~@args]
                 (let [f# (intemporal.core/stub (var ~qname))]
                   (f# ~@args))))))))
+
+
+;;;;
+;; ctx-aware macros

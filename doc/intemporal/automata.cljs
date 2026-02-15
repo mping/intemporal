@@ -3,7 +3,8 @@
             [intemporal.core :as intemporal]
             [intemporal.fsm :as fsm]
             [hiccups.runtime :as hiccupsrt])
-  (:require-macros [hiccups.core :as hiccups :refer [html]]))
+  (:require-macros [hiccups.core :as hiccups :refer [html]]
+                   [intemporal.internal.context :refer [blet bthen]]))
 
 ;;;;
 ;; main code
@@ -91,13 +92,13 @@
 ;;;;
 ;; bootstrap
 (defn init []
-  (p/let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)
+  (blet [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)
           res    (intemporal/start-workflow engine run-fsm-workflow [resource-rules :state/init :event/create]
                                             :workflow-id "my-wflow")]
 
     ;; set-results!
     (-> (:result res)
-        (p/then (fn [r]
+        (bthen (fn [r]
                   (js/console.log "res" (clj->js r))
                   ;(set-results! (prn-str r))
                   ;(render-tables! engine "my-wflow")
