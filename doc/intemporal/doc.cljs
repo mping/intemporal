@@ -48,13 +48,13 @@
   (set-html! "results" html))
 
 (defn render-table! [id rows]
-  (let [header (keys (first rows))
+  (let [header [:event-type :workflow-id :args :timestamp :seq :activity-name :result]
         thead [:thead
                [:tr
                 (for [h header] [:td h])]]
         tbody [:tbody
                (for [r rows]
-                 [:tr {:class (name (get r :type))}
+                 [:tr ;{:class (get r :type)}
                   (for [h header]
                     [:td (pr-str (get r h))])])]
         tbl   (html
@@ -65,11 +65,8 @@
 
 (defn render-tables! [engine wf-id]
   (let [history (intemporal/get-workflow-history (:store engine) wf-id)]
-    #_#_#_#_
-    (render-table! "tasks" tasks)
-    (render-table! "events" events)
-    (js/console.table (clj->js tasks))
-    (js/console.table (clj->js events))))
+    (render-table! "events" history)
+    (js/console.table (clj->js (mapv clj->js history)))))
 
 ;;;;
 ;; bootstrap
