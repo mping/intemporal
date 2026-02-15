@@ -1,7 +1,10 @@
 (ns intemporal.tests.stub-protocol-test
   (:require [intemporal.core :as intemporal]
             [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]))
+            [matcher-combinators.test :refer [match?]]
+            [intemporal.tests.utils :refer [with-result]])
+  #?(:cljs (:require-macros [intemporal.core :as intemporal]
+                            [intemporal.tests.utils :refer [with-result]])))
 
 (defprotocol MyProto
   (my-method [this x]))
@@ -14,14 +17,14 @@
 
 (defn my-workflow [id]
   (let [proto-stub (intemporal/stub-protocol MyProto)
-        res (my-method proto-stub id)]
+        res        (my-method proto-stub id)]
     {:result res}))
 
 (deftest test-stub-protocol
   (testing "Protocol stubbing via :protocols map"
-    (intemporal/with-workflow-engine [engine {:enable-logging true}]
-      (let [result (intemporal/start-workflow engine my-workflow [21]
-                                              :protocols {MyProto (->MyProtoImpl)})]
+    (let [engine (intemporal/make-workflow-engine :threads 2)]
+      (with-result [result (intemporal/start-workflow engine my-workflow [21]
+                                                      :protocols {MyProto (->MyProtoImpl)})]
         (is (match? {:status :completed
                      :result {:result 42}}
                     result))))))

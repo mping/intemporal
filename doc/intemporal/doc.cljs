@@ -2,7 +2,8 @@
   (:require [intemporal.core :as intemporal]
             [promesa.core :as p]
             [hiccups.runtime :as hiccupsrt])
-  (:require-macros [hiccups.core :as hiccups :refer [html]]))
+  (:require-macros [hiccups.core :as hiccups :refer [html]]
+                   [intemporal.core :refer [stub-protocol]]))
 ;;;;
 ;; main code
 
@@ -10,8 +11,9 @@
   [a :nested])
 
 (defn activity-fn [a]
+  1
   #_(let [f (intemporal/stub nested-fn)]
-    (f :sub)))
+     (f :sub)))
 
 (defprotocol MyActivities
   (foo [this a]))
@@ -22,15 +24,13 @@
 
 (defn my-workflow [i]
   (let [sf (intemporal/stub activity-fn)
-        pr (stub-protocol MyActivities {})
+        pr (intemporal/stub-protocol MyActivities)
 
         sres (sf [1])
         pres (foo pr :X)]
-    (p/let [v1 sres
-            v2 pres]
-      (conj [:root]
-            v1
-            v2))))
+    (conj [:root]
+          sres
+          pres)))
 
 ;;;;
 ;; workflow registration
@@ -72,7 +72,8 @@
 ;; bootstrap
 (defn init []
   (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)
-        res    (intemporal/start-workflow engine my-workflow [1] :workflow-id "my-wflow")]
+        res    (intemporal/start-workflow engine my-workflow [1] :workflow-id "my-wflow"
+                                          :protocols {MyActivities (->MyActivitiesImpl)})]
 
     ;; set-results!
     (-> res

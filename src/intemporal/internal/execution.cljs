@@ -308,15 +308,16 @@
 
 (defn make-workflow-context
   "Create workflow execution context from history."
-  [workflow-id history store registry observer]
-  {:history (atom history)
-   :workflow-id workflow-id
-   :seq-counter (atom 0)
-   :pending-events (atom [])
-   :pending-asyncs (atom [])
-   :store store
-   :registry registry
-   :observer observer})
+  [workflow-id history store registry observer & {:keys [protocols]}]
+  (cond-> {:history (atom history)
+           :workflow-id workflow-id
+           :seq-counter (atom 0)
+           :pending-events (atom [])
+           :pending-asyncs (atom [])
+           :store store
+           :registry registry
+           :observer observer}
+    protocols (assoc :protocols protocols)))
 
 (defn finalize-completed
   "Save completion events and return result. Returns a promise."
@@ -520,7 +521,8 @@
            :error error-map})
         ;; else
         (let [history (p/load-history store workflow-id)
-              ctx (make-workflow-context workflow-id history store registry observer)
+              ctx (make-workflow-context workflow-id history store registry observer
+                                       :protocols (:protocols engine))
               exec-result (binding [ctx/*workflow-context* ctx]
                             (log/debugf "Executing workflow function %s..." workflow-fn)
                             (execute-workflow-fn workflow-fn args))]

@@ -27,9 +27,11 @@
    - :observer - IWorkflowObserver for monitoring
    - :max-iterations - Maximum replay iterations (default: 1000)"
   [{:keys [store] :as engine} workflow-fn args
-   & {:keys [workflow-id observer max-iterations]
+   & {:keys [workflow-id observer max-iterations protocols]
       :or {max-iterations 1000}}]
-  (let [wf-id    (or workflow-id (str (random-uuid)))
+  (let [engine   (cond-> engine
+                   protocols (assoc :protocols protocols))
+        wf-id    (or workflow-id (str (random-uuid)))
         observer (or observer (get engine :observer))]
     (p/save-event store wf-id {:event-type :workflow-started
                                :workflow-id wf-id
@@ -75,9 +77,11 @@
 
    Returns the initial execution result (may be :waiting-* if suspended)."
   [{:keys [store] :as engine} workflow-fn args
-   & {:keys [workflow-id observer max-iterations on-complete]
+   & {:keys [workflow-id observer max-iterations on-complete protocols]
       :or   {max-iterations 1000}}]
-  (let [wf-id    (or workflow-id (str (random-uuid)))
+  (let [engine   (cond-> engine
+                   protocols (assoc :protocols protocols))
+        wf-id    (or workflow-id (str (random-uuid)))
         observer (or observer (get engine :observer))
         wake-fn  (fn wake-fn-impl []
                    (log/with-mdc {:workflow-id wf-id}

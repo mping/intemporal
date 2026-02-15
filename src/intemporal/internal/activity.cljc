@@ -66,8 +66,9 @@
                                  (apply mfn implementation args))
                                :name fullname))))
      :cljs
-     ;; protocol-based registration in CLJS requires more metadata than available at runtime usually
-     (throw (ex-info "register-protocol-activities! not implemented for CLJS" {}))))
+     ;; In CLJS, protocol registration is handled by the stub-protocol macro
+     ;; which has access to protocol metadata at compile time.
+     (throw (ex-info "register-protocol-activities! not needed in CLJS. Use stub-protocol macro." {}))))
 
 (defn get-activity-info [registry activity-name]
   (get @registry activity-name))
