@@ -10,5 +10,5 @@
           db (cfdb/open db)]
 
       ;; Run shared suite
-      (let [store (fdb-store/make-fdb-store db "intemporal-tests")]
+      (with-open [store (fdb-store/make-fdb-store db "intemporal-tests")]
         (suite/run-store-tests store)))))

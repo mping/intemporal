@@ -1,5 +1,6 @@
 (ns intemporal.internal.logging
-  (:require [taoensso.telemere :as t]
+  (:require [clojure.string :as str]
+            [taoensso.telemere :as t]
             #?(:cljs [goog.string :as gstring])
             #?(:cljs [goog.string.format])))
 
@@ -7,47 +8,44 @@
   "Evaluates body with given map merged into telemere's signal context."
   [m & body]
   ;; (t/log! {:level :debug :data {:sym (:sym task)}} ["Found replay event for task with id" (:id task)]))
-  `(t/with-ctx {:data ~m} ~@body))
+  `(t/with-xfn (fn [s#] (update s# :data merge ~m)) ~@body))
 
-(defn- fmt [s args]
+(defn fmat [s args]
   #?(:clj  (apply format s args)
      :cljs (apply gstring/format s args)))
 
-;; Print-style: (info msg) or (info throwable msg)
-(defn trace  [& args] (t/log! :trace (last args)))
-(defn debug  [& args] (t/log! :debug (last args)))
-(defn info   [& args] (t/log! :info  (last args)))
-(defn warn   [& args] (t/log! :warn  (last args)))
-(defn error  [& args] (t/log! :error (last args)))
-(defn fatal  [& args] (t/log! :fatal (last args)))
+(defmacro expand-log [level & args]
+  `(let [args# [~@args]
+         [err# msgs#] (if (instance? #?(:clj Throwable :cljs js/Error) (first args#))
+                        [(first args#) (rest args#)]
+                        [nil args#])
+         msg# (if (seq msgs#)
+                (str/join " " msgs#)
+                (str err#))]
+     (t/log! {:level ~level :msg msg# :error err#})))
 
-;; Format-style: (infof fmt args...) or (infof throwable fmt args...)
-(defn tracef [& args]
-  (if (string? (first args))
-    (t/log! :trace (fmt (first args) (rest args)))
-    (t/log! {:level :trace :error (first args)} (fmt (second args) (nnext args)))))
+(defmacro expand-logf [level & args]
+  `(let [args# [~@args]
+         [err# fmt# fmt-args#] (if (instance? #?(:clj Throwable :cljs js/Error) (first args#))
+                                 [(first args#) (second args#) (drop 2 args#)]
+                                 [nil (first args#) (rest args#)])]
+     (t/log! {:level ~level
+              :msg (fmat fmt# fmt-args#)
+              :error err#})))
 
-(defn debugf [& args]
-  (if (string? (first args))
-    (t/log! :debug (fmt (first args) (rest args)))
-    (t/log! {:level :debug :error (first args)} (fmt (second args) (nnext args)))))
+;; --- Print-style (Variadic) ---
+(defmacro trace [& args] `(expand-log :trace ~@args))
+(defmacro debug [& args] `(expand-log :debug ~@args))
+(defmacro info  [& args] `(expand-log :info  ~@args))
+(defmacro warn  [& args] `(expand-log :warn  ~@args))
+(defmacro error [& args] `(expand-log :error ~@args))
+(defmacro fatal [& args] `(expand-log :fatal ~@args))
 
-(defn infof [& args]
-  (if (string? (first args))
-    (t/log! :info (fmt (first args) (rest args)))
-    (t/log! {:level :info :error (first args)} (fmt (second args) (nnext args)))))
+;; --- Format-style (Printf) ---
+(defmacro tracef [& args] `(expand-logf :trace ~@args))
+(defmacro debugf [& args] `(expand-logf :debug ~@args))
+(defmacro infof  [& args] `(expand-logf :info  ~@args))
+(defmacro warnf  [& args] `(expand-logf :warn  ~@args))
+(defmacro errorf [& args] `(expand-logf :error ~@args))
+(defmacro fatalf [& args] `(expand-logf :fatal ~@args))
 
-(defn warnf [& args]
-  (if (string? (first args))
-    (t/log! :warn (fmt (first args) (rest args)))
-    (t/log! {:level :warn :error (first args)} (fmt (second args) (nnext args)))))
-
-(defn errorf [& args]
-  (if (string? (first args))
-    (t/log! :error (fmt (first args) (rest args)))
-    (t/log! {:level :error :error (first args)} (fmt (second args) (nnext args)))))
-
-(defn fatalf [& args]
-  (if (string? (first args))
-    (t/log! :fatal (fmt (first args) (rest args)))
-    (t/log! {:level :fatal :error (first args)} (fmt (second args) (nnext args)))))

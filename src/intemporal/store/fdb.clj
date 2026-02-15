@@ -4,7 +4,8 @@
             [me.vedang.clj-fdb.transaction :as ftr]
             [me.vedang.clj-fdb.subspace.subspace :as fsub]
             [cheshire.core :as json])
-  (:import [com.apple.foundationdb.tuple Tuple]))
+  (:import [com.apple.foundationdb.tuple Tuple]
+           (java.lang AutoCloseable)))
 
 ;; ============================================================================
 ;; Serialization Helpers
@@ -25,6 +26,9 @@
 ;; ============================================================================
 
 (defrecord FDBStore [db root-subspace callbacks]
+  AutoCloseable
+  (close [this]
+    this)
   p/IStore
   (load-history [_ workflow-id]
     (let [history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))]

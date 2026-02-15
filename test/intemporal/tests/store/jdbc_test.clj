@@ -19,6 +19,6 @@
 (deftest jdbc-store-test
   (testing "JDBC Store Implementation"
     (ensure-database!)
-    (let [store (jdbc-store/make-jdbc-store db-spec)]
+    (with-open [store (jdbc-store/make-jdbc-store db-spec)]
       (suite/run-store-tests store))))
 

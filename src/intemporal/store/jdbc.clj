@@ -4,8 +4,10 @@
             [next.jdbc :as jdbc]
             [next.jdbc.prepare :as prepare]
             [next.jdbc.result-set :as rs]
-            [cheshire.core :as json])
-  (:import (org.postgresql.util PGobject)
+            [cheshire.core :as json]
+            [hikari-cp.core :as hikari])
+  (:import (java.lang AutoCloseable)
+           (org.postgresql.util PGobject)
            (java.sql PreparedStatement)))
 
 (comment
@@ -68,6 +70,9 @@
 ;; ============================================================================
 
 (defrecord JdbcStore [datasource callbacks]
+  AutoCloseable
+  (close [this]
+    (when datasource (hikari/close-datasource datasource)))
   p/IStore
   (load-history [_ workflow-id]
     (let [rows (jdbc/execute! datasource
@@ -174,5 +179,5 @@
   "Creates a new jdbc store"
   [jdbc-url]
   (migrate! jdbc-url)
-  (let [ds (hikari-cp.core/make-datasource {:jdbc-url jdbc-url})]
+  (let [ds (hikari/make-datasource {:jdbc-url jdbc-url})]
     (->JdbcStore ds (atom {}))))
