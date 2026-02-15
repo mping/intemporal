@@ -1,4 +1,4 @@
-(ns intemporal.tests.macros-test
+(ns intemporal.tests.context-macros-test
   (:require [intemporal.core :as intemporal]
             [cljs.test :refer [deftest is testing]]
             [intemporal.internal.context :as ctx]
