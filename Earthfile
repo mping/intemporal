@@ -32,8 +32,7 @@ deps:
 
 build-base:
   FROM +deps
-  # copy src here cause we want to maximize chance to cache deps
-  COPY --dir .clj-kondo build bin dev src doc test resources /build
+  COPY --dir .clj-kondo build bin doc src test resources /build
 
 lint:
   FROM +build-base
@@ -42,11 +41,8 @@ lint:
 build-main:
   FROM +build-base
   RUN clj -T:build compile-main
-build-dev:
-  FROM +build-main
-  RUN clj -T:build compile-dev
 build-jar:
-  FROM +build-dev
+  FROM +build-main
   RUN clj -T:build jar
 build-cljs:
   FROM +build-base
@@ -55,7 +51,6 @@ build-cljs:
 build-all:
   BUILD +lint
   BUILD +build-main
-  BUILD +build-dev
   BUILD +build-jar
   BUILD +build-cljs
 
