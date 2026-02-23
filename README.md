@@ -17,62 +17,42 @@ Two concepts apply:
 ## Usage
 
 Examples:
-- [demo_workflow.clj](./dev/intemporal/demo_workflow.clj)
-- [demo_automata.cljc](./dev/intemporal/demo_automata.cljc)
-- [demo_saga.cljc](./dev/intemporal/demo_saga.cljc)
+- [doc.cljs](./doc/intemporal/doc.cljs)
+- [automata.cljs](./doc/intemporal/automata.cljs)
 
 > Note that when the runtime is javascript, all activities will return a promise.
-> Thus, the use of `promesa.core/let` and/or `intemporal.macros/env-let` is advised
+> Thus, the use of `promesa.core/let` is advised
 
 ```clojure
+(ns intemporal.demo
+  (:require [intemporal.core :as intemporal]
+            [intemporal.store :as store]))
 
-(ns intemporal.demo-workflow
-  (:require [intemporal.store :as store]
-            [intemporal.workflow :as w]
-            [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]))
-
-;;;;
-;; demo
-
-(defn nested-fn [a]
-  [a :nested])
-
+;; Activities are regular functions
 (defn activity-fn [a]
-  (let [f (stub-function nested-fn)]
-    (conj a :activity (f :sub))))
+  [:processed a])
 
+;; Protocols can also be used as activities
 (defprotocol MyActivities
   (foo [this a]))
 
 (defrecord MyActivitiesImpl []
   MyActivities
-  (foo [this a] (println "record was called:" ) [a :child]))
+  (foo [this a] [a :child]))
 
-(defn-workflow my-workflow [i]
-  (let [sf (stub-function activity-fn)
-        pr (stub-protocol MyActivities {})]
-    (conj [:root]
-          (sf [1])
-          (foo pr :X))))
+;; Workflows orchestrate activities via stubs
+(defn my-workflow [i]
+  (let [act (intemporal/stub #'activity-fn)
+        pr  (intemporal/stub-protocol MyActivities)]
+    {:activity (act i)
+     :protocol (foo pr :X)}))
 
-(def mstore (store/make-memstore))
-(def executor (w/start-poller! mstore {`MyActivities (->MyActivitiesImpl)}))
-
-;; note that in cljs, this returns a promise
-(def res (w/with-env {:store mstore}
-           (my-workflow 1)))
-
-(defn pprint-table [table]
-  (clojure.pprint/print-table table))
-
-(defn print-tables []
-  (let [tasks (store/list-tasks mstore)
-        events (->> (store/list-events mstore)
-                    (sort-by :id))]
-    (pprint-table tasks)
-    (pprint-table events)))
-
-(print-tables)
+;; Create an engine and run the workflow
+(intemporal/with-workflow-engine [engine {:threads 2}]
+  (let [result (intemporal/start-workflow engine
+                                          my-workflow [1]
+                                          :protocols {MyActivities (->MyActivitiesImpl)})]
+    (println result)))
 ```
 
 # TODO
@@ -85,6 +65,6 @@ Examples:
 - [x] Convert to `.cljc` 
 - [x] Workers + Queues
 - [x] Saga pattern
-- [ ] Workflow cancellation
+- [x] Workflow cancellation
 - [x] OT tracing
-- [ ] Signals
+- [x] Signals

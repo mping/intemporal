@@ -17,29 +17,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The codebase is organized into several layers:
 
-1. **Core API** ([src/intemporal/core.clj](src/intemporal/core.clj))
+1. **Core API** ([src/intemporal/core.cljc](src/intemporal/core.cljc))
    - `stub` - Creates activity stubs for use in workflows
-   - Main workflow execution entry points
-   - Handles activity caching, replay, and async operations
+   - `stub-protocol` - Creates protocol stubs for use in workflows
+   - `start-workflow`, `resume-workflow` - Workflow execution entry points
+   - `make-workflow-engine`, `with-workflow-engine` - Engine lifecycle
+   - `wait-for-signal`, `send-signal`, `sleep`, `async`, `join` - Workflow operations
+   - `run-child-workflow`, `cancel-workflow` - Child workflows and cancellation
 
-2. **Protocol Definitions** ([src/intemporal/protocol.clj](src/intemporal/protocol.clj))
+2. **Protocol Definitions** ([src/intemporal/protocol.cljc](src/intemporal/protocol.cljc))
    - `IStore` - Workflow persistence (history, signals, cancellation)
    - `IActivityExecutor` - Activity execution with timeout/retry
    - `IScheduler` - Timer scheduling
    - `IWorkflowObserver` - Event observation for monitoring/tracing
 
 3. **Internal Components** (src/intemporal/internal/)
-   - `context.clj` - Dynamic workflow context with sequence counters, pending events
-   - `execution.clj` - Workflow execution engine, handles suspensions and retries
-   - `runtime.clj` - Default implementations of `IActivityExecutor` and `IScheduler`
-   - `activity.clj` - Activity registration and metadata
-   - `error.clj` - Error types (suspensions, interruptions, rejections, cancellations)
-   - `logging.clj` - Structured logging with MDC support
-   - `macros.cljc` - `defn-workflow`, `stub-function`, `stub-protocol` macros
+   - `context.cljc` - Dynamic workflow context with sequence counters, pending events
+   - `execution.clj` / `execution.cljs` - Workflow execution engine (platform-specific)
+   - `runtime.clj` / `runtime.cljs` - Default implementations of `IActivityExecutor` and `IScheduler` (platform-specific)
+   - `activity.cljc` - Activity registration and metadata
+   - `error.cljc` - Error types (suspensions, interruptions, rejections, cancellations)
+   - `logging.cljc` - Structured logging via taoensso/telemere
+   - `macros.cljc` - `stub-protocol` macro
+   - `fns/start_workflow.clj` / `fns/start_workflow.cljs` - Workflow start logic (platform-specific)
 
-4. **Store Implementations** ([src/intemporal/store.clj](src/intemporal/store.clj))
+4. **Store Implementations** ([src/intemporal/store.cljc](src/intemporal/store.cljc))
    - `InMemoryStore` - In-memory implementation of `IStore`
-   - Additional stores: FoundationDB (`:fdb` alias), JDBC (`:jdbc` alias)
+   - Additional stores: FoundationDB (`store/fdb.clj`, `:fdb` alias), JDBC (`store/jdbc.clj`, `:jdbc` alias)
+
+5. **Observer** ([src/intemporal/observer.cljc](src/intemporal/observer.cljc))
+   - `noop-observer`, `make-logging-observer` - Observer factories
+   - `observer/otel.clj` - OpenTelemetry observer implementation
 
 ### Key Mechanisms
 
@@ -78,6 +86,10 @@ bin/kaocha :test --focus intemporal.tests.crash.future-cancel-test
 
 # Run tests via npx
 npx shadow-cljs compile node
+
+# Focus cljs tests
+bin/kaocha :test-cljs --focus cljs:intemporal.tests.crash.future-cancel-test
+
 ```
 
 **Important**: Test namespaces use hyphens (e.g., `signal-wait-crash-test`), which map to underscored file names (`signal_wait_crash_test.clj`).
@@ -117,49 +129,58 @@ clojure -T:build jar
 
 ### Debug Configuration
 
-The test runner ([bin/kaocha](bin/kaocha)) automatically starts a debug agent on port 5005:
+The test runner ([bin/kaocha](bin/kaocha)) has a commented-out debug agent on port 5005 that can be enabled:
 ```
 -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
 ```
 
 ### OpenTelemetry Tracing
 
-The project includes OpenTelemetry instrumentation (see [deps.edn](deps.edn) lines 14-24):
+The project includes OpenTelemetry instrumentation (see [deps.edn](deps.edn) `:dev` alias, `_jvm-opts`):
 - Java agent: `./opentelemetry-javaagent.jar`
 - OTLP endpoint: `http://localhost:4317` (gRPC)
 - Service name: `intemporal`
 - Metrics and logs are disabled by default
+- Note: The OTel JVM opts use the `_jvm-opts` key (underscore prefix), so they are **not active by default** - they must be manually enabled
 
 ## Code Patterns
 
 ### Defining a Workflow
 
-```clojure
-(require '[intemporal.core :as w])
-(require '[intemporal.internal.macros :refer [defn-workflow]])
+Workflows are regular functions that use `stub` to wrap activity calls:
 
-(defn-workflow my-workflow [arg]
-  (let [activity-stub (w/stub some-activity-fn)]
-    (activity-stub arg)))
+```clojure
+(require '[intemporal.core :as intemporal])
+
+(defn my-activity [arg]
+  [:processed arg])
+
+(defn my-workflow [arg]
+  (let [act (intemporal/stub #'my-activity)]
+    (act arg)))
 ```
 
 ### Activities
 
 Activities can be:
-- Regular functions: `(w/stub my-function)`
-- Protocol methods: `(w/stub-protocol MyProtocol {})`
+- Regular functions (via var): `(intemporal/stub #'my-function)`
+- Protocol methods: `(intemporal/stub-protocol MyProtocol)`
 
 ### Running Workflows
 
 ```clojure
-(require '[intemporal.store :as store])
+(require '[intemporal.core :as intemporal])
 
-(def my-store (store/make-memstore))
-(def executor (w/start-poller! my-store {`MyProtocol (->MyProtocolImpl)}))
+;; Using with-workflow-engine (ensures cleanup)
+(intemporal/with-workflow-engine [engine {:threads 4}]
+  (intemporal/start-workflow engine my-workflow [arg]))
 
-;; Execute workflow (returns result in JVM, Promise in ClojureScript)
-(def result (w/with-env {:store my-store}
-              (my-workflow args)))
+;; Or manually managing the engine
+(let [engine (intemporal/make-workflow-engine :threads 4)]
+  (try
+    (intemporal/start-workflow engine my-workflow [arg])
+    (finally
+      (intemporal/shutdown-engine engine))))
 ```
 
 ## Testing Guidelines
@@ -167,13 +188,19 @@ Activities can be:
 ### Test Organization
 
 - [test/intemporal/tests/](test/intemporal/tests/) - Main test directory
-  - `async_test.clj` - Async operation tests
-  - `cancellation_test.clj` - Workflow cancellation
-  - `child_workflow_test.clj` - Nested workflow tests
-  - `error_test.clj` - Error handling and retry policies
-  - `signal_test.clj` - Signal send/receive
-  - `timer_test.clj` - Timer scheduling
-  - `tracing_test.clj` - OpenTelemetry tracing
+  - `async_test.clj` / `.cljs` - Async operation tests
+  - `cancellation_test.clj` / `.cljs` - Workflow cancellation
+  - `child_workflow_test.clj` / `.cljs` - Nested workflow tests
+  - `error_test.clj` / `.cljs` - Error handling and retry policies
+  - `signal_test.clj` / `.cljs` - Signal send/receive
+  - `timer_test.clj` / `.cljs` - Timer scheduling
+  - `tracing_test.clj` - OpenTelemetry tracing (JVM only)
+  - `protocol_test.clj` - Protocol tests
+  - `replay_check_test.clj` - Replay verification
+  - `stub_protocol_test.cljc` - Protocol stubbing tests
+  - `context_macros_test.cljs` - Context macros (ClojureScript only)
+  - `utils.cljc` - Test utilities
+  - [store/](test/intemporal/tests/store/) - Store-specific tests
   - [crash/](test/intemporal/tests/crash/) - Crash recovery scenarios
 
 ### Crash Recovery Tests
@@ -188,15 +215,18 @@ Tests in `test/intemporal/tests/crash/` verify workflow resilience:
 
 ### Required Dependencies (all environments)
 - Clojure 1.12.1+
-- tools.logging + logback (structured logging)
-- OpenTelemetry API (tracing)
+- taoensso/telemere (structured logging)
+- clj-otel-api (OpenTelemetry tracing)
 - macrovich (cross-platform macros)
+- promesa (promises, required for ClojureScript)
+- cheshire (JSON)
+- shadow-cljs
 
 ### Optional Dependencies (via aliases)
 - `:fdb` - FoundationDB client
-- `:jdbc` - PostgreSQL/JDBC persistence
-- `:cljs` - ClojureScript support (shadow-cljs)
-- `:dev` - Testing libraries (Kaocha, test.check, matcher-combinators, spy)
+- `:jdbc` - PostgreSQL/JDBC persistence (next.jdbc, PostgreSQL, HikariCP, migratus)
+- `:cljs` - ClojureScript support
+- `:dev` - Testing libraries (Kaocha, kaocha-cloverage, kaocha-junit-xml, kaocha-cljs, logback, spy, matcher-combinators, clj-async-profiler)
 
 ## Important Notes
 
