@@ -28,7 +28,7 @@ jobs:
       - name: Check earthly version
         run: earthly --version
       - name: Run tests with earthly
-        run: earthly -P +test --ci --remote-cache=ghcr.io/mping/intemporal:ci-cache
+        run: earthly -P +test --ci --quiet --remote-cache=ghcr.io/mping/intemporal:ci-cache
       - name: Setup LCOV
         uses: hrishikesh-kadam/setup-lcov@v1
       - uses: kcjpop/coverage-comments@v2.2
