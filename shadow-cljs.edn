@@ -16,6 +16,7 @@
           :node {:target    :node-test
                  :output-to "target/tests.js"
                  :ns-regexp "-test$"
+                 :preloads  [intemporal.tests.node-keepalive]
                  :compiler-options {:source-map "true"}
                  :autorun   true}
 

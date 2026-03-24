@@ -38,3 +38,7 @@ coverage/
 .calva/
 .venv/
 memory-bank/
+.claude
+
+src2/
+test2/

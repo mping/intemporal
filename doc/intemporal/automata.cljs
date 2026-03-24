@@ -1,11 +1,10 @@
 (ns intemporal.automata
-  (:require [intemporal.store :as s]
-            [intemporal.workflow :as w]
-            [promesa.core :as p]
+  (:require [promesa.core :as p]
+            [intemporal.core :as intemporal]
             [intemporal.fsm :as fsm]
             [hiccups.runtime :as hiccupsrt])
-  (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow env-let]]
-                   [hiccups.core :as hiccups :refer [html]]))
+  (:require-macros [hiccups.core :as hiccups :refer [html]]
+                   [intemporal.internal.context :refer [blet bthen]]))
 
 ;;;;
 ;; main code
@@ -43,25 +42,20 @@
 ;;;;
 ;; workflow registration
 
-(defn-workflow run-fsm-workflow
-  [rules init-state init-event]
-  (let [stub      (stub-function process-event)
-        initstate {::fsm/rules rules ::fsm/state init-state}
-        ;; capture the env before chaining promises
-        env       (w/current-env)]
+(defn run-fsm-workflow [rules init-state init-event]
+  (let [stub      (intemporal/stub process-event)
+        initstate {::fsm/rules rules ::fsm/state init-state}]
 
     (p/loop [state initstate
              evt   init-event]
       (if evt
         (p/recur (fsm/transit state evt)
-                 ;; because we may end up in another "thread" we may loose the dynamic *env*
-                 ;; so we need to set it up again
-                 (w/with-env env
-                   (stub evt)))
+                 (stub evt))
         (::fsm/state state)))))
 
 ;;;;
 ;; workflow registration
+
 
 (defn set-html! [id html]
   (-> js/document
@@ -69,54 +63,47 @@
       (.-innerHTML)
       (set! html)))
 
-(defn set-results! [html]
-  (set-html! "results" html))
-
 (defn render-table! [id rows]
-  (let [header (keys (first rows))
-        thead  [:thead
-                [:tr
-                 (for [h header] [:td h])]]
-        tbody  [:tbody
-                (for [r rows]
-                  [:tr {:class (name (get r :type))}
-                   (for [h header]
-                     [:td (pr-str (get r h))])])]
-        tbl    (html
-                 [:table {:role "grid"}
-                  thead
-                  tbody])]
+  (let [header [:event-type :workflow-id :args :timestamp :seq :activity-name :result]
+        thead [:thead
+               [:tr
+                (for [h header] [:td h])]]
+        tbody [:tbody
+               (for [r rows]
+                 [:tr ;{:class (get r :type)}
+                  (for [h header]
+                    [:td (pr-str (get r h))])])]
+        tbl   (html
+                [:table {:role "grid"}
+                 thead
+                 tbody])]
     (set-html! id tbl)))
 
+(defn render-tables! [engine wf-id]
+  (let [history (intemporal/get-workflow-history (:store engine) wf-id)]
+    (render-table! "events" history)
+    (js/console.table (clj->js (mapv clj->js history)))))
 
-(defn render-tables! [the-store]
-  (let [tasks  (s/list-tasks the-store)
-        events (->> (s/list-events the-store)
-                    (sort-by :id))]
-    (render-table! "tasks" tasks)
-    (render-table! "events" events)
-    (js/console.table (clj->js tasks))
-    (js/console.table (clj->js events))))
 
 ;;;;
 ;; bootstrap
 (defn init []
-  (let [mstore (s/make-store)
-        stop   (w/start-worker! mstore)
-        res    (w/with-env {:store mstore}
-                 (run-fsm-workflow resource-rules :state/init :event/create))]
+  (blet [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)
+          res    (intemporal/start-workflow engine run-fsm-workflow [resource-rules :state/init :event/create]
+                                            :workflow-id "my-wflow")]
 
     ;; set-results!
-    (-> res
-        (p/then (fn [r]
-                  (js/console.log "res" r)
-                  (set-results! (prn-str r))
-                  (render-tables! mstore)))
+    (-> (:result res)
+        (bthen (fn [r]
+                  (js/console.log "res" (clj->js r))))
+                  ;(set-results! (prn-str r))
+                  ;(render-tables! engine "my-wflow")
+
 
         (p/catch (fn [r]
-                   (js/console.error "error" r)
-                   (set-results! (prn-str r))))
-        (p/finally (fn [_ _] (stop))))))
+                   (js/console.error "error" r))))))
+                   ;(set-results! (prn-str r)
+
 
 (comment
   (require '[shadow.cljs.devtools.api :as shadow])

@@ -85,14 +85,21 @@
 
             <h3>Execution</h3>
             <pre><code>
-;; create a store
-(def mstore (s/make-memstore))
-;; start some worker that knows how to resolve protocol implementations
-(def worker (w/start-worker! mstore {`MyActivities (->MyActivitiesImpl)}))
+(defn init []
+  (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)
+        res    (intemporal/start-workflow engine my-workflow [1] :workflow-id "my-wflow"
+                                          :protocols {MyActivities (->MyActivitiesImpl)})]
 
-;; finally, call your workflow
-(let [res (w/with-env {:store mstore}
-             (my-workflow 1))]
+    ;; set-results!
+    (-> res
+        (bthen (fn [r]
+                  (js/console.log "res" (clj->js r))
+                  (set-results! (prn-str r))
+                  (render-tables! engine "my-wflow")))
+
+        (p/catch (fn [r]
+                   (js/console.error "error" r)
+                   (set-results! (prn-str r)))))))
 </code>
 </pre>
             <h3>Live example</h3>

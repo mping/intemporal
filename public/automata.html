@@ -85,16 +85,16 @@
             <h3>Workflow definition</h3>
             <pre><code>
 
-(defn run-fsm-workflow
-  [rules init-state init-event]
-  (let [stub      (a/stub-protocol EventHandler (make-event-handler) {:idempotent true})
+(defn run-fsm-workflow [rules init-state init-event]
+  (let [stub      (intemporal/stub process-event)
         initstate {::fsm/rules rules ::fsm/state init-state}]
 
-    (loop [state initstate
-           evt   init-event]
-      (if-let [nxt (process-event stub evt)]
-        (recur (fsm/transit state evt) nxt)
-        state))))
+    (p/loop [state initstate
+             evt   init-event]
+      (if evt
+        (p/recur (fsm/transit state evt)
+                 (stub evt))
+        (::fsm/state state)))))
 </code>
 </pre>
 
