@@ -7,14 +7,8 @@
                    [intemporal.internal.context :refer [blet bthen]]))
 ;;;;
 ;; main code
-
-(defn nested-fn [a]
-  [a :nested])
-
 (defn activity-fn [a]
-  1
-  #_(let [f (intemporal/stub nested-fn)]
-     (f :sub)))
+  [:some a ])
 
 (defprotocol MyActivities
   (foo [this a]))

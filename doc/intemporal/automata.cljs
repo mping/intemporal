@@ -4,7 +4,7 @@
             [intemporal.fsm :as fsm]
             [hiccups.runtime :as hiccupsrt])
   (:require-macros [hiccups.core :as hiccups :refer [html]]
-                   [intemporal.internal.context :refer [blet bthen]]))
+                   [intemporal.internal.context :refer [blet bthen bloop]]))
 
 ;;;;
 ;; main code
@@ -46,8 +46,8 @@
   (let [stub      (intemporal/stub process-event)
         initstate {::fsm/rules rules ::fsm/state init-state}]
 
-    (p/loop [state initstate
-             evt   init-event]
+    (bloop [state initstate
+            evt   init-event]
       (if evt
         (p/recur (fsm/transit state evt)
                  (stub evt))
@@ -56,12 +56,14 @@
 ;;;;
 ;; workflow registration
 
-
 (defn set-html! [id html]
   (-> js/document
       (.getElementById id)
       (.-innerHTML)
       (set! html)))
+
+(defn set-results! [html]
+  (set-html! "results" html))
 
 (defn render-table! [id rows]
   (let [header [:event-type :workflow-id :args :timestamp :seq :activity-name :result]
@@ -84,7 +86,6 @@
     (render-table! "events" history)
     (js/console.table (clj->js (mapv clj->js history)))))
 
-
 ;;;;
 ;; bootstrap
 (defn init []
@@ -95,14 +96,12 @@
     ;; set-results!
     (-> (:result res)
         (bthen (fn [r]
-                  (js/console.log "res" (clj->js r))))
-                  ;(set-results! (prn-str r))
-                  ;(render-tables! engine "my-wflow")
-
-
+                  (js/console.log "res" (clj->js r))
+                  (set-results! (prn-str r))
+                  (render-tables! engine "my-wflow")))
         (p/catch (fn [r]
-                   (js/console.error "error" r))))))
-                   ;(set-results! (prn-str r)
+                   (js/console.error "error" r)
+                   (set-results! (prn-str r)))))))
 
 
 (comment

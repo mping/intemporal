@@ -123,3 +123,16 @@
                 (fn [& args#]
                   (binding [*workflow-context* ~ctx-sym]
                     (apply ~f args#))))))))
+
+(defmacro bloop
+  "Like p/loop, but automatically propagates *workflow-context*.
+   Use p/recur inside the body as normal."
+  [bindings & body]
+  (macros/case
+    :clj (throw (IllegalArgumentException. "CLJS only"))
+    :cljs
+    (let [ctx-sym (gensym "workflow-ctx")]
+      `(let [~ctx-sym *workflow-context*]
+         (promesa.core/loop ~bindings
+           (binding [*workflow-context* ~ctx-sym]
+             ~@body))))))
