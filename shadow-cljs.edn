@@ -6,7 +6,7 @@
                 :output-dir "public/js"
                 :asset-path "/js"
                 :compiler-options {:infer-externs true
-                                   :optimizations :none}
+                                   :optimizations :simple}
                 :modules {:shared {:entries []}
                           :main     {:init-fn intemporal.doc/init
                                      :depends-on #{:shared}}

@@ -46,7 +46,7 @@ build-jar:
   RUN clj -T:build jar
 build-cljs:
   FROM +build-base
-  RUN npx shadow-cljs compile doc
+  RUN npx shadow-cljs release doc
 
 build-all:
   BUILD +lint
