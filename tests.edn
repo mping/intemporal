@@ -33,11 +33,15 @@
           :test-paths   ["test"]}
 
          ;; jvm based tests
-         {:id           :test
+         {:id                    :test
           ;:kaocha.filter/skip-meta [:crash]
-          :ns-patterns  ["-test$"]
-          :source-paths ["src"]
-          :test-paths   ["test"]}
+          :ns-patterns           ["-test$"]
+          ;; Exclude the jepsen namespace — it is not a kaocha test suite and
+          ;; its ns name ends in .runner / .worker (not -test) anyway, but
+          ;; exclude explicitly to be safe.
+          :kaocha.filter/skip-meta [:jepsen]
+          :source-paths          ["src"]
+          :test-paths            ["test"]}
          {:id   :test-cljs
           :type :kaocha.type/cljs
           :cljs/repl-env cljs.repl.node/repl-env
