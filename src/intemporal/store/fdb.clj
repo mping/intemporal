@@ -112,6 +112,13 @@
   (unregister-signal-callback [_ workflow-id signal-name]
     (swap! callbacks update workflow-id dissoc signal-name))
 
+  (register-wake-callback [_ workflow-id callback]
+    (swap! callbacks assoc-in [workflow-id ::wake] callback))
+
+  (wake-workflow [_ workflow-id]
+    (when-let [callback (get-in @callbacks [workflow-id ::wake])]
+      (future (callback))))
+
   (is-cancelled? [_ workflow-id]
     (ftr/run db
       (fn [tx]

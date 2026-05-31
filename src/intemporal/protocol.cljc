@@ -16,6 +16,8 @@
   (consume-signal [store workflow-id signal-name] "Consume and remove a signal")
   (register-signal-callback [store workflow-id signal-name callback] "Register callback to be invoked when signal arrives")
   (unregister-signal-callback [store workflow-id signal-name] "Unregister signal callback")
+  (register-wake-callback [store workflow-id callback] "Register a generic wake callback, fired by wake-workflow to force the workflow to re-enter its execution loop (e.g. to observe cancellation)")
+  (wake-workflow [store workflow-id] "Fire the registered wake callback for a workflow, forcing it to re-enter its loop and re-evaluate state such as the cancellation flag. No-op if none registered.")
   (is-cancelled? [store workflow-id] "Check if workflow is cancelled")
   (mark-cancelled [store workflow-id] "Mark workflow as cancelled")
   (get-workflow-status [store workflow-id] "Get current workflow status"))

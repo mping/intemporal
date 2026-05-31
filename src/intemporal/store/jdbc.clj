@@ -92,7 +92,10 @@
         ;; Ensure workflow exists
         (jdbc/execute! tx ["INSERT INTO intemporal_workflows (id) VALUES (?) ON CONFLICT (id) DO NOTHING"
                            workflow-id])
-        ;; Insert events
+        ;; Insert events. DO UPDATE keeps the write idempotent under normal
+        ;; replay (the engine re-writes the same seq with identical data on
+        ;; each pass). Rejecting a *concurrent* writer is the lease's job
+        ;; (Phase C) — see validate-lease in save-events there.
         (doseq [event events]
           (let [seq-num    (:seq event)
                 event-type (name (:event-type event))
@@ -145,6 +148,13 @@
 
   (unregister-signal-callback [_ workflow-id signal-name]
     (swap! callbacks update workflow-id dissoc signal-name))
+
+  (register-wake-callback [_ workflow-id callback]
+    (swap! callbacks assoc-in [workflow-id ::wake] callback))
+
+  (wake-workflow [_ workflow-id]
+    (when-let [callback (get-in @callbacks [workflow-id ::wake])]
+      (future (callback))))
 
   (is-cancelled? [_ workflow-id]
     (let [row (jdbc/execute-one! datasource

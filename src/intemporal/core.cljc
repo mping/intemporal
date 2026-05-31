@@ -410,10 +410,13 @@
 
 (defn cancel-workflow
   "Cancel a running workflow.
-   The workflow will be cancelled at the next suspension point."
+   The workflow is cancelled at the next suspension point. If it is currently
+   suspended (e.g. waiting on a signal), wake-workflow forces it to re-enter its
+   loop so it observes the cancellation flag rather than waiting forever."
   [store workflow-id]
   (log/with-mdc {:workflow-id workflow-id}
     (p/mark-cancelled store workflow-id)
+    (p/wake-workflow store workflow-id)
     (log/debugf "Cancelling workflow"))
   {:cancelled true :workflow-id workflow-id})
 

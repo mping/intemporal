@@ -60,6 +60,14 @@
   (unregister-signal-callback [_ workflow-id signal-name]
     (swap! state update-in [:workflows workflow-id :signal-callbacks] dissoc signal-name))
 
+  (register-wake-callback [_ workflow-id callback]
+    (swap! state assoc-in [:workflows workflow-id :wake-callback] callback))
+
+  (wake-workflow [_ workflow-id]
+    (when-let [callback (get-in @state [:workflows workflow-id :wake-callback])]
+      #?(:clj (future (callback))
+         :cljs (js/setTimeout callback 0))))
+
   (is-cancelled? [_ workflow-id]
     (get-in @state [:workflows workflow-id :cancelled] false))
 

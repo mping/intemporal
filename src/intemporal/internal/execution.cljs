@@ -247,38 +247,38 @@
         :wait-timer))))
 
 (defn process-signal [store workflow-id suspension-data pending-events wake-fn observer]
-  (let [{:keys [seq signal-name]} suspension-data]
+  (let [{:keys [seq signal-name]} suspension-data
+        save-received (fn [signal-data]
+                        (p/save-event store workflow-id {:event-type  :signal-received
+                                                         :seq         seq
+                                                         :signal-name signal-name
+                                                         :signal-id   (:id signal-data)
+                                                         :payload     (:payload signal-data)
+                                                         :timestamp   (utils/current-time-ms)})
+                        (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data)))]
     ;; Save pending events
     (p/save-events store workflow-id pending-events)
+    ;; Register the wake callback FIRST, then check for an already-available
+    ;; signal (fixes bug 2.1: a signal arriving between the consume-check and
+    ;; the registration could previously be lost). consume-signal is atomic in
+    ;; every store, so exactly one of {the inline check below, the callback}
+    ;; consumes the signal — the other observes nil and no-ops. The callback
+    ;; only wakes if it was the one that consumed, so the inline :continue path
+    ;; never double-executes the workflow.
+    (p/register-signal-callback store workflow-id signal-name
+                               (fn []
+                                 (when-let [signal-data (p/consume-signal store workflow-id signal-name)]
+                                   (save-received signal-data)
+                                   (p/unregister-signal-callback store workflow-id signal-name)
+                                   (when wake-fn (wake-fn)))))
     (if-let [signal-data (p/consume-signal store workflow-id signal-name)]
-      ;; Signal already available - process immediately
+      ;; We won the race inline: handle the signal and continue synchronously.
       (do
-        (p/save-event store workflow-id {:event-type  :signal-received
-                                         :seq         seq
-                                         :signal-name signal-name
-                                         :signal-id   (:id signal-data)
-                                         :payload     (:payload signal-data)
-                                         :timestamp   (utils/current-time-ms)})
-        (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data))
+        (p/unregister-signal-callback store workflow-id signal-name)
+        (save-received signal-data)
         :continue)
-      ;; ELSE Signal not yet available - register callback and wait
-      (do
-        (p/register-signal-callback store workflow-id signal-name
-                                   (fn []
-                                     ;; When signal arrives, consume it and save event
-                                     (when-let [signal-data (p/consume-signal store workflow-id signal-name)]
-                                       (p/save-event store workflow-id {:event-type  :signal-received
-                                                                        :seq         seq
-                                                                        :signal-name signal-name
-                                                                        :signal-id   (:id signal-data)
-                                                                        :payload     (:payload signal-data)
-                                                                        :timestamp   (utils/current-time-ms)})
-                                       (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data)))
-                                     ;; Unregister callback
-                                     (p/unregister-signal-callback store workflow-id signal-name)
-                                     ;; Wake up the workflow
-                                     (when wake-fn (wake-fn))))
-        :wait-signal))))
+      ;; No signal yet: stay suspended; the armed callback will wake us.
+      :wait-signal)))
 
 (defn process-signal-with-timeout [store scheduler workflow-id suspension-data
                                     pending-events wake-fn observer]
@@ -596,7 +596,13 @@
 
                              (if (= action :continue)
                                (prom/recur (inc iteration))
-                               (action->result action workflow-id)))
+                               ;; About to wait: register a generic wake callback so an
+                               ;; external actor (e.g. cancel-workflow) can force this
+                               ;; workflow to re-enter and observe the cancel flag.
+                               (do
+                                 (when wake-fn
+                                   (p/register-wake-callback store workflow-id wake-fn))
+                                 (action->result action workflow-id))))
 
                            :failed
                            (finalize-failed store workflow-id

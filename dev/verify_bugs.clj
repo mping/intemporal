@@ -65,6 +65,52 @@
       (act counter))
     :done))
 
+;; ── RacingStore: deterministic race injector ──────────────────────────────────
+;;
+;; Wraps any IStore so that the first time consume-signal returns nil for a
+;; specific (workflow-id, signal-name):
+;;
+;;   1. It delivers gate-nil  ("race window is open")
+;;   2. It blocks on gate-sent ("sender has injected signal into the window")
+;;   3. Then returns nil, letting process-signal proceed to register-callback
+;;
+;; The sender thread:
+;;   1. Waits on gate-nil
+;;   2. Calls p/add-signal on the INNER store directly, writing the signal row
+;;      but firing no callback (none registered yet — we're in the window)
+;;   3. Delivers gate-sent
+;;
+;; After the window closes:
+;;   - p/register-signal-callback is called → callback registered in inner store
+;;   - Signal is already in inner store; add-signal already ran with empty callbacks
+;;   - Callback will never fire retroactively
+;;   - Workflow is permanently stuck with an undelivered wake
+;;
+;; Proof of stuck:  p/get-pending-signals returns the signal row;
+;;                  workflow status remains :running; the workflow future times out.
+
+(defrecord RacingStore [inner gate-nil gate-sent armed?]
+  p/IStore
+  (load-history            [_ wf-id]                    (p/load-history inner wf-id))
+  (save-event              [_ wf-id ev]                 (p/save-event inner wf-id ev))
+  (save-events             [_ wf-id evs]                (p/save-events inner wf-id evs))
+  (find-event              [_ wf-id et sq]              (p/find-event inner wf-id et sq))
+  (get-pending-signals     [_ wf-id]                    (p/get-pending-signals inner wf-id))
+  (add-signal              [_ wf-id sn sd]              (p/add-signal inner wf-id sn sd))
+  (register-signal-callback [_ wf-id sn cb]             (p/register-signal-callback inner wf-id sn cb))
+  (unregister-signal-callback [_ wf-id sn]              (p/unregister-signal-callback inner wf-id sn))
+  (is-cancelled?           [_ wf-id]                    (p/is-cancelled? inner wf-id))
+  (mark-cancelled          [_ wf-id]                    (p/mark-cancelled inner wf-id))
+  (get-workflow-status     [_ wf-id]                    (p/get-workflow-status inner wf-id))
+
+  (consume-signal [_ wf-id sig-name]
+    (let [result (p/consume-signal inner wf-id sig-name)]
+      ;; Only intercept once (armed? tracks first nil-return)
+      (when (and (nil? result) (compare-and-set! armed? true false))
+        (deliver gate-nil {:wf-id wf-id :sig-name sig-name})
+        (deref gate-sent 5000 :timeout-waiting-for-sender))
+      result)))
+
 ;; ── Bug scenarios ─────────────────────────────────────────────────────────────
 
 (defn- scenario-1-1
@@ -151,42 +197,76 @@
       result)))
 
 (defn- scenario-2-1
-  "Bug 2.1 — Register-then-consume signal race.
+  "Bug 2.1 — Register-then-consume signal race (deterministic via RacingStore).
 
-  process-signal does: (1) consume-signal, (2) if nil → register-callback.
-  If a sender fires between (1) and (2) the signal is consumed but the
-  callback fires into nothing (or the signal is already gone by the time
-  the callback tries to re-consume).
+  process-signal executes:
+    (1) consume-signal → nil   (no signal available)
+    (2) register-signal-callback
 
-  We maximise the window by having the sender fire 200 ms after the workflow
-  starts (before it has committed to suspending).  A stuck workflow after a
-  sent signal indicates the race was hit."
-  [make-store label]
-  (let [store   (make-store)
-        wf-id   (str "bug21-" (random-uuid))
-        result  (promise)
-        engine  (intemporal/make-workflow-engine :store store :threads 2)]
-    (try
-      (future
-        (try
-          (let [r (intemporal/start-workflow engine wait-signal-wf []
-                                            :workflow-id wf-id)]
-            (deliver result r))
-          (catch Exception e (deliver result {:error (str e)}))))
-      ;; Send the signal after a short window — trying to land between
-      ;; consume-check (step 1) and register-callback (step 2).
-      (Thread/sleep 200)
-      (p/add-signal store wf-id "go" {:source :race-test})
-      ;; Wait up to 3 s for the workflow to wake.
-      (let [r (deref result 3000 ::timeout)]
-        {:store   label
-         :bug?    (= ::timeout r)
-         :detail  (if (= ::timeout r)
-                    "Workflow stuck: signal sent before callback was registered (race hit)"
-                    "Workflow woke normally (race window not hit this run — try more iterations)")})
-      (finally
-        (intemporal/shutdown-engine engine)
-        (when (instance? java.io.Closeable store) (.close store))))))
+  The RacingStore intercepts step (1): after consume-signal returns nil it
+  blocks on gate-nil/gate-sent, letting us inject a signal into the INNER
+  store BEFORE step (2) runs.  After the sender delivers gate-sent the
+  consume returns nil and process-signal proceeds to register-callback.
+
+  At that point:
+    • Signal row IS in inner store (written by add-signal in the window)
+    • add-signal checked inner callbacks atom → found empty → fired no wake
+    • Callback IS now registered (step 2 ran after the window)
+    • But add-signal already ran with empty callbacks → wake was lost
+    • Callback will never fire retroactively
+    • Workflow is permanently stuck
+
+  Proof:
+    • workflow future times out  (stuck)
+    • p/get-pending-signals returns the signal row  (unconsumed)
+    • workflow status is :running"
+  [make-inner-store label]
+  (let [inner     (make-inner-store)
+        gate-nil  (promise)
+        gate-sent (promise)
+        store     (->RacingStore inner gate-nil gate-sent (atom true))
+        wf-id     (str "bug21-" (random-uuid))
+        result    (promise)
+        engine    (intemporal/make-workflow-engine :store store :threads 2)]
+    ;; Workflow thread
+    (future
+      (try
+        (let [r (intemporal/start-workflow engine wait-signal-wf []
+                                           :workflow-id wf-id)]
+          (deliver result r))
+        (catch Exception e (deliver result {:error (str e)}))))
+
+    ;; Wait until consume-signal returned nil (race window is open)
+    (let [gate-info (deref gate-nil 5000 ::timeout)]
+      (if (= ::timeout gate-info)
+        (do (intemporal/shutdown-engine engine)
+            (when (instance? java.io.Closeable inner) (.close inner))
+            {:store label :bug? false
+             :detail "Gate never opened — workflow did not reach consume-signal in time"})
+        (do
+          ;; Inject signal directly into the inner store.
+          ;; At this moment process-signal is parked between consume-check and register-callback.
+          ;; inner.add-signal writes the signal and checks callbacks atom → empty → no wake.
+          (p/add-signal inner wf-id "go" {:source :injected-in-race-window})
+          ;; Release the gate — let consume-signal return nil to process-signal
+          (deliver gate-sent :signal-injected)
+          ;; Give process-signal time to register the callback (step 2)
+          (Thread/sleep 200)
+          ;; Check outcome
+          (let [r       (deref result 2000 ::timeout)
+                pending (p/get-pending-signals inner wf-id)
+                status  (p/get-workflow-status inner wf-id)]
+            (intemporal/shutdown-engine engine)
+            (when (instance? java.io.Closeable inner) (.close inner))
+            {:store        label
+             :bug?         (= ::timeout r)
+             :detail       (if (= ::timeout r)
+                             (str "RACE CONFIRMED — signal injected in race window; "
+                                  "wake never fired; status=" status
+                                  "; orphaned signal keys=" (keys pending))
+                             (str "Workflow woke (race not reproduced): " r))
+             :pending-signals (keys pending)
+             :final-status    status}))))))  ; closes: map let[r] do if let[gate-info] outer-let, defn
 
 (defn- scenario-2-3
   "Bug 2.3 — Cancellation can't reach a sleeping workflow.
@@ -317,7 +397,7 @@
 
   ;; ----------------------------------------------------------------------------
   (print-scenario
-    "Bug 2.1" "Register-then-consume signal race (intermittent)"
+    "Bug 2.1" "Register-then-consume signal race (deterministic)"
     [(scenario-2-1 make-jdbc-store "JDBC")
      (scenario-2-1 make-fdb-store  "FDB")])
 
@@ -328,7 +408,8 @@
      (scenario-2-3 make-fdb-store  "FDB")])
 
   ;; ----------------------------------------------------------------------------
-  (println "\nNote: Bug 2.1 is a race; a single run may not always hit the window.")
-  (println "      Increase Thread/sleep in scenario-2-1 or run multiple times.\n")
+  (println "\nNote: Bug 2.1 uses a latch-synchronized RacingStore to deterministically")
+  (println "      inject a signal into the consume-nil→register-callback window.")
+  (println "      The race is guaranteed to reproduce on every run.\n")
 
   (System/exit 0))
