@@ -1,5 +1,7 @@
 (ns intemporal.store.jdbc
   (:require [intemporal.protocol :as p]
+            [intemporal.internal.lease :as lease]
+            [intemporal.internal.error :as error]
             [migratus.core :as migratus]
             [next.jdbc :as jdbc]
             [next.jdbc.prepare :as prepare]
@@ -92,6 +94,15 @@
         ;; Ensure workflow exists
         (jdbc/execute! tx ["INSERT INTO intemporal_workflows (id) VALUES (?) ON CONFLICT (id) DO NOTHING"
                            workflow-id])
+        ;; Phase C: validate the lease in the same transaction. If this owner no
+        ;; longer holds a live lease (another worker took over / it expired),
+        ;; refuse the write so concurrent execution can't corrupt history.
+        (when-let [owner lease/*owner*]
+          (when-not (jdbc/execute-one! tx
+                      ["SELECT 1 FROM intemporal_workflows
+                        WHERE id = ? AND owner_id = ? AND lease_until > now()"
+                       workflow-id owner])
+            (throw (error/lease-lost-exception workflow-id owner))))
         ;; Insert events. DO UPDATE keeps the write idempotent under normal
         ;; replay (the engine re-writes the same seq with identical data on
         ;; each pass). Rejecting a *concurrent* writer is the lease's job
@@ -136,8 +147,10 @@
                          workflow-id])
       (jdbc/execute! tx ["INSERT INTO intemporal_signals (workflow_id, signal_name, payload) VALUES (?, ?, ?)"
                          workflow-id signal-name signal-data]))
-
-    ;; Trigger callback if registered
+    ;; Phase C: durable, cross-pod wake (a worker on any pod resumes the workflow).
+    (p/add-runnable this workflow-id :signal)
+    ;; In-process fast path: fire the callback for an embedded (no-worker) engine
+    ;; running in THIS process. Cross-pod wake goes through the marker above.
     (when-let [callback (get-in @callbacks [workflow-id signal-name])]
       (future (callback)))
     signal-data)
@@ -170,11 +183,13 @@
                                   workflow-id])]
       (boolean (:intemporal_workflows/cancelled row))))
 
-  (mark-cancelled [_ workflow-id]
+  (mark-cancelled [this workflow-id]
     (jdbc/execute! datasource
                    ["INSERT INTO intemporal_workflows (id, cancelled) VALUES (?, true)
                      ON CONFLICT (id) DO UPDATE SET cancelled = true"
-                    workflow-id]))
+                    workflow-id])
+    ;; Phase C: durable wake so a worker resumes the sleeper and it observes the flag.
+    (p/add-runnable this workflow-id :cancel))
 
   (get-workflow-status [this workflow-id]
     (let [wf-row (jdbc/execute-one! datasource
@@ -194,7 +209,64 @@
                     (case (:event-type last-event)
                       :workflow-completed :completed
                       :workflow-failed :failed
-                      :running))))))))
+                      :running)))))))
+
+  ;; --- Phase C: lease / ownership ---
+  (claim-workflow [_ workflow-id owner-id lease-ms]
+    (let [res (jdbc/execute-one! datasource
+                ["UPDATE intemporal_workflows
+                  SET owner_id = ?, lease_until = now() + ((?)::bigint * interval '1 millisecond')
+                  WHERE id = ?
+                    AND (owner_id IS NULL OR owner_id = ? OR lease_until IS NULL OR lease_until < now())"
+                 owner-id lease-ms workflow-id owner-id])]
+      (pos? (or (:next.jdbc/update-count res) 0))))
+
+  (renew-lease [_ workflow-id owner-id lease-ms]
+    (let [res (jdbc/execute-one! datasource
+                ["UPDATE intemporal_workflows
+                  SET lease_until = now() + ((?)::bigint * interval '1 millisecond')
+                  WHERE id = ? AND owner_id = ?"
+                 lease-ms workflow-id owner-id])]
+      (pos? (or (:next.jdbc/update-count res) 0))))
+
+  (release-lease [_ workflow-id owner-id]
+    (jdbc/execute! datasource
+                   ["UPDATE intemporal_workflows SET owner_id = NULL, lease_until = NULL
+                     WHERE id = ? AND owner_id = ?"
+                    workflow-id owner-id])
+    nil)
+
+  ;; --- Phase C: runnable markers ---
+  (add-runnable [_ workflow-id reason]
+    (jdbc/execute! datasource
+                   ["INSERT INTO intemporal_runnable (workflow_id, reason, enqueued_at, claimed_until)
+                     VALUES (?, ?, now(), to_timestamp(0))
+                     ON CONFLICT (workflow_id) DO UPDATE SET reason = EXCLUDED.reason, enqueued_at = now()"
+                    workflow-id (name reason)])
+    nil)
+
+  (claim-runnable [_ _owner-id batch-size claim-ms]
+    (jdbc/with-transaction [tx datasource]
+      (let [rows (jdbc/execute! tx
+                   ["SELECT workflow_id FROM intemporal_runnable
+                     WHERE claimed_until < now()
+                     ORDER BY enqueued_at
+                     FOR UPDATE SKIP LOCKED
+                     LIMIT ?" batch-size])
+            ids  (mapv :intemporal_runnable/workflow_id rows)]
+        (when (seq ids)
+          (let [ph (apply str (interpose "," (repeat (count ids) "?")))]
+            (jdbc/execute! tx
+              (into [(str "UPDATE intemporal_runnable
+                           SET claimed_until = now() + ((?)::bigint * interval '1 millisecond')
+                           WHERE workflow_id IN (" ph ")")
+                     claim-ms]
+                    ids))))
+        ids)))
+
+  (delete-runnable [_ workflow-id]
+    (jdbc/execute! datasource ["DELETE FROM intemporal_runnable WHERE workflow_id = ?" workflow-id])
+    nil))
 
 ;; TODO use more complete opts
 (defn make-jdbc-store

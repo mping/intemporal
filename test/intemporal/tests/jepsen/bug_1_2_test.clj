@@ -1,92 +1,72 @@
 (ns intemporal.tests.jepsen.bug-1-2-test
-  "Bug 1.2 — Concurrent save-events at the same (workflow-id, seq) corrupts history.
+  "Bug 1.2 — Concurrent execution corrupting history.  REGRESSION GUARD.
 
-  Root cause (improvements.md §1.2):
-    JDBC:  INSERT … ON CONFLICT (workflow_id, seq) DO UPDATE silently overwrites
-           the losing write.  Both callers receive no error, but only one event
-           survives in intemporal_history.  The discarded write is invisible.
-    FDB:   save-events keys events as [seq, uuid], so two concurrent writes at
-           the same seq both survive as separate rows.  load-history returns
-           both, making the history non-deterministic.
-    Mem:   InMemoryStore.save-events appends unconditionally (swap! conj), so
-           duplicate-seq events accumulate in the vector.
+  Root cause (improvements.md §1.2) — now FIXED (Phase C):
+    Two pods could run the same workflow and both write history; JDBC's
+    ON CONFLICT DO UPDATE silently overwrote, FDB produced duplicate-seq rows.
+    There was nothing stopping two concurrent writers.
 
-  Both outcomes violate the invariant that seq numbers are unique within a
-  workflow's history — breaking deterministic replay.
+    The fix: a lease (C1). A worker claims ownership before executing; every
+    save-events validates the lease in the same transaction and throws
+    LeaseLostException if this owner no longer holds it. Two workers cannot both
+    write — the one without a live lease is rejected, so history can't be
+    corrupted by concurrent execution.
 
-  These tests assert the CURRENT (buggy) behaviour.  They will fail once the
-  fix from improvements.md §A3 is applied (DO NOTHING + conflict exception)."
+  These tests assert the FIXED behaviour: once a second owner takes over, the
+  first owner's writes are rejected rather than silently corrupting history."
   (:require [clojure.test :refer [deftest is testing]]
             [intemporal.protocol :as p]
             [intemporal.store :as mem]
             [intemporal.store.jdbc :as jdbc-store]
             [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]))
-
-;; ── Shared scenario ───────────────────────────────────────────────────────────
+            [me.vedang.clj-fdb.FDB :as cfdb]
+            [intemporal.internal.lease :as lease]
+            [intemporal.internal.error :as error]))
 
 (defn- run-scenario
-  "Fires two concurrent writes at seq=0, waits for both, then reads back history.
-  Returns {:writes [result-a result-b] :seq0-count n :seq0-events [...]}."
+  "owner-A claims and writes; ownership moves to owner-B; A's next write must be
+  rejected. Returns {:a-wrote? :b-claimed? :a-rejected? :seq-count}."
   [store]
-  (let [wf-id   (str "bug12-" (random-uuid))
-        event-a {:event-type :workflow-started :seq 0 :writer "thread-a"
-                 :timestamp  (System/currentTimeMillis)}
-        event-b {:event-type :workflow-started :seq 0 :writer "thread-b"
-                 :timestamp  (System/currentTimeMillis)}
-        latch   (promise)
-        fa      (future (deref latch)
-                        (try (p/save-events store wf-id [event-a]) :ok
-                             (catch Exception e {:error (str e)})))
-        fb      (future (deref latch)
-                        (try (p/save-events store wf-id [event-b]) :ok
-                             (catch Exception e {:error (str e)})))]
-    (deliver latch :go)
-    (let [ra @fa
-          rb @fb
-          h  (p/load-history store wf-id)]
-      {:writes       [ra rb]
-       :seq0-count   (count (filter #(= 0 (:seq %)) h))
-       :seq0-events  (filter #(= 0 (:seq %)) h)})))
+  (let [wid (str "bug12-" (random-uuid))]
+    (p/save-event store wid {:event-type :workflow-started :workflow-id wid :args []})
+    (let [a-claim (p/claim-workflow store wid "owner-A" 60000)
+          _       (binding [lease/*owner* "owner-A"]
+                    (p/save-events store wid [{:event-type :activity-completed :seq 0 :result 1}]))
+          _       (p/release-lease store wid "owner-A")
+          b-claim (p/claim-workflow store wid "owner-B" 60000)
+          a-rejected?
+          (try
+            (binding [lease/*owner* "owner-A"]
+              (p/save-events store wid [{:event-type :activity-completed :seq 1 :result 2}]))
+            false
+            (catch Exception e (error/lease-lost? e)))
+          seq0 (->> (p/load-history store wid) (filter #(= 0 (:seq %))) count)]
+      {:a-wrote?    a-claim
+       :b-claimed?  b-claim
+       :a-rejected? a-rejected?
+       :seq0-count  seq0})))
 
-;; ── In-memory tests (always run) ─────────────────────────────────────────────
+(defn- assert-fixed [{:keys [a-wrote? b-claimed? a-rejected? seq0-count]}]
+  (is a-wrote?    "owner-A held the lease and wrote")
+  (is b-claimed?  "ownership moved to owner-B after release")
+  (is a-rejected? "stale owner-A's write was rejected with LeaseLostException (bug 1.2 fixed)")
+  (is (= 1 seq0-count) "exactly one event at seq=0 — no concurrent-write corruption"))
 
-(deftest concurrent-seq-write-appends-both-in-memory
-  (testing "InMemoryStore appends both events, producing duplicate seq=0"
-    (let [store  (mem/->InMemoryStore (atom {}))
-          {:keys [writes seq0-count]} (run-scenario store)]
-      (is (every? #{:ok} writes)
-          "Both writes return :ok — no conflict signalled")
-      (is (> seq0-count 1)
-          (str "History has " seq0-count " events at seq=0 — duplicate seq (bug 1.2)")))))
+(deftest lease-prevents-corruption-in-memory
+  (testing "InMemoryStore"
+    (assert-fixed (run-scenario (mem/->InMemoryStore (atom {}))))))
 
-;; ── JDBC tests (require Postgres) ────────────────────────────────────────────
-
-(deftest ^:integration concurrent-seq-write-silently-clobbered-jdbc
-  (testing "JDBC: ON CONFLICT DO UPDATE silently discards one write"
+(deftest ^:integration lease-prevents-corruption-jdbc
+  (testing "JdbcStore"
     (let [url   (or (System/getenv "DATABASE_URL")
                     "jdbc:postgresql://localhost:5432/root?user=root&password=root")
           store (jdbc-store/make-jdbc-store url)]
-      (try
-        (let [{:keys [writes seq0-count seq0-events]} (run-scenario store)]
-          (is (every? #{:ok} writes)
-              "Both writes return :ok — DO UPDATE never raises a conflict error")
-          (is (= 1 seq0-count)
-              "Exactly one row at seq=0 — the other write was silently discarded (bug 1.2)")
-          (is (contains? #{"thread-a" "thread-b"} (:writer (first seq0-events)))
-              "Surviving writer is whichever won the race — non-deterministic"))
-        (finally (.close store))))))
+      (try (assert-fixed (run-scenario store)) (finally (.close store))))))
 
-;; ── FDB tests (require FoundationDB) ─────────────────────────────────────────
-
-(deftest ^:integration concurrent-seq-write-produces-duplicates-fdb
-  (testing "FDB: UUID-keyed writes store both events at seq=0"
+(deftest ^:integration lease-prevents-corruption-fdb
+  (testing "FDBStore"
     (let [root  (str "bug12-" (random-uuid))
           fdb   (cfdb/select-api-version 730)
           db    (.open fdb "docker/fdb.cluster")
           store (fdb-store/make-fdb-store db root)]
-      (let [{:keys [writes seq0-count]} (run-scenario store)]
-        (is (every? #{:ok} writes)
-            "Both writes return :ok")
-        (is (> seq0-count 1)
-            (str "History has " seq0-count " events at seq=0 — duplicate seq (bug 1.2)"))))))
+      (assert-fixed (run-scenario store)))))

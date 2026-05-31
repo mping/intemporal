@@ -20,7 +20,26 @@
   (wake-workflow [store workflow-id] "Fire the registered wake callback for a workflow, forcing it to re-enter its loop and re-evaluate state such as the cancellation flag. No-op if none registered.")
   (is-cancelled? [store workflow-id] "Check if workflow is cancelled")
   (mark-cancelled [store workflow-id] "Mark workflow as cancelled")
-  (get-workflow-status [store workflow-id] "Get current workflow status"))
+  (get-workflow-status [store workflow-id] "Get current workflow status")
+
+  ;; --- Phase C: multi-pod primitives (opt-in; single-process callers ignore) ---
+  (claim-workflow [store workflow-id owner-id lease-ms]
+    "Atomically claim or renew ownership of a workflow if it is unowned, owned by
+     owner-id already, or its lease has expired. Sets owner_id=owner-id and
+     lease_until=now+lease-ms. Returns true on success, false if another live
+     owner holds it.")
+  (renew-lease [store workflow-id owner-id lease-ms]
+    "Extend the lease to now+lease-ms iff owner-id still owns it. Returns boolean.")
+  (release-lease [store workflow-id owner-id]
+    "Release ownership (clear owner_id/lease_until) iff held by owner-id.")
+  (add-runnable [store workflow-id reason]
+    "Durably mark a workflow as needing execution. Replaces the process-local
+     wake callback for cross-pod wake. Idempotent: one marker per workflow.")
+  (claim-runnable [store owner-id batch-size claim-ms]
+    "Claim up to batch-size runnable markers whose claim has lapsed, fencing them
+     for claim-ms so other workers skip them. Returns a vector of workflow-ids.")
+  (delete-runnable [store workflow-id]
+    "Remove a workflow's runnable marker (after it has been resumed)."))
 
 (defprotocol IActivityExecutor
   "Protocol for executing activities"

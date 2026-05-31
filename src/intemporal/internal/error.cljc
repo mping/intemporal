@@ -81,6 +81,25 @@
           (.-data e)
           (::cancelled (.-data e)))))
 
+(defn lease-lost-exception
+  "Thrown by IStore/save-events when the writer's lease on a workflow is no
+   longer valid (another worker took ownership, or the lease expired). The
+   worker catches this and aborts the in-flight execution cleanly. (Phase C)"
+  [workflow-id owner-id]
+  (ex-info "Workflow lease lost"
+           {::lease-lost true
+            :workflow-id workflow-id
+            :owner-id    owner-id}))
+
+(defn lease-lost? [e]
+  #?(:clj
+     (and (instance? IExceptionInfo e)
+          (::lease-lost (ex-data e)))
+     :cljs
+     (and (instance? js/Error e)
+          (or (and (.-data e) (::lease-lost (.-data e)))
+              (::lease-lost (ex-data e))))))
+
 (defn activity-rejected-exception [activity-name cause]
   (ex-info "Execution rejected"
            {::rejected     true

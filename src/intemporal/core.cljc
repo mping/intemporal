@@ -7,6 +7,7 @@
             [intemporal.internal.logging :as log]
             [intemporal.internal.fns.start-workflow :as sw]
             [intemporal.internal.workflow-registry :as wreg]
+            [intemporal.internal.lease :as lease]
             [intemporal.protocol :as p]
             [intemporal.store :as store]
             [intemporal.observer :as obs]
@@ -450,6 +451,63 @@
                           {:observer observer
                            :max-iterations max-iterations})))
 
+#?(:clj
+   (defn start-worker
+     "Start a background recovery worker (Phase C). It polls the store's durable
+      runnable markers, claims a lease on each workflow, and resumes it by id —
+      so a workflow whose original pod crashed, or one signalled/cancelled from
+      another pod, is driven to completion. Returns a 0-arg stop fn.
+
+      The worker resumes via resume-workflow [engine workflow-id], so the workflow
+      function must be registered in this process (start-workflow registers it
+      automatically; a fresh process must register its workflow vars at startup).
+
+      Options:
+        :owner-id    unique id for this worker (default: random uuid)
+        :poll-ms     idle poll interval when no markers are due (default 100)
+        :batch-size  max markers claimed per poll (default 10)
+        :lease-ms    lease duration per claimed workflow (default 30000)
+        :claim-ms    marker fencing duration while processing (default 30000)"
+     [{:keys [store] :as engine}
+      & {:keys [owner-id poll-ms batch-size lease-ms claim-ms]
+         :or   {owner-id (str (random-uuid)) poll-ms 100 batch-size 10
+                lease-ms 30000 claim-ms 30000}}]
+     (let [running (atom true)
+           process-one
+           (fn [wf-id]
+             (when (p/claim-workflow store wf-id owner-id lease-ms)
+               (binding [lease/*owner* owner-id]
+                 (try
+                   (resume-workflow engine wf-id)
+                   (p/delete-runnable store wf-id)
+                   (catch Throwable t
+                     (if (error/lease-lost? t)
+                       (log/debugf "Worker %s lost lease on %s; skipping" owner-id wf-id)
+                       (log/warnf t "Worker %s failed resuming %s" owner-id wf-id)))
+                   (finally
+                     (p/release-lease store wf-id owner-id))))))
+           thread
+           (Thread.
+             ^Runnable
+             (fn []
+               (while @running
+                 (try
+                   (let [ids (p/claim-runnable store owner-id batch-size claim-ms)]
+                     (if (seq ids)
+                       (doseq [wf-id ids :while @running]
+                         (process-one wf-id))
+                       (Thread/sleep (long poll-ms))))
+                   (catch InterruptedException _ (reset! running false))
+                   (catch Throwable t
+                     (log/warnf t "Worker %s loop error" owner-id)
+                     (Thread/sleep (long poll-ms)))))))]
+       (doto thread
+         (.setDaemon true)
+         (.setName (str "intemporal-worker-" owner-id))
+         (.start))
+       (fn stop-worker []
+         (reset! running false)
+         (.interrupt thread)))))
 
 (defn send-signal
   "Send a signal to a workflow.
