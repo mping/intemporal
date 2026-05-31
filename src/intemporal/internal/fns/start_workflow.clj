@@ -2,6 +2,7 @@
   (:require [intemporal.internal.execution :as exec]
             [intemporal.internal.logging :as log]
             [intemporal.internal.activity :as a]
+            [intemporal.internal.workflow-registry :as wreg]
             [intemporal.protocol :as p]
             [intemporal.utils :as utils])
   (:import [java.util.concurrent LinkedBlockingQueue]))
@@ -50,9 +51,14 @@
                                                                   (when observer
                                                                     (p/on-workflow-resumed observer wf-id))
                                                                   (.offer wake-q :wake))}))]
-    (log/with-mdc {:workflow-id wf-id}
+    ;; Record the workflow function under its stable name so the workflow can be
+    ;; resumed later by id alone (resume-workflow [engine wf-id]); the name is
+    ;; stored in the :workflow-started event below. (improvements.md §B3)
+    (let [wf-name (wreg/register-workflow! workflow-fn)]
+     (log/with-mdc {:workflow-id wf-id}
       (p/save-event store wf-id {:event-type :workflow-started
                                  :workflow-id wf-id
+                                 :workflow-fn-name wf-name
                                  :args (vec args)
                                  :timestamp (utils/current-time-ms)})
       (when observer
@@ -74,4 +80,4 @@
             result))
         (catch Exception e
           (log/warnf e "Caught exception")
-          (throw e))))))
+          (throw e)))))))

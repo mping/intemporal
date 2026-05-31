@@ -6,6 +6,7 @@
             [intemporal.internal.execution :as exec]
             [intemporal.internal.logging :as log]
             [intemporal.internal.fns.start-workflow :as sw]
+            [intemporal.internal.workflow-registry :as wreg]
             [intemporal.protocol :as p]
             [intemporal.store :as store]
             [intemporal.observer :as obs]
@@ -363,6 +364,50 @@
   [engine workflow-fn args & opts]
   (apply sw/start-workflow engine workflow-fn args opts))
 
+#?(:clj
+   (defn submit-workflow
+     "Start a workflow asynchronously and return {:workflow-id id} immediately,
+      without blocking the caller until completion (improvements.md §B4). The
+      workflow runs on a background thread; use await-workflow to wait for the
+      result, or resume-workflow/get-workflow-status to observe it later.
+
+      Accepts the same options as start-workflow (:workflow-id, :observer, …)."
+     [engine workflow-fn args & opts]
+     (let [m     (apply hash-map opts)
+           wid   (or (:workflow-id m) (str (random-uuid)))
+           opts' (mapcat identity (assoc m :workflow-id wid))]
+       (future
+         (try
+           (apply sw/start-workflow engine workflow-fn args opts')
+           (catch Throwable t
+             (log/warnf t "submit-workflow background run failed"))))
+       {:workflow-id wid})))
+
+#?(:clj
+   (defn await-workflow
+     "Block until the workflow reaches a terminal state (:completed, :failed,
+      :cancelled) and return {:status … :result …}. Polls get-workflow-status;
+      a workflow id that is briefly :not-found (still starting) is tolerated.
+      Returns {:status :timeout} if the deadline elapses first."
+     [{:keys [store]} workflow-id & {:keys [poll-ms timeout-ms]
+                                     :or   {poll-ms 50 timeout-ms 30000}}]
+     (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+       (loop []
+         (let [st (p/get-workflow-status store workflow-id)]
+           (cond
+             (#{:completed :failed :cancelled} st)
+             {:status st
+              :result (->> (p/load-history store workflow-id)
+                           (filter #(= :workflow-completed (:event-type %)))
+                           first
+                           :result)}
+
+             (> (System/currentTimeMillis) deadline)
+             {:status :timeout :workflow-id workflow-id}
+
+             :else
+             (do (Thread/sleep (long poll-ms)) (recur))))))))
+
 (defn resume-workflow
   "Resume a waiting workflow (e.g., after signal delivery or timer).
 
@@ -379,15 +424,31 @@
    Options:
    - :observer - IWorkflowObserver
    - :max-iterations - Maximum replay iterations"
-  [{:keys [store executor scheduler registry] :as engine} workflow-id workflow-fn args
-   & {:keys [observer max-iterations]
-      :or {max-iterations 1000}}]
-  (when observer
-    (p/on-workflow-resumed observer workflow-id))
-  (log/info "Workflow resumed")
-  (exec/run-workflow-internal engine workflow-id workflow-fn args
-                         {:observer observer
-                          :max-iterations max-iterations}))
+  ([{:keys [store] :as engine} workflow-id]
+   ;; Resolve fn + args from the :workflow-started event via the workflow
+   ;; registry (improvements.md §B3). Requires the workflow fn to have been
+   ;; registered in this process (start-workflow does so automatically; a
+   ;; restarted/other process must register its workflow vars at startup).
+   (let [history (p/load-history store workflow-id)
+         started (first (filter #(= :workflow-started (:event-type %)) history))]
+     (when-not started
+       (throw (ex-info "Cannot resume: no :workflow-started event in history"
+                       {:workflow-id workflow-id})))
+     (let [wf-name (:workflow-fn-name started)
+           wf-fn   (wreg/resolve-workflow wf-name)]
+       (when-not wf-fn
+         (throw (ex-info "Cannot resume: workflow function not registered"
+                         {:workflow-id workflow-id :workflow-fn-name wf-name})))
+       (resume-workflow engine workflow-id wf-fn (vec (:args started))))))
+  ([{:keys [store executor scheduler registry] :as engine} workflow-id workflow-fn args
+    & {:keys [observer max-iterations]
+       :or {max-iterations 1000}}]
+   (when observer
+     (p/on-workflow-resumed observer workflow-id))
+   (log/info "Workflow resumed")
+   (exec/run-workflow-internal engine workflow-id workflow-fn args
+                          {:observer observer
+                           :max-iterations max-iterations})))
 
 
 (defn send-signal

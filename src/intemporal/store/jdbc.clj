@@ -103,7 +103,15 @@
             (jdbc/execute! tx ["INSERT INTO intemporal_history (workflow_id, seq, event_type, data)
                                 VALUES (?, ?, ?, ?)
                                 ON CONFLICT (workflow_id, seq) DO UPDATE SET event_type = EXCLUDED.event_type, data = EXCLUDED.data"
-                               workflow-id seq-num event-type data])))))
+                               workflow-id seq-num event-type data])))
+        ;; Phase B2: maintain the O(1) status column on terminal events.
+        (when-let [term (some (fn [e] (case (:event-type e)
+                                        :workflow-completed "completed"
+                                        :workflow-failed    "failed"
+                                        nil))
+                              events)]
+          (jdbc/execute! tx ["UPDATE intemporal_workflows SET status = ? WHERE id = ?"
+                             term workflow-id]))))
     events)
 
   (find-event [_ workflow-id event-type seq-num]
@@ -170,11 +178,15 @@
 
   (get-workflow-status [this workflow-id]
     (let [wf-row (jdbc/execute-one! datasource
-                                    ["SELECT cancelled FROM intemporal_workflows WHERE id = ?"
-                                     workflow-id])]
+                                    ["SELECT cancelled, status FROM intemporal_workflows WHERE id = ?"
+                                     workflow-id])
+          status (:intemporal_workflows/status wf-row)]
       (cond
         (nil? wf-row) :not-found
         (:intemporal_workflows/cancelled wf-row) :cancelled
+        ;; Phase B2 fast path: terminal status is cached in the column (O(1)).
+        (#{"completed" "failed"} status) (keyword status)
+        ;; Otherwise (running / pre-migration) derive from history as before.
         :else (let [history (p/load-history this workflow-id)]
                 (if (empty? history)
                   :not-found

@@ -47,21 +47,35 @@
   (save-event [_ workflow-id event]
     (let [history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))
           seq-num (:seq event (System/currentTimeMillis))
-          key (->tuple [seq-num (str (java.util.UUID/randomUUID))])]
+          key (->tuple [seq-num (str (java.util.UUID/randomUUID))])
+          term (case (:event-type event)
+                 :workflow-completed "completed"
+                 :workflow-failed    "failed"
+                 nil)]
       (ftr/run db
         (fn [tx]
-          (fdb-core/set tx history-sub key (->bytes event))))
+          (fdb-core/set tx history-sub key (->bytes event))
+          ;; Phase B2: cache terminal status for O(1) reads.
+          (when term
+            (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "status"]) (->bytes term)))))
       event))
 
   (save-events [_ workflow-id events]
     (when (seq events)
-      (let [history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))]
+      (let [history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))
+            term        (some #(case (:event-type %)
+                                 :workflow-completed "completed"
+                                 :workflow-failed    "failed"
+                                 nil)
+                              events)]
         (ftr/run db
           (fn [tx]
             (doseq [event events]
               (let [seq-num (:seq event (System/currentTimeMillis))
                     key (->tuple [seq-num (str (java.util.UUID/randomUUID))])]
-                (fdb-core/set tx history-sub key (->bytes event))))))))
+                (fdb-core/set tx history-sub key (->bytes event))))
+            (when term
+              (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "status"]) (->bytes term)))))))
     events)
 
   (find-event [this workflow-id event-type seq-num]
@@ -132,14 +146,21 @@
   (get-workflow-status [this workflow-id]
     (if (p/is-cancelled? this workflow-id)
       :cancelled
-      (let [history (p/load-history this workflow-id)]
-        (if (empty? history)
-          :not-found
-          (let [last-event (last history)]
-            (case (:event-type last-event)
-              :workflow-completed :completed
-              :workflow-failed :failed
-              :running)))))))
+      ;; Phase B2 fast path: terminal status cached at ["state" id "status"].
+      (let [cached (<-bytes (ftr/run db
+                              (fn [tx]
+                                (fdb-core/get tx root-subspace
+                                              (->tuple ["state" workflow-id "status"])))))]
+        (if (#{"completed" "failed"} cached)
+          (keyword cached)
+          (let [history (p/load-history this workflow-id)]
+            (if (empty? history)
+              :not-found
+              (let [last-event (last history)]
+                (case (:event-type last-event)
+                  :workflow-completed :completed
+                  :workflow-failed :failed
+                  :running)))))))))
 
 (defn make-fdb-store [db subspace-name]
   (let [root (fsub/create (->tuple [subspace-name]))]
