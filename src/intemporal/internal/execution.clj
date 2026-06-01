@@ -575,6 +575,15 @@
                 (do
                   (when wake-fn
                     (p/register-wake-callback store workflow-id wake-fn))
+                  ;; C2: record when this workflow next needs attention so the
+                  ;; ownership scan can skip it until due. Timer waits carry a
+                  ;; clock deadline; signal/async waits are always eligible (nil).
+                  (let [sd (:suspension-data exec-result)
+                        wake-at (case action
+                                  :wait-timer          (:fire-at sd)
+                                  :wait-signal-timeout (:deadline sd)
+                                  nil)]
+                    (p/set-wake-at store workflow-id wake-at))
                   (action->result action workflow-id))))
 
             :failed

@@ -1,8 +1,8 @@
 (ns intemporal.store
   (:require [intemporal.protocol :as p]
-            [intemporal.utils :as utils]
-            [intemporal.internal.lease :as lease]
-            [intemporal.internal.error :as error]))
+            [intemporal.utils :as utils]))
+
+(def ^:private terminal-status? #{:completed :failed})
 
 ;; ============================================================================
 ;; In-Memory Store Implementation
@@ -25,14 +25,6 @@
 
   (save-events [_ workflow-id events]
     (when (seq events)
-      ;; Phase C: when running under a worker lease, refuse to write if this
-      ;; owner no longer holds a valid lease (another worker took over / expired).
-      (when-let [owner lease/*owner*]
-        (let [s   @state
-              cur (get-in s [:workflows workflow-id :owner])
-              lu  (get-in s [:workflows workflow-id :lease-until] 0)]
-          (when (or (not= cur owner) (< lu (utils/current-time-ms)))
-            (throw (error/lease-lost-exception workflow-id owner)))))
       (swap! state
              (fn [s]
                (let [s    (update-in s [:workflows workflow-id :history] (fnil into []) events)
@@ -57,14 +49,12 @@
   (get-pending-signals [_ workflow-id]
     (get-in @state [:workflows workflow-id :signals] {}))
 
-  (add-signal [this workflow-id signal-name signal-data]
+  (add-signal [_ workflow-id signal-name signal-data]
     (swap! state update-in [:workflows workflow-id :signals signal-name]
            (fnil conj []) signal-data)
-    ;; Phase C: durable wake marker so a worker (possibly another pod) resumes it.
-    (p/add-runnable this workflow-id :signal)
-    ;; Check if there's a callback registered for this signal (single-process path)
+    ;; In-process wake for an embedded (no-worker) engine in THIS process.
+    ;; Worker mode picks the workflow up via the ownership scan (list-pending).
     (when-let [callback (get-in @state [:workflows workflow-id :signal-callbacks signal-name])]
-      ;; Invoke callback asynchronously
       #?(:clj (future (callback))
          :cljs (js/setTimeout callback 0)))
     signal-data)
@@ -99,10 +89,8 @@
   (is-cancelled? [_ workflow-id]
     (get-in @state [:workflows workflow-id :cancelled] false))
 
-  (mark-cancelled [this workflow-id]
-    (swap! state assoc-in [:workflows workflow-id :cancelled] true)
-    ;; Phase C: wake a sleeper via a durable marker too (worker path).
-    (p/add-runnable this workflow-id :cancel))
+  (mark-cancelled [_ workflow-id]
+    (swap! state assoc-in [:workflows workflow-id :cancelled] true))
 
   (get-workflow-status [_ workflow-id]
     (let [wf (get-in @state [:workflows workflow-id])]
@@ -116,65 +104,43 @@
                   :workflow-failed :failed
                   :running)))))
 
-  ;; --- Phase C: lease / ownership ---
-  (claim-workflow [_ workflow-id owner-id lease-ms]
+  ;; --- Phase C: ownership-based recovery ---
+  (claim-owner [_ workflow-id owner-id]
     (let [ok (atom false)]
       (swap! state
              (fn [s]
-               (let [cur (get-in s [:workflows workflow-id :owner])
-                     lu  (get-in s [:workflows workflow-id :lease-until] 0)
-                     now (utils/current-time-ms)]
-                 (if (or (nil? cur) (= cur owner-id) (< lu now))
+               (let [cur (get-in s [:workflows workflow-id :owner])]
+                 (if (or (nil? cur) (= cur owner-id))
                    (do (reset! ok true)
-                       (-> s
-                           (assoc-in [:workflows workflow-id :owner] owner-id)
-                           (assoc-in [:workflows workflow-id :lease-until] (+ now lease-ms))))
+                       (assoc-in s [:workflows workflow-id :owner] owner-id))
                    s))))
       @ok))
 
-  (renew-lease [_ workflow-id owner-id lease-ms]
-    (let [ok (atom false)]
-      (swap! state
-             (fn [s]
-               (if (= owner-id (get-in s [:workflows workflow-id :owner]))
-                 (do (reset! ok true)
-                     (assoc-in s [:workflows workflow-id :lease-until]
-                               (+ (utils/current-time-ms) lease-ms)))
-                 s)))
-      @ok))
+  (list-pending [_ owner-id limit]
+    (let [now (utils/current-time-ms)]
+      (->> (:workflows @state)
+           (filter (fn [[_ wf]]
+                     (and (seq (:history wf))
+                          (not (terminal-status? (:status wf)))
+                          ;; C2: skip workflows not yet due to wake
+                          (let [wa (:wake-at wf)] (or (nil? wa) (<= wa now)))
+                          (let [o (:owner wf)] (or (nil? o) (= o owner-id))))))
+           (map first)
+           (take limit)
+           vec)))
 
-  (release-lease [_ workflow-id owner-id]
+  (release-owner [_ owner-id]
     (swap! state
            (fn [s]
-             (if (= owner-id (get-in s [:workflows workflow-id :owner]))
-               (update-in s [:workflows workflow-id] dissoc :owner :lease-until)
-               s)))
+             (reduce (fn [s [wid wf]]
+                       (if (and (= owner-id (:owner wf))
+                                (not (terminal-status? (:status wf))))
+                         (update-in s [:workflows wid] dissoc :owner)
+                         s))
+                     s
+                     (:workflows s))))
     nil)
 
-  ;; --- Phase C: runnable markers ---
-  (add-runnable [_ workflow-id reason]
-    (swap! state update-in [:runnable workflow-id]
-           (fn [m] (assoc (or m {}) :reason reason
-                          :enqueued-at (utils/current-time-ms)
-                          :claimed-until (get m :claimed-until 0))))
-    nil)
-
-  (claim-runnable [_ _owner-id batch-size claim-ms]
-    (let [claimed (atom [])]
-      (swap! state
-             (fn [s]
-               (let [now (utils/current-time-ms)
-                     due (->> (:runnable s)
-                              (filter (fn [[_ m]] (< (:claimed-until m 0) now)))
-                              (map first)
-                              (take batch-size)
-                              vec)]
-                 (reset! claimed due)
-                 (reduce (fn [s wid]
-                           (assoc-in s [:runnable wid :claimed-until] (+ now claim-ms)))
-                         s due))))
-      @claimed))
-
-  (delete-runnable [_ workflow-id]
-    (swap! state update :runnable dissoc workflow-id)
+  (set-wake-at [_ workflow-id wake-at-ms]
+    (swap! state assoc-in [:workflows workflow-id :wake-at] wake-at-ms)
     nil))

@@ -1,69 +1,55 @@
 (ns intemporal.tests.jepsen.bug-1-2-test
   "Bug 1.2 — Concurrent execution corrupting history.  REGRESSION GUARD.
 
-  Root cause (improvements.md §1.2) — now FIXED (Phase C):
+  Root cause (improvements.md §1.2) — now FIXED (Phase C, ownership model):
     Two pods could run the same workflow and both write history; JDBC's
     ON CONFLICT DO UPDATE silently overwrote, FDB produced duplicate-seq rows.
-    There was nothing stopping two concurrent writers.
+    Nothing stopped two concurrent writers.
 
-    The fix: a lease (C1). A worker claims ownership before executing; every
-    save-events validates the lease in the same transaction and throws
-    LeaseLostException if this owner no longer holds it. Two workers cannot both
-    write — the one without a live lease is rejected, so history can't be
-    corrupted by concurrent execution.
+    The fix: an ownership column. claim-owner atomically stamps
+    `owner WHERE owner IS NULL OR owner = me`, so exactly one pod can own (and
+    therefore run) a workflow; the worker resumes owned workflows one at a time.
+    No two writers execute concurrently, so history cannot be corrupted.
 
-  These tests assert the FIXED behaviour: once a second owner takes over, the
-  first owner's writes are rejected rather than silently corrupting history."
+  These tests assert the FIXED behaviour: of two pods racing to claim one
+  unowned workflow, exactly one succeeds; the loser cannot run it."
   (:require [clojure.test :refer [deftest is testing]]
             [intemporal.protocol :as p]
             [intemporal.store :as mem]
             [intemporal.store.jdbc :as jdbc-store]
             [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]
-            [intemporal.internal.lease :as lease]
-            [intemporal.internal.error :as error]))
+            [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (defn- run-scenario
-  "owner-A claims and writes; ownership moves to owner-B; A's next write must be
-  rejected. Returns {:a-wrote? :b-claimed? :a-rejected? :seq-count}."
+  "Two owners race to claim one unowned workflow. Returns
+  {:a-claimed? :b-claimed? :pending-for-loser}."
   [store]
   (let [wid (str "bug12-" (random-uuid))]
     (p/save-event store wid {:event-type :workflow-started :workflow-id wid :args []})
-    (let [a-claim (p/claim-workflow store wid "owner-A" 60000)
-          _       (binding [lease/*owner* "owner-A"]
-                    (p/save-events store wid [{:event-type :activity-completed :seq 0 :result 1}]))
-          _       (p/release-lease store wid "owner-A")
-          b-claim (p/claim-workflow store wid "owner-B" 60000)
-          a-rejected?
-          (try
-            (binding [lease/*owner* "owner-A"]
-              (p/save-events store wid [{:event-type :activity-completed :seq 1 :result 2}]))
-            false
-            (catch Exception e (error/lease-lost? e)))
-          seq0 (->> (p/load-history store wid) (filter #(= 0 (:seq %))) count)]
-      {:a-wrote?    a-claim
-       :b-claimed?  b-claim
-       :a-rejected? a-rejected?
-       :seq0-count  seq0})))
+    (let [a (p/claim-owner store wid "owner-A")
+          b (p/claim-owner store wid "owner-B")]   ; A already owns it -> B must fail
+      {:a-claimed? a
+       :b-claimed? b
+       ;; scope to this wid — the shared DB may hold unowned rows from prior runs
+       :wid-pending-for-b? (contains? (set (p/list-pending store "owner-B" 1000)) wid)})))
 
-(defn- assert-fixed [{:keys [a-wrote? b-claimed? a-rejected? seq0-count]}]
-  (is a-wrote?    "owner-A held the lease and wrote")
-  (is b-claimed?  "ownership moved to owner-B after release")
-  (is a-rejected? "stale owner-A's write was rejected with LeaseLostException (bug 1.2 fixed)")
-  (is (= 1 seq0-count) "exactly one event at seq=0 — no concurrent-write corruption"))
+(defn- assert-fixed [{:keys [a-claimed? b-claimed? wid-pending-for-b?]}]
+  (is a-claimed?            "owner-A claimed the unowned workflow")
+  (is (false? b-claimed?)   "owner-B could NOT claim A's workflow — exclusive ownership (bug 1.2 fixed)")
+  (is (not wid-pending-for-b?) "the workflow is not runnable by B, so B never executes it"))
 
-(deftest lease-prevents-corruption-in-memory
+(deftest claim-is-exclusive-in-memory
   (testing "InMemoryStore"
     (assert-fixed (run-scenario (mem/->InMemoryStore (atom {}))))))
 
-(deftest ^:integration lease-prevents-corruption-jdbc
+(deftest ^:integration claim-is-exclusive-jdbc
   (testing "JdbcStore"
     (let [url   (or (System/getenv "DATABASE_URL")
                     "jdbc:postgresql://localhost:5432/root?user=root&password=root")
           store (jdbc-store/make-jdbc-store url)]
       (try (assert-fixed (run-scenario store)) (finally (.close store))))))
 
-(deftest ^:integration lease-prevents-corruption-fdb
+(deftest ^:integration claim-is-exclusive-fdb
   (testing "FDBStore"
     (let [root  (str "bug12-" (random-uuid))
           fdb   (cfdb/select-api-version 730)

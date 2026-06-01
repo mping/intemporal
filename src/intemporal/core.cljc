@@ -7,7 +7,6 @@
             [intemporal.internal.logging :as log]
             [intemporal.internal.fns.start-workflow :as sw]
             [intemporal.internal.workflow-registry :as wreg]
-            [intemporal.internal.lease :as lease]
             [intemporal.protocol :as p]
             [intemporal.store :as store]
             [intemporal.observer :as obs]
@@ -292,13 +291,19 @@
         existing (p/find-event store workflow-id :timer-fired seq-num)]
     (if existing
       nil
-      (let [fire-at (+ (utils/current-time-ms) ms)]
-        (ctx/add-pending-event! {:event-type :timer-scheduled
-                                 :seq seq-num
-                                 :fire-at fire-at
-                                 :duration-ms ms
-                                 :timestamp (utils/current-time-ms)})
-        (ctx/notify-observer p/on-timer-scheduled (:workflow-id ctx) seq-num fire-at)
+      ;; Reuse the fire-at from a prior :timer-scheduled event if one was already
+      ;; persisted for this seq. Recomputing (now + ms) on every replay would push
+      ;; the deadline later on each resume (drift) and make a crash-resumed sleep
+      ;; never reliably fire. The fire time must be deterministic across replays.
+      (let [prior   (p/find-event store workflow-id :timer-scheduled seq-num)
+            fire-at (or (:fire-at prior) (+ (utils/current-time-ms) ms))]
+        (when-not prior
+          (ctx/add-pending-event! {:event-type :timer-scheduled
+                                   :seq seq-num
+                                   :fire-at fire-at
+                                   :duration-ms ms
+                                   :timestamp (utils/current-time-ms)})
+          (ctx/notify-observer p/on-timer-scheduled (:workflow-id ctx) seq-num fire-at))
         (throw (error/make-suspension :timer {:seq seq-num
                                               :fire-at fire-at}))))))
 ;; ============================================================================
@@ -453,46 +458,45 @@
 
 #?(:clj
    (defn start-worker
-     "Start a background recovery worker (Phase C). It polls the store's durable
-      runnable markers, claims a lease on each workflow, and resumes it by id —
-      so a workflow whose original pod crashed, or one signalled/cancelled from
-      another pod, is driven to completion. Returns a 0-arg stop fn.
+     "Start a background recovery worker (Phase C, ownership model). Each poll it
+      lists the non-terminal workflows this owner may run — its own plus any
+      unowned (`owner = owner-id OR owner IS NULL`) — claims each by stamping
+      ownership, and resumes it by id. This is the cross-pod wake AND the crash
+      recovery: the first poll re-picks this owner's orphaned workflows, and a
+      later poll re-resumes a signalled/cancelled one (replay consumes the
+      signal / observes the cancellation). Workflows are resumed sequentially on
+      the poll thread, so neither cross-pod nor intra-pod double-execution occurs.
+
+      Use a STABLE owner-id per pod (e.g. StatefulSet ordinal / config) so a
+      crashed pod reclaims its own work on restart. Returns a 0-arg stop fn that
+      releases this owner's workflows (so other pods can pick them up).
 
       The worker resumes via resume-workflow [engine workflow-id], so the workflow
       function must be registered in this process (start-workflow registers it
       automatically; a fresh process must register its workflow vars at startup).
 
       Options:
-        :owner-id    unique id for this worker (default: random uuid)
-        :poll-ms     idle poll interval when no markers are due (default 100)
-        :batch-size  max markers claimed per poll (default 10)
-        :lease-ms    lease duration per claimed workflow (default 30000)
-        :claim-ms    marker fencing duration while processing (default 30000)"
+        :owner-id    stable id for this worker (default: random uuid)
+        :poll-ms     poll interval (default 500)
+        :batch-size  max workflows scanned per poll (default 100)"
      [{:keys [store] :as engine}
-      & {:keys [owner-id poll-ms batch-size lease-ms claim-ms]
-         :or   {owner-id (str (random-uuid)) poll-ms 100 batch-size 10
-                lease-ms 30000 claim-ms 30000}}]
+      & {:keys [owner-id poll-ms batch-size]
+         :or   {owner-id (str (random-uuid)) poll-ms 500 batch-size 100}}]
      (let [running (atom true)
            process-one
            (fn [wf-id]
-             (when (p/claim-workflow store wf-id owner-id lease-ms)
-               (binding [lease/*owner* owner-id]
-                 (try
-                   (resume-workflow engine wf-id)
-                   (p/delete-runnable store wf-id)
-                   (catch Throwable t
-                     (if (error/lease-lost? t)
-                       (log/debugf "Worker %s lost lease on %s; skipping" owner-id wf-id)
-                       (log/warnf t "Worker %s failed resuming %s" owner-id wf-id)))
-                   (finally
-                     (p/release-lease store wf-id owner-id))))))
+             (when (p/claim-owner store wf-id owner-id)
+               (try
+                 (resume-workflow engine wf-id)
+                 (catch Throwable t
+                   (log/warnf t "Worker %s failed resuming %s" owner-id wf-id)))))
            thread
            (Thread.
              ^Runnable
              (fn []
                (while @running
                  (try
-                   (let [ids (p/claim-runnable store owner-id batch-size claim-ms)]
+                   (let [ids (p/list-pending store owner-id batch-size)]
                      (if (seq ids)
                        (doseq [wf-id ids :while @running]
                          (process-one wf-id))
@@ -507,7 +511,8 @@
          (.start))
        (fn stop-worker []
          (reset! running false)
-         (.interrupt thread)))))
+         (.interrupt thread)
+         (p/release-owner store owner-id)))))
 
 (defn send-signal
   "Send a signal to a workflow.

@@ -14,16 +14,22 @@
                              pending-timers]
   p/IScheduler
   (schedule-timer [_ workflow-id seq-num fire-at callback]
-    (let [delay-ms  (max 0 (- fire-at (System/currentTimeMillis)))
-          timer-key [workflow-id seq-num]
-          future    (.schedule pool
-                               ^Runnable (fn []
-                                           (swap! pending-timers dissoc timer-key)
-                                           (callback))
-                               delay-ms
-                               TimeUnit/MILLISECONDS)]
-      (swap! pending-timers assoc timer-key future)
-      timer-key))
+    (let [timer-key [workflow-id seq-num]]
+      ;; Idempotent: under the ownership scan a suspended timer workflow is
+      ;; re-resumed every poll, so process-timer may call schedule-timer again
+      ;; for the same [wf,seq]. Scheduling a second future would leak it and
+      ;; risk a duplicate :timer-fired. If one is already armed, keep it.
+      (if (contains? @pending-timers timer-key)
+        timer-key
+        (let [delay-ms (max 0 (- fire-at (System/currentTimeMillis)))
+              future   (.schedule pool
+                                  ^Runnable (fn []
+                                              (swap! pending-timers dissoc timer-key)
+                                              (callback))
+                                  delay-ms
+                                  TimeUnit/MILLISECONDS)]
+          (swap! pending-timers assoc timer-key future)
+          timer-key))))
 
   (cancel-timer [_ workflow-id seq-num]
     (let [timer-key [workflow-id seq-num]]

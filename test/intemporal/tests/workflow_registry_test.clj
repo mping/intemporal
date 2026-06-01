@@ -7,7 +7,6 @@
   re-running already-completed activities."
   (:require [clojure.test :refer [deftest is testing]]
             [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
             [intemporal.store :as store]
             [intemporal.internal.workflow-registry :as wreg]))
 

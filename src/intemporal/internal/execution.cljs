@@ -602,6 +602,13 @@
                                (do
                                  (when wake-fn
                                    (p/register-wake-callback store workflow-id wake-fn))
+                                 ;; C2: record when this workflow next needs attention.
+                                 (let [sd (:suspension-data exec-result)
+                                       wake-at (case action
+                                                 :wait-timer          (:fire-at sd)
+                                                 :wait-signal-timeout (:deadline sd)
+                                                 nil)]
+                                   (p/set-wake-at store workflow-id wake-at))
                                  (action->result action workflow-id))))
 
                            :failed

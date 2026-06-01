@@ -22,24 +22,22 @@
   (mark-cancelled [store workflow-id] "Mark workflow as cancelled")
   (get-workflow-status [store workflow-id] "Get current workflow status")
 
-  ;; --- Phase C: multi-pod primitives (opt-in; single-process callers ignore) ---
-  (claim-workflow [store workflow-id owner-id lease-ms]
-    "Atomically claim or renew ownership of a workflow if it is unowned, owned by
-     owner-id already, or its lease has expired. Sets owner_id=owner-id and
-     lease_until=now+lease-ms. Returns true on success, false if another live
-     owner holds it.")
-  (renew-lease [store workflow-id owner-id lease-ms]
-    "Extend the lease to now+lease-ms iff owner-id still owns it. Returns boolean.")
-  (release-lease [store workflow-id owner-id]
-    "Release ownership (clear owner_id/lease_until) iff held by owner-id.")
-  (add-runnable [store workflow-id reason]
-    "Durably mark a workflow as needing execution. Replaces the process-local
-     wake callback for cross-pod wake. Idempotent: one marker per workflow.")
-  (claim-runnable [store owner-id batch-size claim-ms]
-    "Claim up to batch-size runnable markers whose claim has lapsed, fencing them
-     for claim-ms so other workers skip them. Returns a vector of workflow-ids.")
-  (delete-runnable [store workflow-id]
-    "Remove a workflow's runnable marker (after it has been resumed)."))
+  ;; --- Phase C: ownership-based recovery (opt-in; single-process callers ignore) ---
+  (claim-owner [store workflow-id owner-id]
+    "Atomically stamp ownership: UPDATE owner=owner-id WHERE owner IS NULL OR
+     owner=owner-id. Returns true iff the workflow is now owned by owner-id. The
+     exclusivity gate — only one pod can claim an unowned workflow.")
+  (list-pending [store owner-id limit]
+    "Return up to `limit` workflow-ids that are NON-TERMINAL, DUE (wake-at is null
+     or in the past), and (owner=owner-id OR owner IS NULL): the workflows this
+     owner may resume right now. Used for both the live poll and startup recovery.")
+  (release-owner [store owner-id]
+    "Clear ownership (owner=NULL) for this owner's non-terminal workflows, so
+     other pods may pick them up. Called on clean shutdown.")
+  (set-wake-at [store workflow-id wake-at-ms]
+    "Record the earliest time (epoch ms) this workflow next needs attention, or
+     nil for 'always eligible' (waiting on an external event, not the clock).
+     list-pending skips workflows whose wake-at is still in the future (C2)."))
 
 (defprotocol IActivityExecutor
   "Protocol for executing activities"

@@ -30,7 +30,6 @@
             [intemporal.jepsen.client  :as client]
             [intemporal.jepsen.nemesis :as nemesis]
             [intemporal.jepsen.checker :as checker]
-            [next.jdbc :as jdbc]
             [clojure.pprint :as pp]
             [taoensso.telemere :as log])
   (:import [java.util.concurrent Executors TimeUnit]))
@@ -246,6 +245,6 @@
         (db/kill-all!)))))
 
 (defn -main [& args]
-  (let [opts (when (seq args) (read-string (first args)))]
-    (let [r (run (or opts {}))]
-      (System/exit (if (:valid? r) 0 1)))))
+  (let [opts (when (seq args) (read-string (first args)))
+        r    (run (or opts {}))]
+    (System/exit (if (:valid? r) 0 1))))

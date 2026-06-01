@@ -79,7 +79,7 @@
         (catch InterruptedException _
           (log/log! :info (str "[" owner "] interrupted wf=" workflow-id)))
         (catch Throwable t
-          (log/log! :warn (str "[" owner "] failed wf=" workflow-id " err=" (str t))))))))
+          (log/log! :warn (str "[" owner "] failed wf=" workflow-id " err=" t)))))))
 
 (defn- start-poll-loop!
   "Starts the background work-queue poll loop. Returns a 0-arity stop fn."
@@ -99,7 +99,7 @@
             (catch InterruptedException _
               (reset! running? false))
             (catch Throwable t
-              (log/log! :warn (str "[" owner "] poll loop error: " (str t)))
+              (log/log! :warn (str "[" owner "] poll loop error: " t))
               (Thread/sleep poll-interval-ms))))))
     (fn [] (reset! running? false))))
 

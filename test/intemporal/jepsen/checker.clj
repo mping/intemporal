@@ -22,9 +22,11 @@
     checker 3 (history-integrity)     -> FAIL  (if concurrent-start ran)
     checker 4 (cancellation-liveness) -> FAIL  (cancelled sleepers never wake)"
   (:require [next.jdbc :as jdbc]
+            [next.jdbc.result-set :as rs]
+            [clojure.string :as str]
             [taoensso.telemere :as log]))
 
-(def ^:private jdbc-opts {:builder-fn next.jdbc.result-set/as-unqualified-maps})
+(def ^:private jdbc-opts {:builder-fn rs/as-unqualified-maps})
 
 ;; ---------------------------------------------------------------------------
 ;; Helper: submitted workflow-ids from history
@@ -42,14 +44,6 @@
   [history]
   (->> @history
        (filter #(and (= :cancel (:f %)) (= :ok (:type %))))
-       (keep #(get-in % [:value :workflow-id]))
-       set))
-
-(defn- signalled-ids
-  "Set of workflow-ids for which a signal op succeeded."
-  [history]
-  (->> @history
-       (filter #(and (= :signal (:f %)) (= :ok (:type %))))
        (keep #(get-in % [:value :workflow-id]))
        set))
 
@@ -74,7 +68,7 @@
   (let [ids (submitted-ids history)]
     (if (empty? ids)
       {:valid? true :violations [] :stats {:submitted 0}}
-      (let [in-clause (clojure.string/join "," (repeat (count ids) "?"))
+      (let [in-clause (str/join "," (repeat (count ids) "?"))
             stuck (jdbc/execute! db-spec
                     (into [(str "SELECT w.id,
                                         w.cancelled,
@@ -158,7 +152,7 @@
   (let [cs-ids (concurrent-start-ids history)]
     (if (empty? cs-ids)
       {:valid? true :violations [] :stats {:concurrent-start-workflows 0}}
-      (let [in-clause (clojure.string/join "," (repeat (count cs-ids) "?"))
+      (let [in-clause (str/join "," (repeat (count cs-ids) "?"))
             ;; Look for evidence of the silent overwrite: seq=0 with the
             ;; sentinel event_type means the second writer clobbered the first.
             corrupted (jdbc/execute! db-spec
@@ -203,7 +197,7 @@
   (let [c-ids (cancelled-ids history)]
     (if (empty? c-ids)
       {:valid? true :violations [] :stats {:cancelled-submitted 0}}
-      (let [in-clause (clojure.string/join "," (repeat (count c-ids) "?"))
+      (let [in-clause (str/join "," (repeat (count c-ids) "?"))
             stuck (jdbc/execute! db-spec
                     (into [(str "SELECT w.id,
                                         h.event_type AS last_event

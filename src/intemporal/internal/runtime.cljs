@@ -46,15 +46,20 @@
   p/IScheduler
 
   (schedule-timer [_ workflow-id seq-num fire-at callback]
-    (let [delay-ms  (max 0 (- fire-at (utils/current-time-ms)))
-          timer-key [workflow-id seq-num]
-          timer-id  (js/setTimeout
-                      (fn []
-                        (swap! pending-timers dissoc timer-key)
-                        (callback))
-                      delay-ms)]
-      (swap! pending-timers assoc timer-key timer-id)
-      timer-key))
+    (let [timer-key [workflow-id seq-num]]
+      ;; Idempotent: a re-resumed timer workflow may call schedule-timer again
+      ;; for the same [wf,seq]; keep the already-armed timer rather than arming
+      ;; a second one (which would risk a duplicate :timer-fired).
+      (if (contains? @pending-timers timer-key)
+        timer-key
+        (let [delay-ms (max 0 (- fire-at (utils/current-time-ms)))
+              timer-id (js/setTimeout
+                         (fn []
+                           (swap! pending-timers dissoc timer-key)
+                           (callback))
+                         delay-ms)]
+          (swap! pending-timers assoc timer-key timer-id)
+          timer-key))))
 
   (cancel-timer [_ workflow-id seq-num]
     (let [timer-key [workflow-id seq-num]]

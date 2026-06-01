@@ -35,7 +35,7 @@
           VALUES (?,?,?,?,?,?)"
          *test-run* workflow-id step nonce (name phase) *owner*])
       (catch Throwable t
-        (log/warn! "jepsen side-channel write failed" {:err (str t)})))))
+        (log/log! :warn (str "jepsen side-channel write failed: " t))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Activities.

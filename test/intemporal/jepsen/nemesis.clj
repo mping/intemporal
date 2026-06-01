@@ -9,6 +9,7 @@
   owning worker is gone."
   (:require [intemporal.jepsen.db :as db]
             [next.jdbc :as jdbc]
+            [clojure.string :as str]
             [taoensso.telemere :as log]))
 
 (defn- pick-victim
@@ -95,7 +96,7 @@
                                 AND completed = FALSE
                                 AND wf_type IN ('signal-wait','cancel-sleep','rapid-signal')
                                 AND claimed_by IN ("
-                             (clojure.string/join "," (repeat (count dead-owners) "?"))
+                             (str/join "," (repeat (count dead-owners) "?"))
                              ")")
                          test-run]
                        dead-owners)))]

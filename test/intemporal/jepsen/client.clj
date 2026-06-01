@@ -14,10 +14,7 @@
 
   History entries are plain EDN maps compatible with jepsen.history format:
     {:process <int> :type (:ok|:fail|:info) :f <op> :value {...} :time <ms>}"
-  (:require [intemporal.protocol :as p]
-            [intemporal.store.jdbc :as jdbc-store]
-            [next.jdbc :as jdbc]
-            [taoensso.telemere :as log]))
+  (:require [next.jdbc :as jdbc]))
 
 (defn now-ms [] (System/currentTimeMillis))
 

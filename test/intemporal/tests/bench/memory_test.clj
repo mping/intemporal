@@ -11,5 +11,5 @@
 (comment
   (time
     ;; 100k => 3GB, 10s
-    (run-store-tests (store/->InMemoryStore (atom {})) 100000))
+    (suite/run-store-tests (store/->InMemoryStore (atom {})) 100000))
   "")

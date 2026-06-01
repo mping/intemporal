@@ -54,11 +54,10 @@
     ;; Record the workflow function under its stable name so the workflow can be
     ;; resumed later by id alone (resume-workflow [engine wf-id]); the name is
     ;; stored in the :workflow-started event below. (improvements.md §B3)
-    (let [wf-name (wreg/register-workflow! workflow-fn)]
-     (log/with-mdc {:workflow-id wf-id}
+    (log/with-mdc {:workflow-id wf-id}
       (p/save-event store wf-id {:event-type :workflow-started
                                  :workflow-id wf-id
-                                 :workflow-fn-name wf-name
+                                 :workflow-fn-name (wreg/register-workflow! workflow-fn)
                                  :args (vec args)
                                  :timestamp (utils/current-time-ms)})
       (when observer
@@ -80,4 +79,4 @@
             result))
         (catch Exception e
           (log/warnf e "Caught exception")
-          (throw e)))))))
+          (throw e))))))

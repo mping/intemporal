@@ -44,12 +44,10 @@
   (is-cancelled?           [_ wf-id]        (p/is-cancelled? inner wf-id))
   (mark-cancelled          [_ wf-id]        (p/mark-cancelled inner wf-id))
   (get-workflow-status     [_ wf-id]        (p/get-workflow-status inner wf-id))
-  (claim-workflow          [_ wf-id o l]    (p/claim-workflow inner wf-id o l))
-  (renew-lease             [_ wf-id o l]    (p/renew-lease inner wf-id o l))
-  (release-lease           [_ wf-id o]      (p/release-lease inner wf-id o))
-  (add-runnable            [_ wf-id r]      (p/add-runnable inner wf-id r))
-  (claim-runnable          [_ o b c]       (p/claim-runnable inner o b c))
-  (delete-runnable         [_ wf-id]        (p/delete-runnable inner wf-id))
+  (claim-owner             [_ wf-id o]      (p/claim-owner inner wf-id o))
+  (list-pending            [_ o lim]        (p/list-pending inner o lim))
+  (release-owner           [_ o]            (p/release-owner inner o))
+  (set-wake-at             [_ wf-id wa]     (p/set-wake-at inner wf-id wa))
 
   (consume-signal [_ wf-id sig-name]
     (let [result (p/consume-signal inner wf-id sig-name)]

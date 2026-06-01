@@ -1,7 +1,5 @@
 (ns intemporal.store.fdb
   (:require [intemporal.protocol :as p]
-            [intemporal.internal.lease :as lease]
-            [intemporal.internal.error :as error]
             [me.vedang.clj-fdb.core :as fdb-core]
             [me.vedang.clj-fdb.transaction :as ftr]
             [me.vedang.clj-fdb.subspace.subspace :as fsub]
@@ -22,6 +20,34 @@
 
 (defn ->tuple [v]
   (Tuple/from (into-array Object (map #(if (keyword? %) (name %) %) v))))
+
+;; ============================================================================
+;; Ownership index (Phase C)
+;;
+;; FDB cannot SQL-scan by owner, so non-terminal workflows are indexed under
+;; ["wf-owner" <owner-or-""> <wf-id>]. list-pending scans the owner's bucket
+;; plus the unowned ("") bucket. The entry is added when a workflow starts,
+;; moved on claim-owner / release-owner, and removed when it terminates.
+;;
+;; The index entry VALUE carries the C2 wake-at (epoch ms, or nil = always due),
+;; so list-pending can skip not-yet-due timer workflows without a separate read.
+;; Bucket moves (claim-owner / release-owner) preserve the value.
+;; ============================================================================
+
+(defn- read-owner [tx root-subspace workflow-id]
+  (<-bytes (fdb-core/get tx root-subspace (->tuple ["owner" workflow-id]))))
+
+(defn- owner-index-key [root-subspace bucket workflow-id]
+  (->tuple ["wf-owner" bucket workflow-id]))
+
+(defn- maintain-owner-index! [tx root-subspace workflow-id events]
+  (let [started?  (some #(= :workflow-started (:event-type %)) events)
+        terminal? (some #(#{:workflow-completed :workflow-failed} (:event-type %)) events)
+        bucket    (or (read-owner tx root-subspace workflow-id) "")]
+    (cond
+      terminal? (fdb-core/clear tx root-subspace (owner-index-key root-subspace bucket workflow-id))
+      started?  (fdb-core/set tx root-subspace (owner-index-key root-subspace bucket workflow-id)
+                              (->bytes {:wake-at nil})))))
 
 ;; ============================================================================
 ;; FDB Store Implementation
@@ -59,7 +85,9 @@
           (fdb-core/set tx history-sub key (->bytes event))
           ;; Phase B2: cache terminal status for O(1) reads.
           (when term
-            (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "status"]) (->bytes term)))))
+            (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "status"]) (->bytes term)))
+          ;; Phase C: keep the ownership index in sync.
+          (maintain-owner-index! tx root-subspace workflow-id [event])))
       event))
 
   (save-events [_ workflow-id events]
@@ -70,25 +98,16 @@
                                  :workflow-failed    "failed"
                                  nil)
                               events)]
-        ;; FDB's run wraps a body exception in CompletionException; unwrap so the
-        ;; lease-lost ExceptionInfo propagates cleanly (worker/error checks rely on it).
-        (try
-          (ftr/run db
-            (fn [tx]
-              ;; Phase C: validate the lease within the serializable transaction.
-              (when-let [owner lease/*owner*]
-                (let [cur (<-bytes (fdb-core/get tx root-subspace (->tuple ["lease" workflow-id])))]
-                  (when (or (not= (:owner-id cur) owner)
-                            (< (:lease-until cur 0) (System/currentTimeMillis)))
-                    (throw (error/lease-lost-exception workflow-id owner)))))
-              (doseq [event events]
-                (let [seq-num (:seq event (System/currentTimeMillis))
-                      key (->tuple [seq-num (str (java.util.UUID/randomUUID))])]
-                  (fdb-core/set tx history-sub key (->bytes event))))
-              (when term
-                (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "status"]) (->bytes term)))))
-          (catch java.util.concurrent.CompletionException ce
-            (throw (or (.getCause ce) ce))))))
+        (ftr/run db
+          (fn [tx]
+            (doseq [event events]
+              (let [seq-num (:seq event (System/currentTimeMillis))
+                    key (->tuple [seq-num (str (java.util.UUID/randomUUID))])]
+                (fdb-core/set tx history-sub key (->bytes event))))
+            (when term
+              (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "status"]) (->bytes term)))
+            ;; Phase C: keep the ownership index in sync.
+            (maintain-owner-index! tx root-subspace workflow-id events)))))
     events)
 
   (find-event [this workflow-id event-type seq-num]
@@ -109,16 +128,15 @@
                     {}
                     r))))))
 
-  (add-signal [this workflow-id signal-name signal-data]
+  (add-signal [_ workflow-id signal-name signal-data]
     (let [signals-sub (fsub/get root-subspace (->tuple ["signals" workflow-id signal-name]))
           key (->tuple [(System/currentTimeMillis) (str (java.util.UUID/randomUUID))])]
       (ftr/run db
         (fn [tx]
           (fdb-core/set tx signals-sub key (->bytes signal-data))))
 
-      ;; Phase C: durable, cross-pod wake (a worker on any pod resumes the workflow).
-      (p/add-runnable this workflow-id :signal)
       ;; In-process fast path for an embedded (no-worker) engine in THIS process.
+      ;; Worker mode picks the workflow up via the ownership scan (list-pending).
       (when-let [callback (get-in @callbacks [workflow-id signal-name])]
         (future (callback)))
 
@@ -153,12 +171,10 @@
       (fn [tx]
         (boolean (<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "cancelled"])))))))
 
-  (mark-cancelled [this workflow-id]
+  (mark-cancelled [_ workflow-id]
     (ftr/run db
       (fn [tx]
-        (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "cancelled"]) (->bytes true))))
-    ;; Phase C: durable wake so a worker resumes the sleeper and it observes the flag.
-    (p/add-runnable this workflow-id :cancel))
+        (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "cancelled"]) (->bytes true)))))
 
   (get-workflow-status [this workflow-id]
     (if (p/is-cancelled? this workflow-id)
@@ -179,72 +195,64 @@
                   :workflow-failed :failed
                   :running))))))))
 
-  ;; --- Phase C: lease / ownership (serializable read-modify-write) ---
-  (claim-workflow [_ workflow-id owner-id lease-ms]
+  ;; --- Phase C: ownership-based recovery (serializable read-modify-write) ---
+  (claim-owner [_ workflow-id owner-id]
     (ftr/run db
       (fn [tx]
-        (let [k   (->tuple ["lease" workflow-id])
-              cur (<-bytes (fdb-core/get tx root-subspace k))
-              now (System/currentTimeMillis)]
-          (if (or (nil? cur) (= (:owner-id cur) owner-id) (< (:lease-until cur 0) now))
-            (do (fdb-core/set tx root-subspace k
-                              (->bytes {:owner-id owner-id :lease-until (+ now lease-ms)}))
-                true)
-            false)))))
-
-  (renew-lease [_ workflow-id owner-id lease-ms]
-    (ftr/run db
-      (fn [tx]
-        (let [k   (->tuple ["lease" workflow-id])
-              cur (<-bytes (fdb-core/get tx root-subspace k))
-              now (System/currentTimeMillis)]
-          (if (= (:owner-id cur) owner-id)
-            (do (fdb-core/set tx root-subspace k
-                              (->bytes {:owner-id owner-id :lease-until (+ now lease-ms)}))
-                true)
-            false)))))
-
-  (release-lease [_ workflow-id owner-id]
-    (ftr/run db
-      (fn [tx]
-        (let [k   (->tuple ["lease" workflow-id])
+        (let [k   (->tuple ["owner" workflow-id])
               cur (<-bytes (fdb-core/get tx root-subspace k))]
-          (when (= (:owner-id cur) owner-id)
-            (fdb-core/clear tx root-subspace k)))))
+          (if (or (nil? cur) (= cur owner-id))
+            (let [old-bucket (or cur "")
+                  ;; preserve the index value (carries C2 wake-at) across the move
+                  entry      (or (<-bytes (fdb-core/get tx root-subspace
+                                            (owner-index-key root-subspace old-bucket workflow-id)))
+                                 {:wake-at nil})]
+              (fdb-core/set tx root-subspace k (->bytes owner-id))
+              (fdb-core/clear tx root-subspace (owner-index-key root-subspace old-bucket workflow-id))
+              (fdb-core/set tx root-subspace (owner-index-key root-subspace owner-id workflow-id)
+                            (->bytes entry))
+              true)
+            false)))))
+
+  (list-pending [_ owner-id limit]
+    (ftr/run db
+      (fn [tx]
+        (let [now  (System/currentTimeMillis)
+              due? (fn [v] (let [wa (:wake-at v)] (or (nil? wa) (<= wa now))))
+              scan (fn [bucket]
+                     (let [sub (fsub/get root-subspace (->tuple ["wf-owner" bucket]))]
+                       (->> (fdb-core/get-range tx (fsub/range sub))
+                            (keep (fn [[key value]]
+                                    (when (due? (<-bytes value))
+                                      (nth key (dec (count key)))))))))]
+          (->> (concat (scan owner-id) (scan ""))
+               distinct
+               (take limit)
+               vec)))))
+
+  (release-owner [_ owner-id]
+    (ftr/run db
+      (fn [tx]
+        (let [sub     (fsub/get root-subspace (->tuple ["wf-owner" owner-id]))
+              entries (->> (fdb-core/get-range tx (fsub/range sub))
+                           (mapv (fn [[key value]]
+                                   [(nth key (dec (count key))) (<-bytes value)])))]
+          (doseq [[wid entry] entries]
+            ;; entries in the owner bucket are non-terminal by construction;
+            ;; preserve the index value (C2 wake-at) when moving to the "" bucket
+            (fdb-core/clear tx root-subspace (->tuple ["owner" wid]))
+            (fdb-core/clear tx root-subspace (owner-index-key root-subspace owner-id wid))
+            (fdb-core/set tx root-subspace (owner-index-key root-subspace "" wid)
+                          (->bytes (or entry {:wake-at nil})))))))
     nil)
 
-  ;; --- Phase C: runnable markers (subspace ["runnable" wf-id]) ---
-  (add-runnable [_ workflow-id reason]
+  (set-wake-at [_ workflow-id wake-at-ms]
     (ftr/run db
       (fn [tx]
-        (fdb-core/set tx root-subspace (->tuple ["runnable" workflow-id])
-                      (->bytes {:reason (name reason)
-                                :enqueued-at (System/currentTimeMillis)
-                                :claimed-until 0}))))
-    nil)
-
-  (claim-runnable [_ _owner-id batch-size claim-ms]
-    (ftr/run db
-      (fn [tx]
-        (let [run-sub (fsub/get root-subspace (->tuple ["runnable"]))
-              rows    (fdb-core/get-range tx (fsub/range run-sub))
-              now     (System/currentTimeMillis)
-              due     (->> rows
-                           (keep (fn [[key value]]
-                                   (let [m   (<-bytes value)
-                                         wid (nth key (dec (count key)))]
-                                     (when (< (:claimed-until m 0) now) [wid m]))))
-                           (take batch-size)
-                           vec)]
-          (doseq [[wid m] due]
-            (fdb-core/set tx root-subspace (->tuple ["runnable" wid])
-                          (->bytes (assoc m :claimed-until (+ now claim-ms)))))
-          (mapv first due)))))
-
-  (delete-runnable [_ workflow-id]
-    (ftr/run db
-      (fn [tx]
-        (fdb-core/clear tx root-subspace (->tuple ["runnable" workflow-id]))))
+        (let [bucket (or (read-owner tx root-subspace workflow-id) "")
+              k      (owner-index-key root-subspace bucket workflow-id)
+              entry  (or (<-bytes (fdb-core/get tx root-subspace k)) {})]
+          (fdb-core/set tx root-subspace k (->bytes (assoc entry :wake-at wake-at-ms))))))
     nil))
 
 (defn make-fdb-store [db subspace-name]
