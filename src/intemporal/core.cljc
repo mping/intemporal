@@ -566,6 +566,30 @@
   `(im/stub-protocol ~proto ~@opts))
 
 ;; ============================================================================
+;; Saga / Compensations
+;; ============================================================================
+
+(defn add-compensation
+  "Register a 0-arg compensation thunk. If the workflow later fails, registered
+   compensations run in reverse order (LIFO). Compensations should call activity
+   stubs so they are durable / replay-safe."
+  [f]
+  (ctx/add-compensation! f))
+
+(defmacro with-failure
+  "Run `body`. If `body` succeeds, register `comp-fn` (with `binding` bound to
+   body's result) to run if the workflow later fails. If `body` fails, no
+   compensation is registered - a step that never completed needs no undo.
+
+   Example:
+   (with-failure [v (book-hotel order)]
+     (cancel-hotel v))"
+  [[binding body] comp-fn]
+  `(let [~binding ~body]
+     (ctx/add-compensation! (fn [] ~comp-fn))
+     ~binding))
+
+;; ============================================================================
 ;; Convenience Functions
 ;; ============================================================================
 

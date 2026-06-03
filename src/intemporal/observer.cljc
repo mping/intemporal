@@ -113,6 +113,22 @@
   (on-workflow-cancelled [_ workflow-id]
     (swap! log-atom conj {:event :workflow-cancelled
                           :workflow-id workflow-id
+                          :timestamp (utils/current-time-ms)}))
+
+  (on-compensation-started [_ workflow-id]
+    (swap! log-atom conj {:event :compensation-started
+                          :workflow-id workflow-id
+                          :timestamp (utils/current-time-ms)}))
+
+  (on-compensation-failed [_ workflow-id error]
+    (swap! log-atom conj {:event :compensation-failed
+                          :workflow-id workflow-id
+                          :error error
+                          :timestamp (utils/current-time-ms)}))
+
+  (on-compensation-completed [_ workflow-id]
+    (swap! log-atom conj {:event :compensation-completed
+                          :workflow-id workflow-id
                           :timestamp (utils/current-time-ms)})))
 
 (defn make-logging-observer
@@ -139,4 +155,7 @@
     (on-signal-received [_ _ _ _])
     (on-workflow-completed [_ _ _])
     (on-workflow-failed [_ _ _])
-    (on-workflow-cancelled [_ _])))
+    (on-workflow-cancelled [_ _])
+    (on-compensation-started [_ _])
+    (on-compensation-failed [_ _ _])
+    (on-compensation-completed [_ _])))

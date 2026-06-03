@@ -17,6 +17,29 @@
   `(when ~observer
      (~proto-fn ~observer ~@args)))
 
+(defn- run-compensations!
+  "Run registered compensations in reverse (LIFO). A compensating activity
+   suspends on first execution -> rethrow the suspension so the loop schedules
+   it. Real errors from a compensation are logged and skipped (best-effort).
+
+   Observer notes: -started fires once per replay pass that has compensations,
+   -completed only on the pass where the stack drains without suspending. Like
+   on-workflow-suspended/-resumed, these may fire across multiple passes; dedup
+   by workflow-id if exactly-once is needed."
+  [comps]
+  (when (seq comps)
+    (ctx/notify-observer p/on-compensation-started (ctx/current-workflow-id)))
+  (doseq [c (reverse comps)]
+    (try
+      (c)
+      (catch Throwable t
+        (when (error/suspension? t) (throw t))
+        (ctx/notify-observer p/on-compensation-failed
+                             (ctx/current-workflow-id) (error/throwable->map t))
+        (log/warnf "Compensation failed, continuing: %s" (ex-message t)))))
+  (when (seq comps)
+    (ctx/notify-observer p/on-compensation-completed (ctx/current-workflow-id))))
+
 (defn execute-workflow-fn [workflow-fn args]
   (try
     {:status :completed
@@ -37,9 +60,60 @@
          :pending-events @(:pending-events (ctx/current-context))}
 
         :else
-        {:status :failed
-         :error e
-         :pending-events @(:pending-events (ctx/current-context))}))))
+        ;; Real failure: run any registered compensations (saga rollback) before
+        ;; finalizing. A compensating activity suspends on first execution, which
+        ;; we surface as :suspended so the loop schedules + resumes it; on replay
+        ;; the body re-throws and already-run compensations return cached results.
+        (let [ctx (ctx/current-context)]
+          (try
+            (run-compensations! @(:compensations ctx))
+            {:status :failed
+             :error e
+             :pending-events @(:pending-events ctx)}
+            (catch Throwable s
+              (if (error/suspension? s)
+                {:status :suspended
+                 :suspension-type (error/suspension-type s)
+                 :suspension-data (error/suspension-data s)
+                 :pending-asyncs @(:pending-asyncs ctx)
+                 :pending-events @(:pending-events ctx)}
+                (throw s)))))))))
+
+(defn cancellation-compensation-pass
+  "Run when a workflow is cancelled. Replays the body with cancellation
+   suppressed (ctx/*compensating-cancel?* must be bound true by the caller) so
+   the compensation stack is rebuilt, then runs the compensations.
+
+   Returns the same result shape as execute-workflow-fn:
+   - :suspended  -> a compensating activity is pending; the loop schedules and
+                    resumes it, then (still cancelled) re-enters this pass.
+   - :cancelled  -> the stack drained; the caller finalizes."
+  [workflow-fn args]
+  (let [ctx (ctx/current-context)]
+    ;; 1. Rebuild compensations by replaying. Completed steps return cached and
+    ;;    re-register their compensations; the frontier (first un-cached op)
+    ;;    throws a forward suspension we discard - we are NOT doing forward work.
+    (try (apply workflow-fn args) (catch Throwable _ nil))
+    ;; 2. Drop any forward pending events the frontier accumulated; keep the
+    ;;    seq-counter so compensating activities get stable, continuing seq nums.
+    (reset! (:pending-events ctx) [])
+    (reset! (:pending-asyncs ctx) [])
+    ;; 3. Run compensations (suppression still on, so comp activities can schedule).
+    (try
+      (run-compensations! @(:compensations ctx))
+      ;; :compensated? distinguishes the drained pass (-> finalize) from
+      ;; execute-workflow-fn's mid-run :cancelled (-> recur into this pass).
+      {:status :cancelled
+       :compensated? true
+       :pending-events @(:pending-events ctx)}
+      (catch Throwable s
+        (if (error/suspension? s)
+          {:status :suspended
+           :suspension-type (error/suspension-type s)
+           :suspension-data (error/suspension-data s)
+           :pending-asyncs @(:pending-asyncs ctx)
+           :pending-events @(:pending-events ctx)}
+          (throw s))))))
 
 (defn execute-with-retry
   "Execute an activity with retry policy"
@@ -329,6 +403,7 @@
    :seq-counter (atom 0)
    :pending-events (atom [])
    :pending-asyncs (atom [])
+   :compensations (atom [])
    :store store
    :registry registry
    :observer observer})
@@ -518,28 +593,21 @@
         {:status :suspended
          :workflow-id workflow-id})
 
-      ;; Check cancellation at start of each iteration
-      (if (p/is-cancelled? store workflow-id)
-        (let [error-map {:type "clojure.lang.ExceptionInfo"
-                         :message "Workflow cancelled"
-                         :data {:workflow-id workflow-id}}]
-
-          (-notify p/on-workflow-cancelled observer workflow-id)
-          (p/save-event store workflow-id {:event-type :workflow-failed
-                                           :error      error-map
-                                           :timestamp  (utils/current-time-ms)})
-
-          (log/info "Workflow cancelled, failing")
-          (-notify p/on-workflow-failed observer workflow-id error-map)
-          {:status :failed
-           :workflow-id workflow-id
-           :error error-map})
-        ;; else
-        (let [history (p/load-history store workflow-id)
-              ctx (make-workflow-context workflow-id history store registry observer)
-              exec-result (binding [ctx/*workflow-context* ctx]
-                            (log/debugf "Executing workflow function %s..." workflow-fn)
-                            (execute-workflow-fn workflow-fn args))]
+      ;; Check cancellation at start of each iteration. When cancelled we still
+      ;; run the body - via cancellation-compensation-pass under suppression - so
+      ;; the compensation stack is rebuilt and compensations roll back completed
+      ;; steps. The result feeds the same dispatch below (:suspended schedules a
+      ;; compensating activity and recurs; :cancelled finalizes).
+      (let [cancelled?  (p/is-cancelled? store workflow-id)
+            history     (p/load-history store workflow-id)
+            ctx         (cond-> (make-workflow-context workflow-id history store registry observer)
+                          cancelled? (assoc :compensating-cancel? true))
+            exec-result (binding [ctx/*workflow-context* ctx]
+                          (log/debugf "Executing workflow function %s (cancelled? %s)..."
+                                      workflow-fn cancelled?)
+                          (if cancelled?
+                            (cancellation-compensation-pass workflow-fn args)
+                            (execute-workflow-fn workflow-fn args)))]
 
           (log/debugf "Workflow function executed, got: %s" (:status exec-result))
           (case (:status exec-result)
@@ -551,9 +619,14 @@
                                 observer)
 
             :cancelled
-            (finalize-cancelled store workflow-id
-                                (:pending-events exec-result)
-                                observer)
+            ;; From the compensation pass (drained) -> finalize. From
+            ;; execute-workflow-fn observing the flag mid-run -> recur so the
+            ;; top-of-loop runs the compensation pass.
+            (if (:compensated? exec-result)
+              (finalize-cancelled store workflow-id
+                                  (:pending-events exec-result)
+                                  observer)
+              (recur (inc iteration)))
 
             :suspended
             (let [action (handle-suspension engine
@@ -590,7 +663,7 @@
             (finalize-failed store workflow-id
                              (:pending-events exec-result)
                              (:error exec-result)
-                             observer)))))))
+                             observer))))))
 
 (defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
                                suspension-data pending-events observer]

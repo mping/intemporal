@@ -14,6 +14,48 @@
 ;; Workflow Execution Engine
 ;; ============================================================================
 
+(defn- run-compensations!
+  "Run registered compensations in reverse (LIFO). A compensating activity
+   suspends on first execution -> rethrow the suspension so the loop schedules
+   it. Real errors from a compensation are logged and skipped (best-effort).
+
+   Observer notes: -started fires once per replay pass that has compensations,
+   -completed only on the pass where the stack drains without suspending. Like
+   on-workflow-suspended/-resumed, these may fire across multiple passes; dedup
+   by workflow-id if exactly-once is needed."
+  [comps]
+  (when (seq comps)
+    (ctx/notify-observer p/on-compensation-started (ctx/current-workflow-id)))
+  (doseq [c (reverse comps)]
+    (try
+      (c)
+      (catch js/Error t
+        (when (error/suspension? t) (throw t))
+        (ctx/notify-observer p/on-compensation-failed
+                             (ctx/current-workflow-id) (error/throwable->map t))
+        (log/warnf "Compensation failed, continuing: %s" (ex-message t)))))
+  (when (seq comps)
+    (ctx/notify-observer p/on-compensation-completed (ctx/current-workflow-id))))
+
+(defn- compensate-result
+  "Run compensations then build the terminal result for a real failure `e`.
+   If a compensating activity suspends, surfaces :suspended so the loop schedules
+   it; on replay the body re-throws and already-run compensations are cached."
+  [ctx e pending-asyncs pending-events]
+  (try
+    (run-compensations! @(:compensations ctx))
+    {:status :failed
+     :error e
+     :pending-events @pending-events}
+    (catch js/Error s
+      (if (error/suspension? s)
+        {:status :suspended
+         :suspension-type (error/suspension-type s)
+         :suspension-data (error/suspension-data s)
+         :pending-asyncs @pending-asyncs
+         :pending-events @pending-events}
+        (throw s)))))
+
 (defn execute-workflow-fn [workflow-fn args]
   ;; Capture context so async callbacks (from p/let, etc.) can access it
   ;; after the dynamic binding scope has exited
@@ -51,9 +93,7 @@
                                  :pending-events @pending-events}
 
                                 :else
-                                {:status :failed
-                                 :error e
-                                 :pending-events @pending-events})))))
+                                (compensate-result ctx e pending-asyncs pending-events))))))
           ;; Synchronous result
           {:status :completed
            :result result
@@ -73,9 +113,7 @@
            :pending-events @pending-events}
 
           :else
-          {:status :failed
-           :error e
-           :pending-events @pending-events})))))
+          (compensate-result ctx e pending-asyncs pending-events))))))
 
 (defn- execute-once
   "Execute activity once, returns a promise of result map."
@@ -354,6 +392,7 @@
            :seq-counter (atom 0)
            :pending-events (atom [])
            :pending-asyncs (atom [])
+           :compensations (atom [])
            :store store
            :registry registry
            :observer observer}
@@ -517,6 +556,46 @@
                                  :timestamp (utils/current-time-ms)})
         result))))
 
+(defn cancellation-compensation-pass
+  "Run when a workflow is cancelled. Replays the body with cancellation
+   suppressed (the context carries :compensating-cancel?) so the compensation
+   stack is rebuilt, then runs the compensations. cljs mirror of the clj pass.
+
+   The body may return a promise (p/let), so step 1 may settle asynchronously;
+   we swallow its result/rejection (forward work is discarded) then run
+   compensations. Returns the execute-workflow-fn result shape (a map, or a
+   promise of one): :suspended (a compensating activity is pending) or
+   :cancelled (the stack drained)."
+  [workflow-fn args]
+  (let [ctx       (ctx/current-context)
+        run-comps (fn []
+                    ;; Drop forward pending events from the frontier; keep the
+                    ;; seq-counter so comp activities get stable seq nums.
+                    (reset! (:pending-events ctx) [])
+                    (reset! (:pending-asyncs ctx) [])
+                    (try
+                      (run-compensations! @(:compensations ctx))
+                      ;; :compensated? distinguishes the drained pass (-> finalize)
+                      ;; from execute-workflow-fn's mid-run :cancelled (-> recur).
+                      {:status :cancelled
+                       :compensated? true
+                       :pending-events @(:pending-events ctx)}
+                      (catch js/Error s
+                        (if (error/suspension? s)
+                          {:status :suspended
+                           :suspension-type (error/suspension-type s)
+                           :suspension-data (error/suspension-data s)
+                           :pending-asyncs @(:pending-asyncs ctx)
+                           :pending-events @(:pending-events ctx)}
+                          (throw s)))))
+        ;; Step 1: replay body to rebuild comps; swallow sync throw or rejection.
+        replay    (try (apply workflow-fn args) (catch js/Error _ nil))]
+    (if (prom/promise? replay)
+      (-> replay
+          (prom/catch (fn [_] nil))    ;; discard forward suspension/rejection
+          (bthen (fn [_] (run-comps)))) ;; bthen rebinds ctx (carries the flag)
+      (run-comps))))
+
 (defn run-workflow-internal
   "Main workflow execution loop - orchestrates replay and execution.
 
@@ -544,29 +623,22 @@
         {:status :suspended
          :workflow-id workflow-id})
 
-      ;; Check cancellation at start of each iteration
-      (if (p/is-cancelled? store workflow-id)
-        (let [error-map {:type "clojure.lang.ExceptionInfo"
-                         :message "Workflow cancelled"
-                         :data {:workflow-id workflow-id}}]
-
-          (-notify p/on-workflow-cancelled observer workflow-id)
-          (p/save-event store workflow-id {:event-type :workflow-failed
-                                           :error      error-map
-                                           :timestamp  (utils/current-time-ms)})
-
-          (log/info "Workflow cancelled, failing")
-          (-notify p/on-workflow-failed observer workflow-id error-map)
-          {:status :failed
-           :workflow-id workflow-id
-           :error error-map})
-        ;; else
-        (let [history (p/load-history store workflow-id)
-              ctx (make-workflow-context workflow-id history store registry observer
-                                       :protocols (:protocols engine))
-              exec-result (binding [ctx/*workflow-context* ctx]
-                            (log/debugf "Executing workflow function %s..." workflow-fn)
-                            (execute-workflow-fn workflow-fn args))
+      ;; Check cancellation at start of each iteration. When cancelled we run the
+      ;; body via cancellation-compensation-pass (context carries
+      ;; :compensating-cancel?) so the compensation stack is rebuilt and rolled
+      ;; back; the result feeds the same dispatch (:suspended schedules a comp
+      ;; activity and recurs; :cancelled finalizes).
+      (let [cancelled?  (p/is-cancelled? store workflow-id)
+            history     (p/load-history store workflow-id)
+            ctx         (cond-> (make-workflow-context workflow-id history store registry observer
+                                                       :protocols (:protocols engine))
+                          cancelled? (assoc :compensating-cancel? true))
+            exec-result (binding [ctx/*workflow-context* ctx]
+                          (log/debugf "Executing workflow function %s (cancelled? %s)..."
+                                      workflow-fn cancelled?)
+                          (if cancelled?
+                            (cancellation-compensation-pass workflow-fn args)
+                            (execute-workflow-fn workflow-fn args)))
               dispatch (fn [exec-result]
                          (log/debugf "Workflow function executed, got: %s" (:status exec-result))
                          (case (:status exec-result)
@@ -578,9 +650,14 @@
                                                observer)
 
                            :cancelled
-                           (finalize-cancelled store workflow-id
-                                               (:pending-events exec-result)
-                                               observer)
+                           ;; From the compensation pass (drained) -> finalize.
+                           ;; From execute-workflow-fn observing the flag mid-run
+                           ;; -> recur so the top-of-loop runs the pass.
+                           (if (:compensated? exec-result)
+                             (finalize-cancelled store workflow-id
+                                                 (:pending-events exec-result)
+                                                 observer)
+                             (prom/recur (inc iteration)))
 
                            :suspended
                            (blet [action (handle-suspension engine
@@ -619,7 +696,7 @@
           ;; exec-result may be a Promise if workflow-fn returned a Promise (e.g. from p/let)
           (if (prom/promise? exec-result)
             (bthen exec-result dispatch)
-            (dispatch exec-result)))))))
+            (dispatch exec-result))))))
 
 (defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
                                suspension-data pending-events observer]

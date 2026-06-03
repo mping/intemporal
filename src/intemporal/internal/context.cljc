@@ -20,6 +20,7 @@
     :seq-counter (atom 0)
     :pending-events pending-events
     :pending-asyncs pending-asyncs
+    :compensations (atom [])
     :store store
     :registry registry
     :observer observer
@@ -36,7 +37,13 @@
 
 (defn check-cancelled! []
   (let [ctx (current-context)]
-    (when (p/is-cancelled? (:store ctx) (:workflow-id ctx))
+    ;; :compensating-cancel? is set on the context during the cancellation
+    ;; compensation pass so the body can replay (rebuilding the compensation
+    ;; stack) and compensating activities can schedule despite the cancel flag.
+    ;; It lives in the context map (not a dynamic var) so it propagates across
+    ;; cljs async boundaries via blet/bthen. See cancellation-compensation-pass.
+    (when (and (not (:compensating-cancel? ctx))
+               (p/is-cancelled? (:store ctx) (:workflow-id ctx)))
       (throw (error/workflow-cancelled-exception)))))
 
 (defn next-seq! []
@@ -66,6 +73,13 @@
 (defn add-pending-async! [async-info]
   (let [ctx (current-context)]
     (swap! (:pending-asyncs ctx) conj async-info)))
+
+(defn add-compensation!
+  "Register a 0-arg compensation thunk onto the current workflow's compensation
+   stack. Compensations run in reverse (LIFO) when the workflow fails."
+  [f]
+  (let [ctx (current-context)]
+    (swap! (:compensations ctx) conj f)))
 
 (defn notify-observer [event-fn & args]
   (when-let [observer (:observer (current-context))]

@@ -78,4 +78,7 @@
   (on-signal-received [observer workflow-id signal-name payload])
   (on-workflow-completed [observer workflow-id result])
   (on-workflow-failed [observer workflow-id error])
-  (on-workflow-cancelled [observer workflow-id]))
+  (on-workflow-cancelled [observer workflow-id])
+  (on-compensation-started [observer workflow-id])
+  (on-compensation-failed [observer workflow-id error])
+  (on-compensation-completed [observer workflow-id]))
