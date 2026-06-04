@@ -7,7 +7,7 @@
 (deftest fdb-store-test
   (testing "FoundationDB Store Implementation"
     (let [db (cfdb/select-api-version 710)
-          db (cfdb/open db)]
+          db (cfdb/open db "docker/fdb.cluster")]
 
       ;; Run shared suite
       (with-open [store (fdb-store/make-fdb-store db "intemporal-tests")]
