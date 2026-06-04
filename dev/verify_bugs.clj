@@ -24,7 +24,7 @@
       "jdbc:postgresql://localhost:5432/root?user=root&password=root"))
 
 (defn- open-fdb []
-  (let [fdb (cfdb/select-api-version 730)]
+  (let [fdb (cfdb/select-api-version 710)]
     (cfdb/open fdb "docker/fdb.cluster")))
 
 (defn- timeout-ms [ms f]

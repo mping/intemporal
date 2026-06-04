@@ -46,7 +46,7 @@
 (deftest ^:integration status-fdb
   (testing "status lifecycle on FDBStore"
     (let [root  (str "status-" (random-uuid))
-          fdb   (cfdb/select-api-version 730)
+          fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
           store (fdb-store/make-fdb-store db root)]
       (check-status store))))

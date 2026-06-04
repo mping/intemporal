@@ -69,7 +69,7 @@
 (deftest ^:integration worker-recovery-fdb
   (testing "FDBStore: worker resumes via the ownership scan"
     (let [root  (str "worker-" (random-uuid))
-          fdb   (cfdb/select-api-version 730)
+          fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
           store (fdb-store/make-fdb-store db root)]
       (check-worker-recovery store))))
@@ -102,7 +102,7 @@
 (deftest ^:integration claim-exclusivity-fdb
   (testing "FDBStore claim-owner exclusivity"
     (let [root  (str "claim-" (random-uuid))
-          fdb   (cfdb/select-api-version 730)
+          fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
           store (fdb-store/make-fdb-store db root)]
       (check-claim-exclusivity store))))

@@ -3,7 +3,7 @@
             [intemporal.tests.utils :refer [with-result]]
             [cljs.test :as t :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]
-            [promesa.core :as p])
+)
   (:require-macros [intemporal.tests.utils :refer [with-result]]
                    [intemporal.internal.context :refer [blet]]))
 

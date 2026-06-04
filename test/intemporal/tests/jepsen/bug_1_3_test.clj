@@ -78,7 +78,7 @@
 (deftest ^:integration engine-restart-recovers-fdb
   (testing "FDBStore: worker recovers after crash"
     (let [root  (str "bug13-" (random-uuid))
-          fdb   (cfdb/select-api-version 730)
+          fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
           store (fdb-store/make-fdb-store db root)]
       (assert-recovered (run-scenario store)))))

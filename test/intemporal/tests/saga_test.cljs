@@ -1,5 +1,5 @@
 (ns intemporal.tests.saga-test
-  "Tests for saga / compensation support (with-failure + add-compensation)."
+  "Tests for saga / compensation support (saga + add-compensation + compensate)."
   (:require [intemporal.core :as intemporal]
             [intemporal.tests.utils :refer [with-result]]
             [cljs.test :as t :refer [deftest is testing]]
@@ -33,41 +33,59 @@
 ;; ============================================================================
 
 (defn happy-saga [order]
-  (let [hotel  (intemporal/stub #'book-hotel)
+  (let [s       (intemporal/saga)
+        hotel  (intemporal/stub #'book-hotel)
         flight (intemporal/stub #'book-flight)
         charge (intemporal/stub #'charge-card)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'cancel-flight)]
-    (intemporal/with-failure [h (hotel order)]
-      (chotel h))
-    (intemporal/with-failure [f (flight order)]
-      (cflight f))
-    (charge order)
-    :booked))
+    (try
+      (let [h (hotel order)]
+        (intemporal/add-compensation s #(chotel h)))
+      (let [f (flight order)]
+        (intemporal/add-compensation s #(cflight f)))
+      (charge order)
+      :booked
+      (catch :default e
+        (when (intemporal/suspension? e) (throw e))
+        (intemporal/compensate s)
+        (throw e)))))
 
 (defn failing-saga [order]
-  (let [hotel  (intemporal/stub #'book-hotel)
+  (let [s       (intemporal/saga)
+        hotel  (intemporal/stub #'book-hotel)
         flight (intemporal/stub #'book-flight)
         charge (intemporal/stub #'charge-card-fails)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'cancel-flight)]
-    (intemporal/with-failure [h (hotel order)]
-      (chotel h))
-    (intemporal/with-failure [f (flight order)]
-      (cflight f))
-    (charge order)
-    :booked))
+    (try
+      (let [h (hotel order)]
+        (intemporal/add-compensation s #(chotel h)))
+      (let [f (flight order)]
+        (intemporal/add-compensation s #(cflight f)))
+      (charge order)
+      :booked
+      (catch :default e
+        (when (intemporal/suspension? e) (throw e))
+        (intemporal/compensate s)
+        (throw e)))))
 
 (defn fail-on-flight-saga [order]
-  (let [hotel  (intemporal/stub #'book-hotel)
+  (let [s       (intemporal/saga)
+        hotel  (intemporal/stub #'book-hotel)
         flight (intemporal/stub #'book-flight-fails)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'cancel-flight)]
-    (intemporal/with-failure [h (hotel order)]
-      (chotel h))
-    (intemporal/with-failure [f (flight order)]
-      (cflight f))
-    :booked))
+    (try
+      (let [h (hotel order)]
+        (intemporal/add-compensation s #(chotel h)))
+      (let [f (flight order)]
+        (intemporal/add-compensation s #(cflight f)))
+      :booked
+      (catch :default e
+        (when (intemporal/suspension? e) (throw e))
+        (intemporal/compensate s)
+        (throw e)))))
 
 ;; ============================================================================
 ;; Tests

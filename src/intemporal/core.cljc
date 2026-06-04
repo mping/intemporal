@@ -33,10 +33,8 @@
         effective-timeout (or timeout-ms (:timeout-ms activity-info))
         effective-retry (or retry-policy (:retry-policy activity-info))]
     (fn [& args]
-      (let [seq-num (ctx/next-seq!)]
+      (let [seq-num (ctx/next-seq!)]            ;; next-seq! already checks cancellation
         (log/with-mdc {:activity activity-name :seqnum seq-num}
-
-          (ctx/check-cancelled!)
           (let [ctx             (ctx/current-context)
                 store           (ctx/current-store)
                 workflow-id     (ctx/current-workflow-id)
@@ -569,25 +567,81 @@
 ;; Saga / Compensations
 ;; ============================================================================
 
+(defn suspension?
+  "True if `e` is an internal workflow suspension (the engine's normal control
+   flow for activities, timers, signals, etc.). Mainly needed in ClojureScript,
+   where every throwable is a js/Error and `(catch :default e)` catches
+   suspensions too - a saga catch there must rethrow them via this predicate.
+   On the JVM suspensions subclass Error, so `(catch Exception e)` already
+   excludes them and no guard is needed. See `saga`."
+  [e]
+  (error/suspension? e))
+
+(defn saga
+  "Create a saga: a handle that collects compensation thunks for the steps a
+   workflow has completed. Register compensations as you go with
+   `add-compensation`, and run them with `compensate` from a catch block.
+
+   Both real failures and workflow cancellation flow through the catch (so this
+   rolls back in either case); the engine's normal control-flow suspensions do
+   not. On the JVM, catch `Exception` - suspensions subclass Error and are
+   excluded automatically:
+
+   (let [s (saga)]
+     (try
+       (let [h (book-hotel order)]
+         (add-compensation s #(cancel-hotel h)))
+       (charge-card order)
+       (catch Exception e
+         (compensate s)             ;; rolls back completed steps, LIFO
+         (throw e))))
+
+   In ClojureScript there is no Error/Exception split, so catch :default and
+   rethrow suspensions explicitly:
+
+       (catch :default e
+         (when (suspension? e) (throw e))
+         (compensate s)
+         (throw e))"
+  []
+  {::compensations (atom [])})
+
 (defn add-compensation
-  "Register a 0-arg compensation thunk. If the workflow later fails, registered
-   compensations run in reverse order (LIFO). Compensations should call activity
-   stubs so they are durable / replay-safe."
-  [f]
-  (ctx/add-compensation! f))
+  "Register a 0-arg compensation thunk on `saga`. Compensations run in reverse
+   registration order (LIFO) when `compensate` is called. The thunk should call
+   activity stubs (closing over the step's result) so it is durable / replay-safe.
+   Register a step's compensation only after the step succeeds, so a step that
+   never completed registers nothing to undo."
+  [saga thunk]
+  (swap! (::compensations saga) conj thunk))
 
-(defmacro with-failure
-  "Run `body`. If `body` succeeds, register `comp-fn` (with `binding` bound to
-   body's result) to run if the workflow later fails. If `body` fails, no
-   compensation is registered - a step that never completed needs no undo.
-
-   Example:
-   (with-failure [v (book-hotel order)]
-     (cancel-hotel v))"
-  [[binding body] comp-fn]
-  `(let [~binding ~body]
-     (ctx/add-compensation! (fn [] ~comp-fn))
-     ~binding))
+(defn compensate
+  "Run `saga`'s registered compensations in reverse (LIFO). Real errors from a
+   compensation are logged and skipped (best-effort rollback); a suspension (a
+   compensating activity running for the first time) is rethrown so the engine
+   schedules and resumes it - on replay already-run compensations return cached
+   results."
+  [saga]
+  (let [comps @(::compensations saga)]
+    (when (seq comps)
+      (ctx/notify-observer p/on-compensation-started (ctx/current-workflow-id)))
+    ;; Suppress the cancellation check so compensating activities can run even
+    ;; when this rollback was triggered by a cancellation (the cancel exception
+    ;; was already caught by the user before calling compensate).
+    (ctx/set-compensating! true)
+    (try
+      (doseq [c (reverse comps)]
+        (try
+          (c)
+          (catch #?(:clj Throwable :cljs js/Error) t
+            (when (error/suspension? t) (throw t))
+            (ctx/notify-observer p/on-compensation-failed
+                                 (ctx/current-workflow-id) (error/throwable->map t))
+            (log/warnf "Compensation failed, continuing: %s" (ex-message t)))))
+      (finally
+        (ctx/set-compensating! false)))
+    (when (seq comps)
+      (ctx/notify-observer p/on-compensation-completed (ctx/current-workflow-id)))))
 
 ;; ============================================================================
 ;; Convenience Functions

@@ -77,7 +77,7 @@
 (deftest ^:integration fire-at-deterministic-fdb
   (testing "FDBStore"
     (let [root  (str "det-" (random-uuid))
-          fdb   (cfdb/select-api-version 730)
+          fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
           store (fdb-store/make-fdb-store db root)]
       (check-determinism store))))
@@ -118,7 +118,7 @@
 (deftest ^:integration timer-recovery-fdb
   (testing "FDBStore"
     (let [root  (str "trec-" (random-uuid))
-          fdb   (cfdb/select-api-version 730)
+          fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
           store (fdb-store/make-fdb-store db root)]
       (check-timer-recovery store))))
@@ -155,7 +155,7 @@
 (deftest ^:integration wake-at-filter-fdb
   (testing "FDBStore"
     (let [root  (str "wake-" (random-uuid))
-          fdb   (cfdb/select-api-version 730)
+          fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
           store (fdb-store/make-fdb-store db root)]
       (check-wake-at-filter store))))

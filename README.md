@@ -57,29 +57,53 @@ Examples:
 
 ### Saga / compensations
 
-`with-failure` registers a compensation for a step. If the step succeeds but the
-workflow later fails, registered compensations run in reverse order (LIFO). A
-step that fails registers no compensation (nothing was created, so nothing to
-undo). Compensations should themselves be activity stubs so they are durable and
+Create a saga with `intemporal/saga`, register a compensation for each step *after*
+it succeeds with `intemporal/add-compensation`, and roll back from a catch block
+with `intemporal/compensate`. Compensations run in reverse registration order
+(LIFO). A step that fails before its `add-compensation` registers nothing to undo.
+Compensations should themselves call activity stubs so they are durable and
 replay-safe.
+
+Both real failures and workflow cancellation flow through the catch, so the one
+idiom rolls back in either case. Catch `Exception`: the engine's normal
+control-flow *suspensions* subclass `Error`, so they are excluded automatically
+and propagate to the engine untouched.
 
 ```clojure
 (defn booking-saga [order]
-  (let [book-hotel    (intemporal/stub #'book-hotel)
+  (let [saga          (intemporal/saga)
+        book-hotel    (intemporal/stub #'book-hotel)
         book-flight   (intemporal/stub #'book-flight)
         charge-card   (intemporal/stub #'charge-card)
         cancel-hotel  (intemporal/stub #'cancel-hotel)
         cancel-flight (intemporal/stub #'cancel-flight)]
-    (intemporal/with-failure [h (book-hotel order)]
-      (cancel-hotel h))
-    (intemporal/with-failure [f (book-flight order)]
-      (cancel-flight f))
-    ;; if charge-card throws, cancel-flight then cancel-hotel run automatically
-    (charge-card order)))
+    (try
+      (let [h (book-hotel order)]
+        (intemporal/add-compensation saga #(cancel-hotel h)))
+      (let [f (book-flight order)]
+        (intemporal/add-compensation saga #(cancel-flight f)))
+      ;; if charge-card throws, the catch runs compensate -> cancel-flight then
+      ;; cancel-hotel (LIFO) -> then rethrows so the workflow finalizes :failed
+      (charge-card order)
+      :booked
+      (catch Exception e
+        (intemporal/compensate saga)
+        (throw e)))))
 ```
 
-`intemporal/add-compensation` is the underlying function if you need to register
-a compensation thunk directly.
+Cancellation is a catchable `Exception`, so any `(catch Exception ...)` in a
+workflow will intercept it — that is what lets a cancelled saga roll back.
+
+In **ClojureScript** there is no `Error`/`Exception` split (everything is a
+`js/Error`), so `(catch :default e)` would also catch suspensions. There, rethrow
+them explicitly:
+
+```clojure
+      (catch :default e
+        (when (intemporal/suspension? e) (throw e))   ;; engine control flow
+        (intemporal/compensate saga)
+        (throw e))
+```
 
 # TODO
 

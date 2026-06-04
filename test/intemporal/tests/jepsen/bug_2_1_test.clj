@@ -106,7 +106,7 @@
 (deftest ^:integration signal-delivered-in-register-consume-window-fdb
   (testing "RacingStore on FDBStore: in-window signal wakes the workflow"
     (let [root  (str "bug21-" (random-uuid))
-          fdb   (cfdb/select-api-version 730)
+          fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
           inner (fdb-store/make-fdb-store db root)]
       (assert-woke (run-scenario inner)))))

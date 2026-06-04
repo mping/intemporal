@@ -1,10 +1,11 @@
 (ns intemporal.tests.saga-test
-  "Tests for saga / compensation support (with-failure + add-compensation).
+  "Tests for saga / compensation support (saga + add-compensation + compensate).
    A compensation registered for a successful step runs (in reverse order)
-   when the workflow later fails."
+   when the workflow later fails and the catch block calls compensate."
   (:require [intemporal.core :as intemporal]
             [intemporal.tests.utils :refer [with-result]]
             [clojure.test :refer [deftest is testing]]
+            [matcher-combinators.matchers :as m]
             [matcher-combinators.test :refer [match?]]))
 
 ;; ============================================================================
@@ -40,81 +41,112 @@
 ;; ============================================================================
 
 (defn happy-saga [order]
-  (let [hotel  (intemporal/stub #'book-hotel)
+  (let [s       (intemporal/saga)
+        hotel  (intemporal/stub #'book-hotel)
         flight (intemporal/stub #'book-flight)
         charge (intemporal/stub #'charge-card)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'cancel-flight)]
-    (intemporal/with-failure [h (hotel order)]
-      (chotel h))
-    (intemporal/with-failure [f (flight order)]
-      (cflight f))
-    (charge order)
-    :booked))
+    (try
+      (let [h (hotel order)]
+        (intemporal/add-compensation s #(chotel h)))
+      (let [f (flight order)]
+        (intemporal/add-compensation s #(cflight f)))
+      (charge order)
+      :booked
+      (catch Exception e
+        (intemporal/compensate s)
+        (throw e)))))
 
 (defn failing-saga [order]
-  (let [hotel  (intemporal/stub #'book-hotel)
+  (let [s       (intemporal/saga)
+        hotel  (intemporal/stub #'book-hotel)
         flight (intemporal/stub #'book-flight)
         charge (intemporal/stub #'charge-card-fails)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'cancel-flight)]
-    (intemporal/with-failure [h (hotel order)]
-      (chotel h))
-    (intemporal/with-failure [f (flight order)]
-      (cflight f))
-    (charge order)
-    :booked))
+    (try
+      (let [h (hotel order)]
+        (intemporal/add-compensation s #(chotel h)))
+      (let [f (flight order)]
+        (intemporal/add-compensation s #(cflight f)))
+      (charge order)
+      :booked
+      (catch Exception e
+        (intemporal/compensate s)
+        (throw e)))))
 
 (defn fail-on-flight-saga [order]
-  (let [hotel  (intemporal/stub #'book-hotel)
+  (let [s       (intemporal/saga)
+        hotel  (intemporal/stub #'book-hotel)
         flight (intemporal/stub #'book-flight-fails)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'cancel-flight)]
-    (intemporal/with-failure [h (hotel order)]
-      (chotel h))
-    (intemporal/with-failure [f (flight order)]
-      (cflight f))
-    :booked))
+    (try
+      (let [h (hotel order)]
+        (intemporal/add-compensation s #(chotel h)))
+      ;; flight fails before its compensation is registered
+      (let [f (flight order)]
+        (intemporal/add-compensation s #(cflight f)))
+      :booked
+      (catch Exception e
+        (intemporal/compensate s)
+        (throw e)))))
 
 ;; Books hotel + flight, then stays busy in a loop so a cancel arrives after the
 ;; bookings have completed (mirrors cancellation-test/long-flow).
 (defn cancel-rollback-saga [order]
-  (let [hotel   (intemporal/stub #'book-hotel)
+  (let [s       (intemporal/saga)
+        hotel   (intemporal/stub #'book-hotel)
         flight  (intemporal/stub #'book-flight)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'cancel-flight)
         slow    (intemporal/stub #'slow-step)]
-    (intemporal/with-failure [h (hotel order)]
-      (chotel h))
-    (intemporal/with-failure [f (flight order)]
-      (cflight f))
-    (loop [i 0]
-      (if (< i 40) (do (slow i) (recur (inc i))) :booked))))
+    (try
+      (let [h (hotel order)]
+        (intemporal/add-compensation s #(chotel h)))
+      (let [f (flight order)]
+        (intemporal/add-compensation s #(cflight f)))
+      (loop [i 0]
+        (if (< i 40) (do (slow i) (recur (inc i))) :booked))
+      (catch Exception e
+        (intemporal/compensate s)
+        (throw e)))))
 
-;; Cancel lands before any with-failure step completes (busy first).
+;; Cancel lands before any compensation is registered (busy first).
 (defn cancel-early-saga [order]
-  (let [hotel (intemporal/stub #'book-hotel)
+  (let [s      (intemporal/saga)
+        hotel (intemporal/stub #'book-hotel)
         chotel (intemporal/stub #'cancel-hotel)
         slow  (intemporal/stub #'slow-step)]
-    (loop [i 0]
-      (when (< i 3) (slow i) (recur (inc i))))
-    (intemporal/with-failure [h (hotel order)]
-      (chotel h))
-    :booked))
+    (try
+      (loop [i 0]
+        (when (< i 3) (slow i) (recur (inc i))))
+      (let [h (hotel order)]
+        (intemporal/add-compensation s #(chotel h)))
+      :booked
+      (catch Exception e
+        (intemporal/compensate s)
+        (throw e)))))
 
 ;; Compensation activity itself fails -> swallowed, others still run.
 (defn failing-comp-saga [order]
-  (let [hotel  (intemporal/stub #'book-hotel)
+  (let [s       (intemporal/saga)
+        hotel  (intemporal/stub #'book-hotel)
         flight (intemporal/stub #'book-flight)
         charge (intemporal/stub #'charge-card-fails)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'failing-cancel-flight)]
-    (intemporal/with-failure [h (hotel order)]
-      (chotel h))
-    (intemporal/with-failure [f (flight order)]
-      (cflight f))
-    (charge order)
-    :booked))
+    (try
+      (let [h (hotel order)]
+        (intemporal/add-compensation s #(chotel h)))
+      (let [f (flight order)]
+        (intemporal/add-compensation s #(cflight f)))
+      (charge order)
+      :booked
+      (catch Exception e
+        (intemporal/compensate s)
+        (throw e)))))
 
 ;; ============================================================================
 ;; Tests

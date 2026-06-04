@@ -89,7 +89,7 @@
 (deftest ^:integration cancellation-reaches-sleeping-workflow-fdb
   (testing "cancel-workflow terminates a signal-sleeping workflow (FDBStore)"
     (let [root  (str "bug23-" (random-uuid))
-          fdb   (cfdb/select-api-version 730)
+          fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
           store (fdb-store/make-fdb-store db root)]
       (assert-cancelled (run-scenario store)))))

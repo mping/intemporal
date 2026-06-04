@@ -80,7 +80,7 @@
 (deftest ^:integration signal-across-instances-fdb
   (testing "two FDBStore instances over the same FoundationDB"
     (let [root    (str "bug11-" (random-uuid))
-          fdb     (cfdb/select-api-version 730)
+          fdb     (cfdb/select-api-version 710)
           db      (.open fdb "docker/fdb.cluster")
           store-a (fdb-store/make-fdb-store db root)
           store-b (fdb-store/make-fdb-store db root)]

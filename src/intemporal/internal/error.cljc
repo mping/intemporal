@@ -69,12 +69,15 @@
              (-> e ex-data :data))))
 
 (defn workflow-cancelled-exception []
-  (internal-error "Workflow cancelled" {::cancelled true}))
+  ;; A plain ex-info (catchable by `(catch Exception ...)`) - unlike suspensions,
+  ;; which subclass Error to stay invisible to userland catches. This lets a saga
+  ;; workflow catch cancellation and run compensations to roll completed steps
+  ;; back, while still letting suspensions propagate to the engine untouched.
+  (ex-info "Workflow cancelled" {::cancelled true}))
 
 (defn cancelled-exception? [e]
   #?(:clj
-     (and (instance? Error e)
-          (instance? IExceptionInfo e)
+     (and (instance? IExceptionInfo e)
           (::cancelled (ex-data e)))
      :cljs
      (and (instance? js/Error e)

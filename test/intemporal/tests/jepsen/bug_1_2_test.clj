@@ -52,7 +52,7 @@
 (deftest ^:integration claim-is-exclusive-fdb
   (testing "FDBStore"
     (let [root  (str "bug12-" (random-uuid))
-          fdb   (cfdb/select-api-version 730)
+          fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
           store (fdb-store/make-fdb-store db root)]
       (assert-fixed (run-scenario store)))))

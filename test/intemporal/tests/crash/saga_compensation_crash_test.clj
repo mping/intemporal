@@ -28,18 +28,25 @@
 ;; missing signal is our deterministic "crash" point: the workflow suspends
 ;; mid-compensation and is resumed by a fresh engine in phase 2.
 (defn crash-saga [order]
-  (let [hotel   (intemporal/stub #'book-hotel)
+  (let [s       (intemporal/saga)
+        hotel   (intemporal/stub #'book-hotel)
         flight  (intemporal/stub #'book-flight)
         charge  (intemporal/stub #'charge-card-fails)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'cancel-flight)]
-    (intemporal/with-failure [h (hotel order)]
-      (chotel h))
-    (intemporal/with-failure [f (flight order)]
-      (do (cflight f)
-          (intemporal/wait-for-signal "continue-compensation")))
-    (charge order)
-    :booked))
+    (try
+      (let [h (hotel order)]
+        (intemporal/add-compensation s #(chotel h)))
+      (let [f (flight order)]
+        ;; flight compensation cancels the flight, then waits for a signal -
+        ;; the deterministic "crash" point mid-compensation.
+        (intemporal/add-compensation s #(do (cflight f)
+                                            (intemporal/wait-for-signal "continue-compensation"))))
+      (charge order)
+      :booked
+      (catch Exception e
+        (intemporal/compensate s)
+        (throw e)))))
 
 (defn- count-events [store workflow-id event-type]
   (->> (p/load-history store workflow-id)
