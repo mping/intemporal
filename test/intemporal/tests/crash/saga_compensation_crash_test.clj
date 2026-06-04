@@ -15,13 +15,13 @@
 (def exec-counts (atom {}))
 (defn- bump! [k] (swap! exec-counts update k (fnil inc 0)))
 
-(defn book-hotel  [order] (bump! :book-hotel)  {:hotel order})
+(defn book-hotel [order] (bump! :book-hotel) {:hotel order})
 (defn book-flight [order] (bump! :book-flight) {:flight order})
 (defn charge-card-fails [order]
   (bump! :charge-card)
   (throw (ex-info "card declined" {:order order})))
 
-(defn cancel-hotel  [_] (bump! :cancel-hotel)  :hotel-cancelled)
+(defn cancel-hotel [_] (bump! :cancel-hotel) :hotel-cancelled)
 (defn cancel-flight [_] (bump! :cancel-flight) :flight-cancelled)
 
 ;; The flight compensation cancels the flight, then waits for a signal. The
@@ -35,15 +35,15 @@
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'cancel-flight)]
     (try
-      (let [h (hotel order)]
-        (intemporal/add-compensation s #(chotel h)))
-      (let [f (flight order)]
-        ;; flight compensation cancels the flight, then waits for a signal -
-        ;; the deterministic "crash" point mid-compensation.
-        (intemporal/add-compensation s #(do (cflight f)
-                                            (intemporal/wait-for-signal "continue-compensation"))))
-      (charge order)
-      :booked
+      (let [h (hotel order)
+            _ (intemporal/add-compensation s #(chotel h))
+            f (flight order)
+            ;; flight compensation cancels the flight, then waits for a signal -
+            ;; the deterministic "crash" point mid-compensation.
+            _ (intemporal/add-compensation s #(do (cflight f)
+                                                  (intemporal/wait-for-signal "continue-compensation")))]
+        (charge order)
+        :booked)
       (catch Exception e
         (intemporal/compensate s)
         (throw e)))))
@@ -60,15 +60,15 @@
 (deftest test-compensation-survives-crash
   (testing "Compensation suspended mid-way resumes and runs each step exactly once"
     (reset! exec-counts {})
-    (let [workflow-id "saga-crash-1"
+    (let [workflow-id      "saga-crash-1"
           persistent-store (store/->InMemoryStore (atom {}))]
 
       ;; Phase 1: run until the flight compensation suspends waiting for a signal
       (testing "Phase 1: fails, begins compensation, suspends mid-compensation"
         (let [engine-1 (intemporal/make-workflow-engine :store persistent-store :threads 2)
-              fut (future
-                    (intemporal/start-workflow engine-1 crash-saga ["o1"]
-                                               :workflow-id workflow-id))]
+              fut      (future
+                         (intemporal/start-workflow engine-1 crash-saga ["o1"]
+                                                    :workflow-id workflow-id))]
           ;; Give it time to: book hotel+flight, fail charge, cancel-flight,
           ;; then suspend at wait-for-signal.
           (Thread/sleep 300)

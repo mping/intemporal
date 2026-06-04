@@ -589,9 +589,9 @@
 
    (let [s (saga)]
      (try
-       (let [h (book-hotel order)]
-         (add-compensation s #(cancel-hotel h)))
-       (charge-card order)
+       (let [h (book-hotel order)
+             _ (add-compensation s #(cancel-hotel h))]
+         (charge-card order))
        (catch Exception e
          (compensate s)             ;; rolls back completed steps, LIFO
          (throw e))))

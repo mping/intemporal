@@ -78,14 +78,14 @@ and propagate to the engine untouched.
         cancel-hotel  (intemporal/stub #'cancel-hotel)
         cancel-flight (intemporal/stub #'cancel-flight)]
     (try
-      (let [h (book-hotel order)]
-        (intemporal/add-compensation saga #(cancel-hotel h)))
-      (let [f (book-flight order)]
-        (intemporal/add-compensation saga #(cancel-flight f)))
-      ;; if charge-card throws, the catch runs compensate -> cancel-flight then
-      ;; cancel-hotel (LIFO) -> then rethrows so the workflow finalizes :failed
-      (charge-card order)
-      :booked
+      (let [h (book-hotel order)
+            _ (intemporal/add-compensation saga #(cancel-hotel h))]
+        (let [f (book-flight order)
+              _ (intemporal/add-compensation saga #(cancel-flight f))]
+          ;; if charge-card throws, the catch runs compensate -> cancel-flight then
+          ;; cancel-hotel (LIFO) -> then rethrows so the workflow finalizes :failed
+          (charge-card order)
+          :booked))
       (catch Exception e
         (intemporal/compensate saga)
         (throw e)))))

@@ -15,7 +15,7 @@
 (def events (atom []))
 (defn- record! [e] (swap! events conj e))
 
-(defn book-hotel  [order] (record! [:book-hotel order])  {:hotel order})
+(defn book-hotel [order] (record! [:book-hotel order]) {:hotel order})
 (defn book-flight [order] (record! [:book-flight order]) {:flight order})
 (defn charge-card [order] (record! [:charge-card order]) {:charge order})
 
@@ -27,7 +27,7 @@
   (record! [:book-flight order])
   (throw (ex-info "no seats" {:order order})))
 
-(defn cancel-hotel  [v] (record! [:cancel-hotel v])  :hotel-cancelled)
+(defn cancel-hotel [v] (record! [:cancel-hotel v]) :hotel-cancelled)
 (defn cancel-flight [v] (record! [:cancel-flight v]) :flight-cancelled)
 
 (defn failing-cancel-flight [v]
@@ -42,53 +42,53 @@
 
 (defn happy-saga [order]
   (let [s       (intemporal/saga)
-        hotel  (intemporal/stub #'book-hotel)
-        flight (intemporal/stub #'book-flight)
-        charge (intemporal/stub #'charge-card)
+        hotel   (intemporal/stub #'book-hotel)
+        flight  (intemporal/stub #'book-flight)
+        charge  (intemporal/stub #'charge-card)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'cancel-flight)]
     (try
-      (let [h (hotel order)]
-        (intemporal/add-compensation s #(chotel h)))
-      (let [f (flight order)]
-        (intemporal/add-compensation s #(cflight f)))
-      (charge order)
-      :booked
+      (let [h (hotel order)
+            _ (intemporal/add-compensation s #(chotel h))
+            f (flight order)
+            _ (intemporal/add-compensation s #(cflight f))]
+        (charge order)
+        :booked)
       (catch Exception e
         (intemporal/compensate s)
         (throw e)))))
 
 (defn failing-saga [order]
   (let [s       (intemporal/saga)
-        hotel  (intemporal/stub #'book-hotel)
-        flight (intemporal/stub #'book-flight)
-        charge (intemporal/stub #'charge-card-fails)
+        hotel   (intemporal/stub #'book-hotel)
+        flight  (intemporal/stub #'book-flight)
+        charge  (intemporal/stub #'charge-card-fails)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'cancel-flight)]
     (try
-      (let [h (hotel order)]
-        (intemporal/add-compensation s #(chotel h)))
-      (let [f (flight order)]
-        (intemporal/add-compensation s #(cflight f)))
-      (charge order)
-      :booked
+      (let [h (hotel order)
+            _ (intemporal/add-compensation s #(chotel h))
+            f (flight order)
+            _ (intemporal/add-compensation s #(cflight f))]
+        (charge order)
+        :booked)
       (catch Exception e
         (intemporal/compensate s)
         (throw e)))))
 
 (defn fail-on-flight-saga [order]
   (let [s       (intemporal/saga)
-        hotel  (intemporal/stub #'book-hotel)
-        flight (intemporal/stub #'book-flight-fails)
+        hotel   (intemporal/stub #'book-hotel)
+        flight  (intemporal/stub #'book-flight-fails)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'cancel-flight)]
     (try
-      (let [h (hotel order)]
-        (intemporal/add-compensation s #(chotel h)))
-      ;; flight fails before its compensation is registered
-      (let [f (flight order)]
-        (intemporal/add-compensation s #(cflight f)))
-      :booked
+      (let [h (hotel order)
+            _ (intemporal/add-compensation s #(chotel h))
+            ;; flight fails before its compensation is registered
+            f (flight order)
+            _ (intemporal/add-compensation s #(cflight f))]
+        :booked)
       (catch Exception e
         (intemporal/compensate s)
         (throw e)))))
@@ -103,12 +103,12 @@
         cflight (intemporal/stub #'cancel-flight)
         slow    (intemporal/stub #'slow-step)]
     (try
-      (let [h (hotel order)]
-        (intemporal/add-compensation s #(chotel h)))
-      (let [f (flight order)]
-        (intemporal/add-compensation s #(cflight f)))
-      (loop [i 0]
-        (if (< i 40) (do (slow i) (recur (inc i))) :booked))
+      (let [h (hotel order)
+            _ (intemporal/add-compensation s #(chotel h))
+            f (flight order)
+            _ (intemporal/add-compensation s #(cflight f))]
+        (loop [i 0]
+          (if (< i 40) (do (slow i) (recur (inc i))) :booked)))
       (catch Exception e
         (intemporal/compensate s)
         (throw e)))))
@@ -116,15 +116,15 @@
 ;; Cancel lands before any compensation is registered (busy first).
 (defn cancel-early-saga [order]
   (let [s      (intemporal/saga)
-        hotel (intemporal/stub #'book-hotel)
+        hotel  (intemporal/stub #'book-hotel)
         chotel (intemporal/stub #'cancel-hotel)
-        slow  (intemporal/stub #'slow-step)]
+        slow   (intemporal/stub #'slow-step)]
     (try
       (loop [i 0]
         (when (< i 3) (slow i) (recur (inc i))))
-      (let [h (hotel order)]
-        (intemporal/add-compensation s #(chotel h)))
-      :booked
+      (let [h (hotel order)
+            _ (intemporal/add-compensation s #(chotel h))]
+        :booked)
       (catch Exception e
         (intemporal/compensate s)
         (throw e)))))
@@ -132,18 +132,18 @@
 ;; Compensation activity itself fails -> swallowed, others still run.
 (defn failing-comp-saga [order]
   (let [s       (intemporal/saga)
-        hotel  (intemporal/stub #'book-hotel)
-        flight (intemporal/stub #'book-flight)
-        charge (intemporal/stub #'charge-card-fails)
+        hotel   (intemporal/stub #'book-hotel)
+        flight  (intemporal/stub #'book-flight)
+        charge  (intemporal/stub #'charge-card-fails)
         chotel  (intemporal/stub #'cancel-hotel)
         cflight (intemporal/stub #'failing-cancel-flight)]
     (try
-      (let [h (hotel order)]
-        (intemporal/add-compensation s #(chotel h)))
-      (let [f (flight order)]
-        (intemporal/add-compensation s #(cflight f)))
-      (charge order)
-      :booked
+      (let [h (hotel order)
+            _ (intemporal/add-compensation s #(chotel h))
+            f (flight order)
+            _ (intemporal/add-compensation s #(cflight f))]
+        (charge order)
+        :booked)
       (catch Exception e
         (intemporal/compensate s)
         (throw e)))))
