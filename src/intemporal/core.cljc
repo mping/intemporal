@@ -368,6 +368,7 @@
   [engine workflow-fn args & opts]
   (apply sw/start-workflow engine workflow-fn args opts))
 
+
 #?(:clj
    (defn submit-workflow
      "Start a workflow asynchronously and return {:workflow-id id} immediately,
@@ -524,6 +525,10 @@
    Options:
    - :signal-id - Custom signal ID for idempotency"
   [store workflow-id signal-name payload & {:keys [signal-id]}]
+  (let [status (p/get-workflow-status store workflow-id)]
+    (when-not (= status :running)
+      (throw (ex-info "Cannot send signal: workflow is not active"
+                      {:workflow-id workflow-id :status status}))))
   (let [id (or signal-id (str (random-uuid)))]
     (log/with-mdc {:workflow-id workflow-id}
       (p/add-signal store workflow-id signal-name {:id id :payload payload})
@@ -537,9 +542,13 @@
    loop so it observes the cancellation flag rather than waiting forever."
   [store workflow-id]
   (log/with-mdc {:workflow-id workflow-id}
-    (p/mark-cancelled store workflow-id)
-    (p/wake-workflow store workflow-id)
-    (log/debugf "Cancelling workflow"))
+    (let [status (p/get-workflow-status store workflow-id)]
+      (if (#{:completed :failed :cancelled} status)
+        (log/debugf "Cancelling workflow that is already in terminal state %s, skipping" status)
+        (do
+          (p/mark-cancelled store workflow-id)
+          (p/wake-workflow store workflow-id)
+          (log/debugf "Cancelling workflow")))))
   {:cancelled true :workflow-id workflow-id})
 
 (defn get-workflow-history

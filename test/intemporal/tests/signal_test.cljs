@@ -68,17 +68,19 @@
 
 (deftest test-multiple-signals
   (testing "Multiple signals can be sent to same workflow"
-    (let [wf-id  "multi-signal-test"
-          engine (intemporal/make-workflow-engine :threads 2)]
-      ;; Send signals before workflow starts
-      (intemporal/send-signal (:store engine) wf-id "approval" {:user "alice"})
-      (intemporal/send-signal (:store engine) wf-id "approval" {:user "bob"})
-      ;; First workflow run consumes first signal, then second
+    (let [engine (intemporal/make-workflow-engine :threads 2)
+          wf-id-1 "multi-signal-test-1"
+          wf-id-2 "multi-signal-test-2"]
+      ;; Send signals after a short delay, by which time both workflows are suspended
+      (js/setTimeout
+        #(do (intemporal/send-signal (:store engine) wf-id-1 "approval" {:user "alice"})
+             (intemporal/send-signal (:store engine) wf-id-2 "approval" {:user "bob"}))
+        100)
       (with-result [[result1 result2]
                     (blet [r1 (intemporal/start-workflow engine signal-flow [100]
-                                                          :workflow-id wf-id)
-                            r2 (intemporal/resume-workflow engine wf-id
-                                                           signal-flow [100])]
+                                                         :workflow-id wf-id-1)
+                            r2 (intemporal/start-workflow engine signal-flow [200]
+                                                          :workflow-id wf-id-2)]
                       [r1 r2])]
         (is (match? {:result {:approved {:user "alice"}}} result1))
-        (is (match? {:result {:approved {:user "alice"}}} result2))))))
+        (is (match? {:result {:approved {:user "bob"}}} result2))))))

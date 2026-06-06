@@ -16,6 +16,12 @@ This document describes how to set up your development environment and contribut
 bin/kaocha
 ```
 
+Run `ClojureMCP`
+
+```bash
+clojure -Tmcp start
+```
+
 ## Project Structure
 
 ```

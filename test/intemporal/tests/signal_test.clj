@@ -72,18 +72,29 @@
 (deftest test-multiple-signals
   (testing "Multiple signals can be sent to same workflow"
     (intemporal/with-workflow-engine [engine {:threads 2}]
-      (let [wf-id "multi-signal-test"]
-        ;; Send signals before workflow starts
-        (intemporal/send-signal (:store engine) wf-id "approval" {:user "alice"})
-        (intemporal/send-signal (:store engine) wf-id "approval" {:user "bob"})
+      ;; Two independent workflow runs, each waiting for a signal
+      (let [wf-id-1 "multi-signal-test-1"
+            wf-id-2 "multi-signal-test-2"
+            fut1 (future (intemporal/start-workflow engine signal-flow [100]
+                                                    :workflow-id wf-id-1))
+            fut2 (future (intemporal/start-workflow engine signal-flow [200]
+                                                    :workflow-id wf-id-2))]
+        (Thread/sleep 100)
+        (intemporal/send-signal (:store engine) wf-id-1 "approval" {:user "alice"})
+        (intemporal/send-signal (:store engine) wf-id-2 "approval" {:user "bob"})
+        (is (match? {:result {:approved {:user "alice"}}} @fut1))
+        (is (match? {:result {:approved {:user "bob"}}} @fut2))))))
 
-        ;; First workflow run consumes first signal
-        (let [result1 (intemporal/start-workflow engine
-                                                 signal-flow [100]
-                                                 :workflow-id wf-id)]
-          (is (match? {:result {:approved {:user "alice"}}} result1)))
+(deftest test-send-signal-not-found
+  (testing "send-signal throws when workflow does not exist"
+    (intemporal/with-workflow-engine [engine {}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not active"
+                            (intemporal/send-signal (:store engine) "no-such-wf" "approval" {}))))))
 
-        ;; Second run on same workflow-id consumes second signal
-        (let [result2 (intemporal/resume-workflow engine wf-id
-                                                  signal-flow [100])]
-          (is (match? {:result {:approved {:user "alice"}}} result2)))))))
+(deftest test-send-signal-to-completed-workflow
+  (testing "send-signal throws when workflow is already completed"
+    (intemporal/with-workflow-engine [engine {}]
+      (let [wf-id "completed-signal-test"]
+        (intemporal/start-workflow engine (fn [] :done) [] :workflow-id wf-id)
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not active"
+                              (intemporal/send-signal (:store engine) wf-id "approval" {})))))))

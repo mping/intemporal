@@ -1,5 +1,6 @@
 (ns intemporal.tests.cancellation-test
   (:require [intemporal.core :as intemporal]
+            [intemporal.protocol :as p]
             [clojure.test :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]
             [matcher-combinators.matchers :as m]))
@@ -95,3 +96,24 @@
                        :workflow-id wf-id
                        :error (m/embeds {:message #"cancelled"})}
                       result)))))))
+
+(deftest test-cancel-completed-workflow-is-noop
+  (testing "cancel-workflow on an already-completed workflow is a no-op"
+    (intemporal/with-workflow-engine [engine {}]
+      (let [wf-id "cancel-completed-test"]
+        (intemporal/start-workflow engine (fn [] :done) [] :workflow-id wf-id)
+        (is (= :completed (p/get-workflow-status (:store engine) wf-id)))
+        (intemporal/cancel-workflow (:store engine) wf-id)
+        (is (= :completed (p/get-workflow-status (:store engine) wf-id)))))))
+
+(deftest test-cancel-idempotent
+  (testing "cancel-workflow called twice does not throw"
+    (intemporal/with-workflow-engine [engine {:threads 2}]
+      (let [wf-id "cancel-twice-test"
+            result-future (future
+                            (intemporal/start-workflow engine long-flow [1]
+                                                       :workflow-id wf-id))]
+        (Thread/sleep 100)
+        (intemporal/cancel-workflow (:store engine) wf-id)
+        (intemporal/cancel-workflow (:store engine) wf-id)
+        (is (match? {:status :failed} @result-future))))))
