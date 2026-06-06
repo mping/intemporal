@@ -159,3 +159,50 @@
     (on-compensation-started [_ _])
     (on-compensation-failed [_ _ _])
     (on-compensation-completed [_ _])))
+
+(defn make-composite-observer
+  "Create an observer that fans out all events to a list of observers.
+   Returns a noop-observer if the list is empty."
+  [observers]
+  (let [obs (vec (filter some? observers))]
+    (if (empty? obs)
+      (noop-observer)
+      (reify p/IWorkflowObserver
+        (on-workflow-started [_ workflow-id args]
+          (doseq [o obs] (p/on-workflow-started o workflow-id args)))
+        (on-workflow-suspended [_ workflow-id suspension-type]
+          (doseq [o obs] (p/on-workflow-suspended o workflow-id suspension-type)))
+        (on-workflow-resumed [_ workflow-id]
+          (doseq [o obs] (p/on-workflow-resumed o workflow-id)))
+        (on-activity-scheduled [_ workflow-id seq-num activity-name args]
+          (doseq [o obs] (p/on-activity-scheduled o workflow-id seq-num activity-name args)))
+        (on-activity-started [_ workflow-id seq-num activity-name]
+          (doseq [o obs] (p/on-activity-started o workflow-id seq-num activity-name)))
+        (on-activity-completed [_ workflow-id seq-num activity-name result duration-ms]
+          (doseq [o obs] (p/on-activity-completed o workflow-id seq-num activity-name result duration-ms)))
+        (on-activity-failed [_ workflow-id seq-num activity-name error duration-ms]
+          (doseq [o obs] (p/on-activity-failed o workflow-id seq-num activity-name error duration-ms)))
+        (on-async-started [_ workflow-id seq-num]
+          (doseq [o obs] (p/on-async-started o workflow-id seq-num)))
+        (on-async-completed [_ workflow-id seq-num result]
+          (doseq [o obs] (p/on-async-completed o workflow-id seq-num result)))
+        (on-async-failed [_ workflow-id seq-num error]
+          (doseq [o obs] (p/on-async-failed o workflow-id seq-num error)))
+        (on-timer-scheduled [_ workflow-id seq-num fire-at]
+          (doseq [o obs] (p/on-timer-scheduled o workflow-id seq-num fire-at)))
+        (on-timer-fired [_ workflow-id seq-num]
+          (doseq [o obs] (p/on-timer-fired o workflow-id seq-num)))
+        (on-signal-received [_ workflow-id signal-name payload]
+          (doseq [o obs] (p/on-signal-received o workflow-id signal-name payload)))
+        (on-workflow-completed [_ workflow-id result]
+          (doseq [o obs] (p/on-workflow-completed o workflow-id result)))
+        (on-workflow-failed [_ workflow-id error]
+          (doseq [o obs] (p/on-workflow-failed o workflow-id error)))
+        (on-workflow-cancelled [_ workflow-id]
+          (doseq [o obs] (p/on-workflow-cancelled o workflow-id)))
+        (on-compensation-started [_ workflow-id]
+          (doseq [o obs] (p/on-compensation-started o workflow-id)))
+        (on-compensation-failed [_ workflow-id error]
+          (doseq [o obs] (p/on-compensation-failed o workflow-id error)))
+        (on-compensation-completed [_ workflow-id]
+          (doseq [o obs] (p/on-compensation-completed o workflow-id)))))))

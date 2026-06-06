@@ -657,26 +657,30 @@
    - :scheduler-threads - Number of scheduler threads (default: 2)
    - :default-timeout-ms - Default activity timeout (default: 30000)
    - :enable-logging - Enable logging observer (default: false)
-   - :observer - Custom observer instance (overrides :enable-logging)"
-  [& {:keys [store threads scheduler-threads default-timeout-ms enable-logging observer]
+   - :enable-telemetry - Enable OpenTelemetry observer (default: false, JVM only)
+   - :observer - Additional observer instance, composed on top of built-in observers"
+  [& {:keys [store threads scheduler-threads default-timeout-ms enable-logging enable-telemetry observer]
       :or {store (store/->InMemoryStore (atom {}))
            threads 4
            scheduler-threads 2
            default-timeout-ms 30000
-           enable-logging false}}]
+           enable-logging false
+           enable-telemetry false}}]
   (let [registry (a/make-registry)
-        log-atom (when enable-logging (atom []))]
+        log-atom (when enable-logging (atom []))
+        logging-observer (when enable-logging (obs/make-logging-observer log-atom))
+        otel-observer #?(:clj (when enable-telemetry
+                                (do (require 'intemporal.observer.otel)
+                                    ((resolve 'intemporal.observer.otel/make-otel-observer))))
+                         :cljs nil)
+        composite-observer (obs/make-composite-observer [logging-observer otel-observer observer])]
     {:store store
      :executor (runtime/make-vthreads-executor registry
                                        :threads threads
                                        :default-timeout-ms default-timeout-ms)
      :scheduler (runtime/make-scheduler :threads scheduler-threads)
      :registry registry
-     ;; opts
-     :observer (or observer
-                   (if enable-logging
-                     (obs/make-logging-observer log-atom)
-                     (obs/noop-observer)))
+     :observer composite-observer
      :log (when enable-logging log-atom)}))
 
 (defn shutdown-engine
