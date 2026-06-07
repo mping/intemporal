@@ -2,7 +2,7 @@
   (:require [intemporal.protocol :as p]
             [intemporal.utils :as utils]))
 
-(def ^:private terminal-status? #{:completed :failed})
+(def ^:private terminal-status? #{:completed :failed :cancelled})
 
 ;; ============================================================================
 ;; In-Memory Store Implementation
@@ -20,6 +20,7 @@
                (case (:event-type event)
                  :workflow-completed (assoc-in s [:workflows workflow-id :status] :completed)
                  :workflow-failed    (assoc-in s [:workflows workflow-id :status] :failed)
+                 :workflow-cancelled (assoc-in s [:workflows workflow-id :status] :cancelled)
                  s))))
     event)
 
@@ -32,6 +33,7 @@
                      term (some #(case (:event-type %)
                                    :workflow-completed :completed
                                    :workflow-failed    :failed
+                                   :workflow-cancelled :cancelled
                                    nil)
                                 events)]
                  (if term
@@ -97,13 +99,14 @@
       (cond
         ;; Check terminal status first: a late mark-cancelled must not override
         ;; a workflow that already completed or failed.
-        (#{:completed :failed} (:status wf)) (:status wf)   ; Phase B2 O(1) fast path
+        (#{:completed :failed :cancelled} (:status wf)) (:status wf)   ; Phase B2 O(1) fast path
         (:cancelled wf) :cancelled
         (empty? (:history wf)) :not-found
         :else (let [last-event (last (:history wf))]
                 (case (:event-type last-event)
                   :workflow-completed :completed
                   :workflow-failed :failed
+                  :workflow-cancelled :cancelled
                   :running)))))
 
   ;; --- Phase C: ownership-based recovery ---

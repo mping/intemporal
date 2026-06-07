@@ -1,9 +1,11 @@
 (ns intemporal.internal.context
   (:require [intemporal.internal.error :as error]
+            [intemporal.internal.logging :as log]
             [intemporal.protocol :as p]
             [promesa.core])
   #?(:clj (:require [net.cgrand.macrovich :as macros])
-     :cljs (:require-macros [net.cgrand.macrovich :as macros])))
+     :cljs (:require-macros [net.cgrand.macrovich :as macros]
+                            [intemporal.internal.logging :as log])))
 
 
 ;; ============================================================================
@@ -136,7 +138,7 @@
       (apply event-fn observer args)
       (catch #?(:clj Exception :cljs js/Error) e
         ;; Don't let observer errors break workflow
-        (println "Observer error:" (ex-message e))))))
+        (log/warnf e "Observer error: %s" (ex-message e))))))
 
 ;; ============================================================================
 ;; Context-Aware Macros, cljs only

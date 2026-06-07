@@ -202,7 +202,7 @@
         (Thread/sleep 250)
         (intemporal/cancel-workflow (:store engine) wf-id)
         (let [result @fut]
-          (is (match? {:status :failed
+          (is (match? {:status :cancelled
                        :workflow-id wf-id
                        :error (m/embeds {:message #"cancelled"})}
                       result))
@@ -221,7 +221,7 @@
         (Thread/sleep 60)            ;; mid first slow step, before the with-failure
         (intemporal/cancel-workflow (:store engine) wf-id)
         (let [result @fut]
-          (is (match? {:status :failed :workflow-id wf-id} result))
+          (is (match? {:status :cancelled :workflow-id wf-id} result))
           (is (empty? (compensations @events))))))))
 
 (deftest test-observer-compensation-lifecycle

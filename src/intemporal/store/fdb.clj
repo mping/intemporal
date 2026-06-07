@@ -42,7 +42,7 @@
 
 (defn- maintain-owner-index! [tx root-subspace workflow-id events]
   (let [started?  (some #(= :workflow-started (:event-type %)) events)
-        terminal? (some #(#{:workflow-completed :workflow-failed} (:event-type %)) events)
+        terminal? (some #(#{:workflow-completed :workflow-failed :workflow-cancelled} (:event-type %)) events)
         bucket    (or (read-owner tx root-subspace workflow-id) "")]
     (cond
       terminal? (fdb-core/clear tx root-subspace (owner-index-key root-subspace bucket workflow-id))
@@ -79,6 +79,7 @@
           term (case (:event-type event)
                  :workflow-completed "completed"
                  :workflow-failed    "failed"
+                 :workflow-cancelled "cancelled"
                  nil)]
       (ftr/run db
         (fn [tx]
@@ -96,6 +97,7 @@
             term        (some #(case (:event-type %)
                                  :workflow-completed "completed"
                                  :workflow-failed    "failed"
+                                 :workflow-cancelled "cancelled"
                                  nil)
                               events)]
         (ftr/run db
@@ -174,7 +176,12 @@
   (mark-cancelled [_ workflow-id]
     (ftr/run db
       (fn [tx]
-        (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "cancelled"]) (->bytes true)))))
+        (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "cancelled"]) (->bytes true))
+        ;; Drop the workflow out of the ownership scan immediately so list-pending
+        ;; stops re-listing a cancelled-but-not-yet-finalized workflow. The entry
+        ;; lives under the workflow's current owner bucket (or "" if unowned).
+        (let [bucket (or (read-owner tx root-subspace workflow-id) "")]
+          (fdb-core/clear tx root-subspace (owner-index-key root-subspace bucket workflow-id))))))
 
   (get-workflow-status [this workflow-id]
     ;; Read both status and cancelled flag in one transaction so that a late
@@ -186,7 +193,7 @@
                (boolean (<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "cancelled"]))))]))]
       (cond
         ;; Check terminal status first: takes precedence over the cancelled flag.
-        (#{"completed" "failed"} cached) (keyword cached)
+        (#{"completed" "failed" "cancelled"} cached) (keyword cached)
         cancelled? :cancelled
         :else (let [history (p/load-history this workflow-id)]
                 (if (empty? history)
@@ -195,6 +202,7 @@
                     (case (:event-type last-event)
                       :workflow-completed :completed
                       :workflow-failed :failed
+                      :workflow-cancelled :cancelled
                       :running)))))))
 
   ;; --- Phase C: ownership-based recovery (serializable read-modify-write) ---

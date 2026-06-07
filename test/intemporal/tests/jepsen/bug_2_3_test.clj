@@ -16,8 +16,8 @@
   These tests assert the FIXED behaviour:
     • the workflow TERMINATES (start-workflow returns; no longer stuck)
     • is-cancelled? is true
-    • get-workflow-status is :failed (finalize-cancelled writes :workflow-failed;
-      terminal status takes precedence over the cancelled flag)
+    • get-workflow-status is :cancelled (finalize-cancelled writes a first-class
+      :workflow-cancelled terminal event)
   They will fail again if cancel stops waking sleepers."
   (:require [clojure.test :refer [deftest is testing]]
             [intemporal.core :as intemporal]
@@ -65,10 +65,10 @@
       "Workflow terminated after cancel — wake-workflow forced loop re-entry (bug 2.3 fixed)")
   (is cancelled-flag-set?
       "Cancelled flag is set in the store")
-  ;; A finalized cancelled workflow has :workflow-failed in history (finalize-cancelled),
-  ;; so terminal status takes precedence over the cancelled flag — status is :failed.
-  (is (= :failed status)
-      "Workflow status is :failed after finalization (cancelled flag set, terminal event wins)"))
+  ;; A finalized cancelled workflow has a first-class :workflow-cancelled event in
+  ;; history (finalize-cancelled), so the derived terminal status is :cancelled.
+  (is (= :cancelled status)
+      "Workflow status is :cancelled after finalization (first-class cancelled terminal event)"))
 
 ;; ── In-memory (always runs) ───────────────────────────────────────────────────
 

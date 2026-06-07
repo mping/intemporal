@@ -387,18 +387,20 @@
      :result result}))
 
 (defn finalize-cancelled
-  "Save cancellation event and return result as failed."
+  "Save a dedicated cancellation event and return the cancelled result.
+   The history event is :workflow-cancelled (a first-class terminal state), so
+   history and the derived status agree rather than recording cancellation as a
+   failure."
   [store workflow-id pending-events observer]
   (p/save-events store workflow-id pending-events)
   (let [error-map {:type "clojure.lang.ExceptionInfo"
                    :message "Workflow cancelled"
                    :data {:workflow-id workflow-id}}]
-    (p/save-event store workflow-id {:event-type :workflow-failed
+    (p/save-event store workflow-id {:event-type :workflow-cancelled
                                      :error error-map
                                      :timestamp  (utils/current-time-ms)})
     (-notify p/on-workflow-cancelled observer workflow-id)
-    (-notify p/on-workflow-failed observer workflow-id error-map)
-    {:status :failed
+    {:status :cancelled
      :workflow-id workflow-id
      :error error-map}))
 
@@ -540,11 +542,19 @@
     :or {max-iterations 1000}}]
   #_{:clj-kondo/ignore [:loop-without-recur]}
   (prom/loop [iteration 0]
-    (when (>= iteration max-iterations)
-      (throw (ex-info "Max iterations exceeded" {:workflow-id workflow-id
-                                                 :iterations iteration})))
-
-    (log/debugf "Internal loop %d of %d" iteration max-iterations)
+    (if (>= iteration max-iterations)
+      ;; Replay budget exhausted (e.g. a non-terminating workflow loop). Persist a
+      ;; terminal :workflow-failed event so the workflow becomes resolvable instead
+      ;; of staying "running" forever with an un-recorded exception thrown out of
+      ;; the loop.
+      (do
+        (log/warnf "Workflow %s exceeded replay budget of %d iterations" workflow-id max-iterations)
+        (finalize-failed store workflow-id []
+                         (ex-info "Replay budget exceeded"
+                                  {:workflow-id workflow-id :iterations iteration})
+                         observer))
+      (do
+        (log/debugf "Internal loop %d of %d" iteration max-iterations)
 
     ;; Check if executor is shutting down - stop processing to avoid endless rejections
     (if (p/shutdown? executor)
@@ -615,7 +625,7 @@
           ;; exec-result may be a Promise if workflow-fn returned a Promise (e.g. from p/let)
           (if (prom/promise? exec-result)
             (bthen exec-result dispatch)
-            (dispatch exec-result))))))
+            (dispatch exec-result)))))))) ; close inner (if shutdown? let), outer (do) and budget (if)
 
 (defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
                                suspension-data pending-events observer]

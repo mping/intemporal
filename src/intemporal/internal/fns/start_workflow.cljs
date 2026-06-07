@@ -93,8 +93,8 @@
                                                       :max-iterations max-iterations
                                                       :wake-fn        wake-fn-impl})
                          (bthen (fn [result]
-                                      (when (and on-complete (not (waiting-status? result)))
-                                        (on-complete result))))
+                                  (when (and on-complete (not (waiting-status? result)))
+                                    (on-complete result))))
                          (prom/catch js/Error
                            (fn [e]
                              (when on-complete
@@ -111,9 +111,9 @@
                                        :max-iterations max-iterations
                                        :wake-fn        wake-fn})
           (bthen (fn [result]
-                       (when (and on-complete (not (waiting-status? result)))
-                         (on-complete result))
-                       result))
+                   (when (and on-complete (not (waiting-status? result)))
+                     (on-complete result))
+                   result))
           (prom/catch js/Error
             (fn [e]
               (log/warnf e "Caught exception during async workflow start")

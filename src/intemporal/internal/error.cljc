@@ -115,25 +115,57 @@
             :handle-seq    handle-seq
             :cause         cause}))
 
+(defn exception-kind
+  "Classify an intemporal exception by the marker key in its ex-data, returning a
+   stable keyword (or nil for a plain/unknown exception). Survives JSON round-trips
+   because it is stored explicitly as :exception-kind in the serialized map."
+  [data]
+  (when (map? data)
+    (cond
+      (::cancelled data)            :cancelled
+      (::rejected data)             :rejected
+      (::activity-timeout data)     :activity-timeout
+      (::activity-interrupted data) :activity-interrupted
+      (::activity-failed data)      :activity-failed
+      (::async-failed data)         :async-failed
+      (::suspension data)           :suspension)))
+
 (defn throwable->map [t]
   (when t
-    #?(:clj
-       {:type        (str (type t))
-        :message     (ex-message t)
-        :data        (when (instance? IExceptionInfo t)
-                       (ex-data t))
-        :stack-trace (mapv str (.getStackTrace t))
-        :cause       (throwable->map (.getCause t))}
-       :cljs
-       {:type        (str (type t))
-        :message     (.-message t)
-        :data        (or (.-data t) (ex-data t))
-        :stack-trace (when (.-stack t)
-                       (str/split-lines (.-stack t)))
-        :cause       (when (.-cause t)
-                       (throwable->map (.-cause t)))})))
+    (let [data #?(:clj (when (instance? IExceptionInfo t) (ex-data t))
+                  :cljs (or (.-data t) (ex-data t)))]
+      (cond-> #?(:clj
+                 {:type        (str (type t))
+                  :message     (ex-message t)
+                  :data        data
+                  :stack-trace (mapv str (.getStackTrace t))
+                  :cause       (throwable->map (.getCause t))}
+                 :cljs
+                 {:type        (str (type t))
+                  :message     (.-message t)
+                  :data        data
+                  :stack-trace (when (.-stack t)
+                                 (str/split-lines (.-stack t)))
+                  :cause       (when (.-cause t)
+                                 (throwable->map (.-cause t)))})
+        (exception-kind data) (assoc :exception-kind (exception-kind data))))))
 
-(defn map->exception [m]
+(defn map->exception
+  "Reconstruct an exception from a serialized map. Dispatches on :exception-kind
+   (added by throwable->map) so type predicates such as cancelled-exception? keep
+   working on replayed/resumed errors; falls back to a generic ex-info otherwise."
+  [m]
   (when m
-    (ex-info (or (:message m) "Restored exception")
-             (merge {:restored true} (:data m)))))
+    (let [{:keys [data]} m
+          activity-name (:activity-name data)]
+      (case (some-> (:exception-kind m) keyword)
+        :cancelled            (workflow-cancelled-exception)
+        :rejected             (activity-rejected-exception activity-name (:cause data))
+        :activity-timeout     (activity-timeout-exception activity-name (:timeout-ms data))
+        :activity-interrupted (activity-interrupted-exception activity-name (:cause data))
+        :activity-failed      (activity-failed-exception activity-name
+                                                         (when-let [c (:cause m)] (map->exception c)))
+        :async-failed         (async-failed-exception (:handle-seq data) (:cause data))
+        ;; Unknown / plain exception: preserve the original data and mark restored.
+        (ex-info (or (:message m) "Restored exception")
+                 (merge {:restored true} data))))))

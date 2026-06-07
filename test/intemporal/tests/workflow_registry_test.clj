@@ -29,7 +29,8 @@
       (is (= "intemporal.tests.workflow-registry-test/reg-workflow" nm))
       (is (= @#'reg-workflow (wreg/resolve-workflow nm)))
       (wreg/clear-registry!)
-      (is (nil? (wreg/resolve-workflow nm))))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No workflow function registered"
+                            (wreg/resolve-workflow nm))))))
 
 (deftest resume-by-id-resolves-fn-and-args
   (testing "resume-workflow [engine wf-id] resolves fn+args from history"

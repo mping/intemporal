@@ -45,9 +45,16 @@
      name)))
 
 (defn resolve-workflow
-  "Return the registered workflow fn for `name`, or nil."
+  "Return the registered workflow fn for `name`. Throws a descriptive ex-info if
+   the name is not registered in this process, rather than returning nil and
+   surfacing an obscure NPE deeper in execution. A fresh process must register its
+   workflow vars at startup for cross-process resume to work."
   [name]
-  (get @registry name))
+  (or (get @registry name)
+      (throw (ex-info (str "No workflow function registered for name: " name
+                           ". Register the workflow var at startup so it can be resumed by id.")
+                      {:workflow-name name
+                       :registered    (vec (keys @registry))}))))
 
 (defn clear-registry!
   "Test helper: empties the global registry."

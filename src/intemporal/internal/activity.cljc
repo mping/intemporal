@@ -88,6 +88,7 @@
 ;; Retry Policy
 ;; ============================================================================
 
+;; TODO no need for a record?
 (defrecord RetryPolicy [max-attempts
                         backoff-ms
                         max-backoff-ms

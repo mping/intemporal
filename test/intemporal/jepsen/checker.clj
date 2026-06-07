@@ -84,7 +84,7 @@
                                    AND w.cancelled = FALSE
                                    AND (h.event_type IS NULL
                                         OR h.event_type NOT IN
-                                            ('workflow-completed','workflow-failed'))")]
+                                            ('workflow-completed','workflow-failed','workflow-cancelled'))")]
                           ids)
                     jdbc-opts)]
         {:valid?     (empty? stuck)

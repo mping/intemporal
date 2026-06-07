@@ -47,6 +47,8 @@
          (:intemporal_history/event_type last-evt)) :completed
       (= "workflow-failed"
          (:intemporal_history/event_type last-evt)) :failed
+      (= "workflow-cancelled"
+         (:intemporal_history/event_type last-evt)) :cancelled
       :else                                         :running)))
 
 ;; ---------------------------------------------------------------------------

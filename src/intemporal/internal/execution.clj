@@ -163,40 +163,39 @@
           now (utils/current-time-ms)
 
           ;; Create completion events for both activities and async handles
-          completion-events
-              (mapcat (fn [{:keys [activity-name activity-seq] :as async-info} result]
-                        (log/with-mdc {:activity activity-name :seqnum activity-seq}
-                          (if (= :success (:status result))
-                            (do
-                              (-notify p/on-async-completed observer workflow-id (:handle-seq async-info) (:result result))
-                              (log/tracef "Got completion event: activity succeeded, result: %s" result))
-                            (do
-                              (-notify p/on-async-failed observer workflow-id (:handle-seq async-info) (:error result))
-                              (log/tracef "Got completion event: activity failed, error: %s" (:error result))))
-                          (if (= :success (:status result))
-                            [{:event-type    :activity-completed
-                              :seq           (:activity-seq async-info)
-                              :activity-name (:activity-name async-info)
-                              :result        (:result result)
-                              :duration-ms   (:duration result)
-                              :timestamp     now}
-                             {:event-type :async-completed
-                              :seq        (:handle-seq async-info)
-                              :last-seq   (:activity-seq async-info)
-                              :result     (:result result)
-                              :timestamp  now}]
-                            ;; else
-                            [{:event-type    :activity-failed
-                              :seq           (:activity-seq async-info)
-                              :activity-name (:activity-name async-info)
-                              :error         (:error result)
-                              :timestamp     now}
-                             {:event-type :async-failed
-                              :seq        (:handle-seq async-info)
-                              :last-seq   (:activity-seq async-info)
-                              :error      (:error result)
-                              :timestamp  now}])))
-                      pending-asyncs results)]
+          completion-events (mapcat (fn [{:keys [activity-name activity-seq] :as async-info} result]
+                                      (log/with-mdc {:activity activity-name :seqnum activity-seq}
+                                        (if (= :success (:status result))
+                                          (do
+                                            (-notify p/on-async-completed observer workflow-id (:handle-seq async-info) (:result result))
+                                            (log/tracef "Got completion event: activity succeeded, result: %s" result))
+                                          (do
+                                            (-notify p/on-async-failed observer workflow-id (:handle-seq async-info) (:error result))
+                                            (log/tracef "Got completion event: activity failed, error: %s" (:error result))))
+                                        (if (= :success (:status result))
+                                          [{:event-type    :activity-completed
+                                            :seq           (:activity-seq async-info)
+                                            :activity-name (:activity-name async-info)
+                                            :result        (:result result)
+                                            :duration-ms   (:duration result)
+                                            :timestamp     now}
+                                           {:event-type :async-completed
+                                            :seq        (:handle-seq async-info)
+                                            :last-seq   (:activity-seq async-info)
+                                            :result     (:result result)
+                                            :timestamp  now}]
+                                          ;; else
+                                          [{:event-type    :activity-failed
+                                            :seq           (:activity-seq async-info)
+                                            :activity-name (:activity-name async-info)
+                                            :error         (:error result)
+                                            :timestamp     now}
+                                           {:event-type :async-failed
+                                            :seq        (:handle-seq async-info)
+                                            :last-seq   (:activity-seq async-info)
+                                            :error      (:error result)
+                                            :timestamp  now}])))
+                                    pending-asyncs results)]
       (p/save-events store workflow-id completion-events)))
   :continue)
 
@@ -363,18 +362,20 @@
    :result result})
 
 (defn finalize-cancelled
-  "Save cancellation event and return result as failed."
+  "Save a dedicated cancellation event and return the cancelled result.
+   The history event is :workflow-cancelled (a first-class terminal state), so
+   history and the derived status agree rather than recording cancellation as a
+   failure."
   [store workflow-id pending-events observer]
   (p/save-events store workflow-id pending-events)
   (let [error-map {:type "clojure.lang.ExceptionInfo"
                    :message "Workflow cancelled"
                    :data {:workflow-id workflow-id}}]
-    (p/save-event store workflow-id {:event-type :workflow-failed
+    (p/save-event store workflow-id {:event-type :workflow-cancelled
                                      :error error-map
                                      :timestamp  (utils/current-time-ms)})
     (-notify p/on-workflow-cancelled observer workflow-id)
-    (-notify p/on-workflow-failed observer workflow-id error-map)
-    {:status :failed
+    {:status :cancelled
      :workflow-id workflow-id
      :error error-map}))
 
@@ -514,11 +515,19 @@
    {:keys [observer max-iterations wake-fn]
     :or {max-iterations 1000}}]
   (loop [iteration 0]
-    (when (>= iteration max-iterations)
-      (throw (ex-info "Max iterations exceeded" {:workflow-id workflow-id
-                                                 :iterations iteration})))
-
-    (log/debugf "Internal loop %d of %d" iteration max-iterations)
+    (if (>= iteration max-iterations)
+      ;; Replay budget exhausted (e.g. a non-terminating workflow loop). Persist a
+      ;; terminal :workflow-failed event so the workflow becomes resolvable instead
+      ;; of staying "running" forever with an un-recorded exception thrown out of
+      ;; the loop.
+      (do
+        (log/warnf "Workflow %s exceeded replay budget of %d iterations" workflow-id max-iterations)
+        (finalize-failed store workflow-id []
+                         (ex-info "Replay budget exceeded"
+                                  {:workflow-id workflow-id :iterations iteration})
+                         observer))
+      (do
+        (log/debugf "Internal loop %d of %d" iteration max-iterations)
 
     ;; Check if executor is shutting down - stop processing to avoid endless rejections
     (if (p/shutdown? executor)
@@ -585,7 +594,7 @@
             (finalize-failed store workflow-id
                              (:pending-events exec-result)
                              (:error exec-result)
-                             observer))))))
+                             observer))))))))
 
 (defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
                                suspension-data pending-events observer]

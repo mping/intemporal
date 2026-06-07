@@ -108,6 +108,7 @@
         (when-let [term (some (fn [e] (case (:event-type e)
                                         :workflow-completed "completed"
                                         :workflow-failed    "failed"
+                                        :workflow-cancelled "cancelled"
                                         nil))
                               events)]
           (jdbc/execute! tx ["UPDATE intemporal_workflows SET status = ? WHERE id = ?"
@@ -185,7 +186,7 @@
         (nil? wf-row) :not-found
         ;; Check terminal status first: a late mark-cancelled must not override
         ;; a workflow that already completed or failed.
-        (#{"completed" "failed"} status) (keyword status)
+        (#{"completed" "failed" "cancelled"} status) (keyword status)
         (:intemporal_workflows/cancelled wf-row) :cancelled
         ;; Otherwise (running / pre-migration) derive from history as before.
         :else (let [history (p/load-history this workflow-id)]
@@ -195,6 +196,7 @@
                     (case (:event-type last-event)
                       :workflow-completed :completed
                       :workflow-failed :failed
+                      :workflow-cancelled :cancelled
                       :running)))))))
 
   ;; --- Phase C: ownership-based recovery ---
@@ -208,7 +210,8 @@
   (list-pending [_ owner-id limit]
     (let [rows (jdbc/execute! datasource
                  ["SELECT id FROM intemporal_workflows
-                   WHERE status NOT IN ('completed','failed')
+                   WHERE status NOT IN ('completed','failed','cancelled')
+                     AND cancelled = FALSE
                      AND (wake_at IS NULL OR wake_at <= now())
                      AND (owner = ? OR owner IS NULL)
                    ORDER BY created_at
@@ -219,7 +222,7 @@
   (release-owner [_ owner-id]
     (jdbc/execute! datasource
                    ["UPDATE intemporal_workflows SET owner = NULL
-                     WHERE owner = ? AND status NOT IN ('completed','failed')"
+                     WHERE owner = ? AND status NOT IN ('completed','failed','cancelled')"
                     owner-id])
     nil)
 

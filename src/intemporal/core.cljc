@@ -439,11 +439,10 @@
      (when-not started
        (throw (ex-info "Cannot resume: no :workflow-started event in history"
                        {:workflow-id workflow-id})))
+     ;; resolve-workflow throws a descriptive ex-info if the fn is not registered
+     ;; in this process (e.g. a fresh process that forgot to register its vars).
      (let [wf-name (:workflow-fn-name started)
            wf-fn   (wreg/resolve-workflow wf-name)]
-       (when-not wf-fn
-         (throw (ex-info "Cannot resume: workflow function not registered"
-                         {:workflow-id workflow-id :workflow-fn-name wf-name})))
        (resume-workflow engine workflow-id wf-fn (vec (:args started))))))
   ([{:keys [store executor scheduler registry] :as engine} workflow-id workflow-fn args
     & {:keys [observer max-iterations]
@@ -489,6 +488,11 @@
                  (resume-workflow engine wf-id)
                  (catch Throwable t
                    (log/warnf t "Worker %s failed resuming %s" owner-id wf-id)))))
+           ;; Exponential backoff on consecutive poll failures so a downed
+           ;; database doesn't get hammered (and the logs flooded). Resets to
+           ;; poll-ms after any successful list-pending query.
+           max-backoff-ms (* poll-ms 60)
+           backoff-ms     (atom (long poll-ms))
            thread
            (Thread.
              ^Runnable
@@ -496,14 +500,17 @@
                (while @running
                  (try
                    (let [ids (p/list-pending store owner-id batch-size)]
+                     (reset! backoff-ms (long poll-ms))   ; healthy query: reset backoff
                      (if (seq ids)
                        (doseq [wf-id ids :while @running]
                          (process-one wf-id))
                        (Thread/sleep (long poll-ms))))
                    (catch InterruptedException _ (reset! running false))
                    (catch Throwable t
-                     (log/warnf t "Worker %s loop error" owner-id)
-                     (Thread/sleep (long poll-ms)))))))]
+                     (let [wait @backoff-ms]
+                       (log/warnf t "Worker %s loop error; backing off %dms" owner-id wait)
+                       (Thread/sleep wait)
+                       (swap! backoff-ms #(min max-backoff-ms (* 2 %)))))))))]
        (doto thread
          (.setDaemon true)
          (.setName (str "intemporal-worker-" owner-id))
@@ -511,6 +518,10 @@
        (fn stop-worker []
          (reset! running false)
          (.interrupt thread)
+         ;; Wait briefly for an in-flight resume to finish before releasing
+         ;; ownership, so another pod doesn't pick up a workflow that is still
+         ;; executing here (#7). Bounded so stop never blocks indefinitely.
+         (.join thread (long poll-ms))
          (p/release-owner store owner-id)))))
 
 (defn send-signal
@@ -679,8 +690,7 @@
         log-atom (when enable-logging (atom []))
         logging-observer (when enable-logging (obs/make-logging-observer log-atom))
         otel-observer #?(:clj (when enable-telemetry
-                                (do (require 'intemporal.observer.otel)
-                                    ((resolve 'intemporal.observer.otel/make-otel-observer))))
+                                ((requiring-resolve 'intemporal.observer.otel/make-otel-observer)))
                          :cljs nil)
         composite-observer (obs/make-composite-observer [logging-observer otel-observer observer])]
     {:store store

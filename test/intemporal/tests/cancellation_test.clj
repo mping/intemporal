@@ -40,7 +40,7 @@
 
         ;; Workflow should fail with cancellation error
         (let [result @result-future]
-          (is (match? {:status :failed
+          (is (match? {:status :cancelled
                        :workflow-id wf-id
                        :error (m/embeds {:message #"cancelled"})}
                       result)))))))
@@ -58,7 +58,7 @@
         (intemporal/cancel-workflow (:store engine) wf-id)
 
         (let [result @result-future]
-          (is (match? {:status :failed
+          (is (match? {:status :cancelled
                        :workflow-id wf-id
                        :error (m/embeds {:message #"cancelled"})}
                       result)))))))
@@ -74,7 +74,7 @@
         (let [result (intemporal/start-workflow engine
                                                 cancellable-flow [1]
                                                 :workflow-id wf-id)]
-          (is (match? {:status :failed
+          (is (match? {:status :cancelled
                        :workflow-id wf-id
                        :error (m/embeds {:message #"cancelled"})}
                       result)))))))
@@ -92,7 +92,7 @@
 
         ;; Check result indicates failure with cancellation
         (let [result @result-future]
-          (is (match? {:status :failed
+          (is (match? {:status :cancelled
                        :workflow-id wf-id
                        :error (m/embeds {:message #"cancelled"})}
                       result)))))))
@@ -116,4 +116,4 @@
         (Thread/sleep 100)
         (intemporal/cancel-workflow (:store engine) wf-id)
         (intemporal/cancel-workflow (:store engine) wf-id)
-        (is (match? {:status :failed} @result-future))))))
+        (is (match? {:status :cancelled} @result-future))))))
