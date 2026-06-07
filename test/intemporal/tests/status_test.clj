@@ -23,13 +23,15 @@
         (is (= {:status :completed :result 42}
                (intemporal/await-workflow e workflow-id :timeout-ms 5000)))
         (is (= :completed (p/get-workflow-status store workflow-id))))
-      ;; cancelled (flag precedence)
+      ;; A cancelled workflow that has been finalized ends as :failed in history
+      ;; (finalize-cancelled writes :workflow-failed). The :cancelled status is
+      ;; only visible in the window between mark-cancelled and finalization.
       (let [wid (str "cancel-" (random-uuid))
             f   (future (intemporal/start-workflow e sleep-wf [] :workflow-id wid))]
         (Thread/sleep 300)
         (intemporal/cancel-workflow store wid)
         @f
-        (is (= :cancelled (p/get-workflow-status store wid))))
+        (is (= :failed (p/get-workflow-status store wid))))
       (finally (intemporal/shutdown-engine e)))))
 
 (deftest status-in-memory

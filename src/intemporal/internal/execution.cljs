@@ -287,41 +287,45 @@
 (defn process-signal-with-timeout [store scheduler workflow-id suspension-data
                                     pending-events wake-fn observer]
   (let [{:keys [seq signal-name deadline]} suspension-data
-        now (utils/current-time-ms)]
+        now (utils/current-time-ms)
+        save-completed (fn [signal-data?]
+                         (p/save-event store workflow-id
+                                       (cond-> {:event-type  :signal-wait-completed
+                                                :seq         seq
+                                                :received    (some? signal-data?)
+                                                :signal-name signal-name
+                                                :timestamp   (utils/current-time-ms)}
+                                               (some? signal-data?) (assoc :payload (:payload signal-data?))))
+                         (when signal-data?
+                           (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data?))))]
     (p/save-events store workflow-id pending-events)
     ;; Check if signal already available
     (if-let [signal-data (p/consume-signal store workflow-id signal-name)]
       (do
-        (p/save-event store workflow-id {:event-type  :signal-wait-completed
-                                         :seq         seq
-                                         :received    true
-                                         :signal-name signal-name
-                                         :payload     (:payload signal-data)
-                                         :timestamp   now})
-        (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data))
+        (save-completed signal-data)
         :continue)
       ;; ELSE Check if already timed out
       (if (>= now deadline)
         (do
-          (p/save-event store workflow-id {:event-type  :signal-wait-completed
-                                           :seq         seq
-                                           :received    false
-                                           :signal-name signal-name
-                                           :timestamp   now})
+          (save-completed nil)
           :continue)
-        ;; Schedule timeout
+        ;; Register signal callback FIRST (mirrors the process-signal fix for bug 2.1):
+        ;; a signal arriving between the consume-check above and the timer firing would
+        ;; otherwise be silently lost. With the callback armed, exactly one of {the
+        ;; timer callback, the signal callback} wins the atomic consume-signal race.
         (do
+          (p/register-signal-callback store workflow-id signal-name
+                                      (fn []
+                                        (when-let [signal-data (p/consume-signal store workflow-id signal-name)]
+                                          (p/unregister-signal-callback store workflow-id signal-name)
+                                          (p/cancel-timer scheduler workflow-id seq)
+                                          (save-completed signal-data)
+                                          (when wake-fn (wake-fn)))))
           (p/schedule-timer scheduler workflow-id seq deadline
                             (fn []
-                              ;; Check one more time for signal
+                              (p/unregister-signal-callback store workflow-id signal-name)
                               (let [signal-data? (p/consume-signal store workflow-id signal-name)]
-                                (p/save-event store workflow-id (cond-> {:event-type  :signal-wait-completed
-                                                                         :seq         seq
-                                                                         :received    (some? signal-data?)
-                                                                         :signal-name signal-name
-                                                                         :timestamp   (utils/current-time-ms)}
-                                                                        (some? signal-data?) (assoc :payload (:payload signal-data?)))))
-
+                                (save-completed signal-data?))
                               (when wake-fn (wake-fn))))
           :wait-signal-timeout)))))
 

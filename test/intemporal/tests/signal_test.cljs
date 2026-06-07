@@ -71,14 +71,13 @@
     (let [engine (intemporal/make-workflow-engine :threads 2)
           wf-id-1 "multi-signal-test-1"
           wf-id-2 "multi-signal-test-2"]
-      ;; Send signals after a short delay, by which time both workflows are suspended
-      (js/setTimeout
-        #(do (intemporal/send-signal (:store engine) wf-id-1 "approval" {:user "alice"})
-             (intemporal/send-signal (:store engine) wf-id-2 "approval" {:user "bob"}))
-        100)
+      ;; Each workflow gets its own delayed signal. blet sequences r1 then r2,
+      ;; so each setTimeout fires after its respective workflow is suspended.
+      (js/setTimeout #(intemporal/send-signal (:store engine) wf-id-1 "approval" {:user "alice"}) 100)
       (with-result [[result1 result2]
                     (blet [r1 (intemporal/start-workflow engine signal-flow [100]
                                                          :workflow-id wf-id-1)
+                            _  (js/setTimeout #(intemporal/send-signal (:store engine) wf-id-2 "approval" {:user "bob"}) 100)
                             r2 (intemporal/start-workflow engine signal-flow [200]
                                                           :workflow-id wf-id-2)]
                       [r1 r2])]

@@ -183,9 +183,10 @@
           status (:intemporal_workflows/status wf-row)]
       (cond
         (nil? wf-row) :not-found
-        (:intemporal_workflows/cancelled wf-row) :cancelled
-        ;; Phase B2 fast path: terminal status is cached in the column (O(1)).
+        ;; Check terminal status first: a late mark-cancelled must not override
+        ;; a workflow that already completed or failed.
         (#{"completed" "failed"} status) (keyword status)
+        (:intemporal_workflows/cancelled wf-row) :cancelled
         ;; Otherwise (running / pre-migration) derive from history as before.
         :else (let [history (p/load-history this workflow-id)]
                 (if (empty? history)

@@ -95,8 +95,10 @@
   (get-workflow-status [_ workflow-id]
     (let [wf (get-in @state [:workflows workflow-id])]
       (cond
-        (:cancelled wf) :cancelled
+        ;; Check terminal status first: a late mark-cancelled must not override
+        ;; a workflow that already completed or failed.
         (#{:completed :failed} (:status wf)) (:status wf)   ; Phase B2 O(1) fast path
+        (:cancelled wf) :cancelled
         (empty? (:history wf)) :not-found
         :else (let [last-event (last (:history wf))]
                 (case (:event-type last-event)
@@ -122,6 +124,7 @@
            (filter (fn [[_ wf]]
                      (and (seq (:history wf))
                           (not (terminal-status? (:status wf)))
+                          (not (:cancelled wf))
                           ;; C2: skip workflows not yet due to wake
                           (let [wa (:wake-at wf)] (or (nil? wa) (<= wa now)))
                           (let [o (:owner wf)] (or (nil? o) (= o owner-id))))))

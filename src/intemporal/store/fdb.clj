@@ -177,23 +177,25 @@
         (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "cancelled"]) (->bytes true)))))
 
   (get-workflow-status [this workflow-id]
-    (if (p/is-cancelled? this workflow-id)
-      :cancelled
-      ;; Phase B2 fast path: terminal status cached at ["state" id "status"].
-      (let [cached (<-bytes (ftr/run db
-                              (fn [tx]
-                                (fdb-core/get tx root-subspace
-                                              (->tuple ["state" workflow-id "status"])))))]
-        (if (#{"completed" "failed"} cached)
-          (keyword cached)
-          (let [history (p/load-history this workflow-id)]
-            (if (empty? history)
-              :not-found
-              (let [last-event (last history)]
-                (case (:event-type last-event)
-                  :workflow-completed :completed
-                  :workflow-failed :failed
-                  :running))))))))
+    ;; Read both status and cancelled flag in one transaction so that a late
+    ;; mark-cancelled cannot override a workflow that already completed or failed.
+    (let [[cached cancelled?]
+          (ftr/run db
+            (fn [tx]
+              [(<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "status"])))
+               (boolean (<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "cancelled"]))))]))]
+      (cond
+        ;; Check terminal status first: takes precedence over the cancelled flag.
+        (#{"completed" "failed"} cached) (keyword cached)
+        cancelled? :cancelled
+        :else (let [history (p/load-history this workflow-id)]
+                (if (empty? history)
+                  :not-found
+                  (let [last-event (last history)]
+                    (case (:event-type last-event)
+                      :workflow-completed :completed
+                      :workflow-failed :failed
+                      :running)))))))
 
   ;; --- Phase C: ownership-based recovery (serializable read-modify-write) ---
   (claim-owner [_ workflow-id owner-id]
