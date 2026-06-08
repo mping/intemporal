@@ -176,6 +176,39 @@ sequenceDiagram
     end
 ```
 
+## 4. Internal Execution Loop Flowchart (`run-workflow-internal`)
+
+```mermaid
+flowchart TD
+    Start([run-workflow-internal]) --> IterCheck{"iteration >=\nmax-iterations?"}
+    IterCheck -->|Yes| Fail["finalize-failed\n'Replay budget exceeded'"] --> RetFail(["↩ :failed"])
+    IterCheck -->|No| ShutCheck{"executor\nshutting down?"}
+    ShutCheck -->|Yes| RetSusp(["↩ :suspended"])
+    ShutCheck -->|No| Load["Load history · Create context\nbind *workflow-context*\nseq-counter = 0"]
+    Load --> Exec["execute-workflow-fn\n───────────────────\nREPLAY: stubs return cached events\nFRONTIER: stub throws suspension"]
+
+    Exec --> Status{"result status?"}
+
+    Status -->|":completed"| Done["finalize-completed\nsave events + :workflow-completed"] --> RetOK(["↩ :completed"])
+    Status -->|":cancelled"| Canc["finalize-cancelled\nsave :workflow-cancelled"] --> RetCanc(["↩ :cancelled"])
+    Status -->|":failed"| Failed["finalize-failed\nsave :workflow-failed"] --> RetFailed(["↩ :failed"])
+
+    Status -->|":suspended"| Dispatch{"suspension-type?"}
+
+    Dispatch -->|":activity"| HasAsync{"pending-asyncs?"}
+    HasAsync -->|Yes| Parallel["execute all asyncs in parallel\nVirtual Thread pool\nsave :activity-completed/failed"] --> AC[":continue"]
+    HasAsync -->|No| Single["execute-with-retry\nVirtual Thread\nsave :activity-completed/failed"] --> AC
+
+    Dispatch -->|":timer\n:wait-signal\n:wait-signal-timeout\n:child-workflow\n:join-*"| Other["schedule timer / register signal callback\nor run child workflow"] --> OtherAction{"action?"}
+
+    OtherAction -->|":continue"| AC
+    OtherAction -->|":wait-*"| Wait
+
+    AC --> Recur["recur iteration + 1"] --> IterCheck
+
+    Wait["register-wake-callback\nset-wake-at deadline"] --> RetWait(["↩ :waiting-*"])
+```
+
 ### Detailed Execution Steps
 1. **Startup**: The `start-workflow` call registers protocol activities and persists a `:workflow-started` event to history.
 2. **Replay Phase**: The engine invokes the workflow function. Each stubbed operation queries the store for existing events matching the current sequence number. If a cached event exists, the result is returned directly, ensuring side-effects are skipped.
