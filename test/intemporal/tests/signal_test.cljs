@@ -3,7 +3,7 @@
             [intemporal.tests.utils :refer [with-result]]
             [cljs.test :as t :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]
-            [promesa.core :as p])
+)
   (:require-macros [intemporal.tests.utils :refer [with-result]]
                    [intemporal.internal.context :refer [blet]]))
 
@@ -68,17 +68,18 @@
 
 (deftest test-multiple-signals
   (testing "Multiple signals can be sent to same workflow"
-    (let [wf-id  "multi-signal-test"
-          engine (intemporal/make-workflow-engine :threads 2)]
-      ;; Send signals before workflow starts
-      (intemporal/send-signal (:store engine) wf-id "approval" {:user "alice"})
-      (intemporal/send-signal (:store engine) wf-id "approval" {:user "bob"})
-      ;; First workflow run consumes first signal, then second
+    (let [engine (intemporal/make-workflow-engine :threads 2)
+          wf-id-1 "multi-signal-test-1"
+          wf-id-2 "multi-signal-test-2"]
+      ;; Each workflow gets its own delayed signal. blet sequences r1 then r2,
+      ;; so each setTimeout fires after its respective workflow is suspended.
+      (js/setTimeout #(intemporal/send-signal (:store engine) wf-id-1 "approval" {:user "alice"}) 100)
       (with-result [[result1 result2]
                     (blet [r1 (intemporal/start-workflow engine signal-flow [100]
-                                                          :workflow-id wf-id)
-                            r2 (intemporal/resume-workflow engine wf-id
-                                                           signal-flow [100])]
+                                                         :workflow-id wf-id-1)
+                            _  (js/setTimeout #(intemporal/send-signal (:store engine) wf-id-2 "approval" {:user "bob"}) 100)
+                            r2 (intemporal/start-workflow engine signal-flow [200]
+                                                          :workflow-id wf-id-2)]
                       [r1 r2])]
         (is (match? {:result {:approved {:user "alice"}}} result1))
-        (is (match? {:result {:approved {:user "alice"}}} result2))))))
+        (is (match? {:result {:approved {:user "bob"}}} result2))))))

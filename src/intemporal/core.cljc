@@ -6,6 +6,7 @@
             [intemporal.internal.execution :as exec]
             [intemporal.internal.logging :as log]
             [intemporal.internal.fns.start-workflow :as sw]
+            [intemporal.internal.workflow-registry :as wreg]
             [intemporal.protocol :as p]
             [intemporal.store :as store]
             [intemporal.observer :as obs]
@@ -32,10 +33,8 @@
         effective-timeout (or timeout-ms (:timeout-ms activity-info))
         effective-retry (or retry-policy (:retry-policy activity-info))]
     (fn [& args]
-      (let [seq-num (ctx/next-seq!)]
+      (let [seq-num (ctx/next-seq!)]            ;; next-seq! already checks cancellation
         (log/with-mdc {:activity activity-name :seqnum seq-num}
-
-          (ctx/check-cancelled!)
           (let [ctx             (ctx/current-context)
                 store           (ctx/current-store)
                 workflow-id     (ctx/current-workflow-id)
@@ -290,13 +289,19 @@
         existing (p/find-event store workflow-id :timer-fired seq-num)]
     (if existing
       nil
-      (let [fire-at (+ (utils/current-time-ms) ms)]
-        (ctx/add-pending-event! {:event-type :timer-scheduled
-                                 :seq seq-num
-                                 :fire-at fire-at
-                                 :duration-ms ms
-                                 :timestamp (utils/current-time-ms)})
-        (ctx/notify-observer p/on-timer-scheduled (:workflow-id ctx) seq-num fire-at)
+      ;; Reuse the fire-at from a prior :timer-scheduled event if one was already
+      ;; persisted for this seq. Recomputing (now + ms) on every replay would push
+      ;; the deadline later on each resume (drift) and make a crash-resumed sleep
+      ;; never reliably fire. The fire time must be deterministic across replays.
+      (let [prior   (p/find-event store workflow-id :timer-scheduled seq-num)
+            fire-at (or (:fire-at prior) (+ (utils/current-time-ms) ms))]
+        (when-not prior
+          (ctx/add-pending-event! {:event-type :timer-scheduled
+                                   :seq seq-num
+                                   :fire-at fire-at
+                                   :duration-ms ms
+                                   :timestamp (utils/current-time-ms)})
+          (ctx/notify-observer p/on-timer-scheduled (:workflow-id ctx) seq-num fire-at))
         (throw (error/make-suspension :timer {:seq seq-num
                                               :fire-at fire-at}))))))
 ;; ============================================================================
@@ -363,6 +368,51 @@
   [engine workflow-fn args & opts]
   (apply sw/start-workflow engine workflow-fn args opts))
 
+
+#?(:clj
+   (defn submit-workflow
+     "Start a workflow asynchronously and return {:workflow-id id} immediately,
+      without blocking the caller until completion (improvements.md §B4). The
+      workflow runs on a background thread; use await-workflow to wait for the
+      result, or resume-workflow/get-workflow-status to observe it later.
+
+      Accepts the same options as start-workflow (:workflow-id, :observer, …)."
+     [engine workflow-fn args & opts]
+     (let [m     (apply hash-map opts)
+           wid   (or (:workflow-id m) (str (random-uuid)))
+           opts' (mapcat identity (assoc m :workflow-id wid))]
+       (future
+         (try
+           (apply sw/start-workflow engine workflow-fn args opts')
+           (catch Throwable t
+             (log/warnf t "submit-workflow background run failed"))))
+       {:workflow-id wid})))
+
+#?(:clj
+   (defn await-workflow
+     "Block until the workflow reaches a terminal state (:completed, :failed,
+      :cancelled) and return {:status … :result …}. Polls get-workflow-status;
+      a workflow id that is briefly :not-found (still starting) is tolerated.
+      Returns {:status :timeout} if the deadline elapses first."
+     [{:keys [store]} workflow-id & {:keys [poll-ms timeout-ms]
+                                     :or   {poll-ms 50 timeout-ms 30000}}]
+     (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+       (loop []
+         (let [st (p/get-workflow-status store workflow-id)]
+           (cond
+             (#{:completed :failed :cancelled} st)
+             {:status st
+              :result (->> (p/load-history store workflow-id)
+                           (filter #(= :workflow-completed (:event-type %)))
+                           first
+                           :result)}
+
+             (> (System/currentTimeMillis) deadline)
+             {:status :timeout :workflow-id workflow-id}
+
+             :else
+             (do (Thread/sleep (long poll-ms)) (recur))))))))
+
 (defn resume-workflow
   "Resume a waiting workflow (e.g., after signal delivery or timer).
 
@@ -379,16 +429,100 @@
    Options:
    - :observer - IWorkflowObserver
    - :max-iterations - Maximum replay iterations"
-  [{:keys [store executor scheduler registry] :as engine} workflow-id workflow-fn args
-   & {:keys [observer max-iterations]
-      :or {max-iterations 1000}}]
-  (when observer
-    (p/on-workflow-resumed observer workflow-id))
-  (log/info "Workflow resumed")
-  (exec/run-workflow-internal engine workflow-id workflow-fn args
-                         {:observer observer
-                          :max-iterations max-iterations}))
+  ([{:keys [store] :as engine} workflow-id]
+   ;; Resolve fn + args from the :workflow-started event via the workflow
+   ;; registry (improvements.md §B3). Requires the workflow fn to have been
+   ;; registered in this process (start-workflow does so automatically; a
+   ;; restarted/other process must register its workflow vars at startup).
+   (let [history (p/load-history store workflow-id)
+         started (first (filter #(= :workflow-started (:event-type %)) history))]
+     (when-not started
+       (throw (ex-info "Cannot resume: no :workflow-started event in history"
+                       {:workflow-id workflow-id})))
+     ;; resolve-workflow throws a descriptive ex-info if the fn is not registered
+     ;; in this process (e.g. a fresh process that forgot to register its vars).
+     (let [wf-name (:workflow-fn-name started)
+           wf-fn   (wreg/resolve-workflow wf-name)]
+       (resume-workflow engine workflow-id wf-fn (vec (:args started))))))
+  ([{:keys [store executor scheduler registry] :as engine} workflow-id workflow-fn args
+    & {:keys [observer max-iterations]
+       :or {max-iterations 1000}}]
+   (when observer
+     (p/on-workflow-resumed observer workflow-id))
+   (log/info "Workflow resumed")
+   (exec/run-workflow-internal engine workflow-id workflow-fn args
+                          {:observer observer
+                           :max-iterations max-iterations})))
 
+#?(:clj
+   (defn start-worker
+     "Start a background recovery worker (Phase C, ownership model). Each poll it
+      lists the non-terminal workflows this owner may run — its own plus any
+      unowned (`owner = owner-id OR owner IS NULL`) — claims each by stamping
+      ownership, and resumes it by id. This is the cross-pod wake AND the crash
+      recovery: the first poll re-picks this owner's orphaned workflows, and a
+      later poll re-resumes a signalled/cancelled one (replay consumes the
+      signal / observes the cancellation). Workflows are resumed sequentially on
+      the poll thread, so neither cross-pod nor intra-pod double-execution occurs.
+
+      Use a STABLE owner-id per pod (e.g. StatefulSet ordinal / config) so a
+      crashed pod reclaims its own work on restart. Returns a 0-arg stop fn that
+      releases this owner's workflows (so other pods can pick them up).
+
+      The worker resumes via resume-workflow [engine workflow-id], so the workflow
+      function must be registered in this process (start-workflow registers it
+      automatically; a fresh process must register its workflow vars at startup).
+
+      Options:
+        :owner-id    stable id for this worker (default: random uuid)
+        :poll-ms     poll interval (default 500)
+        :batch-size  max workflows scanned per poll (default 100)"
+     [{:keys [store] :as engine}
+      & {:keys [owner-id poll-ms batch-size]
+         :or   {owner-id (str (random-uuid)) poll-ms 500 batch-size 100}}]
+     (let [running (atom true)
+           process-one
+           (fn [wf-id]
+             (when (p/claim-owner store wf-id owner-id)
+               (try
+                 (resume-workflow engine wf-id)
+                 (catch Throwable t
+                   (log/warnf t "Worker %s failed resuming %s" owner-id wf-id)))))
+           ;; Exponential backoff on consecutive poll failures so a downed
+           ;; database doesn't get hammered (and the logs flooded). Resets to
+           ;; poll-ms after any successful list-pending query.
+           max-backoff-ms (* poll-ms 60)
+           backoff-ms     (atom (long poll-ms))
+           thread
+           (Thread.
+             ^Runnable
+             (fn []
+               (while @running
+                 (try
+                   (let [ids (p/list-pending store owner-id batch-size)]
+                     (reset! backoff-ms (long poll-ms))   ; healthy query: reset backoff
+                     (if (seq ids)
+                       (doseq [wf-id ids :while @running]
+                         (process-one wf-id))
+                       (Thread/sleep (long poll-ms))))
+                   (catch InterruptedException _ (reset! running false))
+                   (catch Throwable t
+                     (let [wait @backoff-ms]
+                       (log/warnf t "Worker %s loop error; backing off %dms" owner-id wait)
+                       (Thread/sleep wait)
+                       (swap! backoff-ms #(min max-backoff-ms (* 2 %)))))))))]
+       (doto thread
+         (.setDaemon true)
+         (.setName (str "intemporal-worker-" owner-id))
+         (.start))
+       (fn stop-worker []
+         (reset! running false)
+         (.interrupt thread)
+         ;; Wait briefly for an in-flight resume to finish before releasing
+         ;; ownership, so another pod doesn't pick up a workflow that is still
+         ;; executing here (#7). Bounded so stop never blocks indefinitely.
+         (.join thread (long poll-ms))
+         (p/release-owner store owner-id)))))
 
 (defn send-signal
   "Send a signal to a workflow.
@@ -402,6 +536,10 @@
    Options:
    - :signal-id - Custom signal ID for idempotency"
   [store workflow-id signal-name payload & {:keys [signal-id]}]
+  (let [status (p/get-workflow-status store workflow-id)]
+    (when-not (= status :running)
+      (throw (ex-info "Cannot send signal: workflow is not active"
+                      {:workflow-id workflow-id :status status}))))
   (let [id (or signal-id (str (random-uuid)))]
     (log/with-mdc {:workflow-id workflow-id}
       (p/add-signal store workflow-id signal-name {:id id :payload payload})
@@ -410,11 +548,18 @@
 
 (defn cancel-workflow
   "Cancel a running workflow.
-   The workflow will be cancelled at the next suspension point."
+   The workflow is cancelled at the next suspension point. If it is currently
+   suspended (e.g. waiting on a signal), wake-workflow forces it to re-enter its
+   loop so it observes the cancellation flag rather than waiting forever."
   [store workflow-id]
   (log/with-mdc {:workflow-id workflow-id}
-    (p/mark-cancelled store workflow-id)
-    (log/debugf "Cancelling workflow"))
+    (let [status (p/get-workflow-status store workflow-id)]
+      (if (#{:completed :failed :cancelled} status)
+        (log/debugf "Cancelling workflow that is already in terminal state %s, skipping" status)
+        (do
+          (p/mark-cancelled store workflow-id)
+          (p/wake-workflow store workflow-id)
+          (log/debugf "Cancelling workflow")))))
   {:cancelled true :workflow-id workflow-id})
 
 (defn get-workflow-history
@@ -439,6 +584,86 @@
   `(im/stub-protocol ~proto ~@opts))
 
 ;; ============================================================================
+;; Saga / Compensations
+;; ============================================================================
+
+(defn suspension?
+  "True if `e` is an internal workflow suspension (the engine's normal control
+   flow for activities, timers, signals, etc.). Mainly needed in ClojureScript,
+   where every throwable is a js/Error and `(catch :default e)` catches
+   suspensions too - a saga catch there must rethrow them via this predicate.
+   On the JVM suspensions subclass Error, so `(catch Exception e)` already
+   excludes them and no guard is needed. See `saga`."
+  [e]
+  (error/suspension? e))
+
+(defn saga
+  "Create a saga: a handle that collects compensation thunks for the steps a
+   workflow has completed. Register compensations as you go with
+   `add-compensation`, and run them with `compensate` from a catch block.
+
+   Both real failures and workflow cancellation flow through the catch (so this
+   rolls back in either case); the engine's normal control-flow suspensions do
+   not. On the JVM, catch `Exception` - suspensions subclass Error and are
+   excluded automatically:
+
+   (let [s (saga)]
+     (try
+       (let [h (book-hotel order)
+             _ (add-compensation s #(cancel-hotel h))]
+         (charge-card order))
+       (catch Exception e
+         (compensate s)             ;; rolls back completed steps, LIFO
+         (throw e))))
+
+   In ClojureScript there is no Error/Exception split, so catch :default and
+   rethrow suspensions explicitly:
+
+       (catch :default e
+         (when (suspension? e) (throw e))
+         (compensate s)
+         (throw e))"
+  []
+  {::compensations (atom [])})
+
+(defn add-compensation
+  "Register a 0-arg compensation thunk on `saga`. Compensations run in reverse
+   registration order (LIFO) when `compensate` is called. The thunk should call
+   activity stubs (closing over the step's result) so it is durable / replay-safe.
+   Register a step's compensation only after the step succeeds, so a step that
+   never completed registers nothing to undo."
+  [saga thunk]
+  (swap! (::compensations saga) conj thunk))
+
+(defn compensate
+  "Run `saga`'s registered compensations in reverse (LIFO). Real errors from a
+   compensation are logged and skipped (best-effort rollback); a suspension (a
+   compensating activity running for the first time) is rethrown so the engine
+   schedules and resumes it - on replay already-run compensations return cached
+   results."
+  [saga]
+  (let [comps @(::compensations saga)]
+    (when (seq comps)
+      (ctx/notify-observer p/on-compensation-started (ctx/current-workflow-id)))
+    ;; Suppress the cancellation check so compensating activities can run even
+    ;; when this rollback was triggered by a cancellation (the cancel exception
+    ;; was already caught by the user before calling compensate).
+    (ctx/set-compensating! true)
+    (try
+      (doseq [c (reverse comps)]
+        (try
+          (c)
+          (catch #?(:clj Throwable :cljs js/Error) t
+            (when (error/suspension? t) (throw t))
+            (ctx/notify-observer p/on-compensation-failed
+                                 (ctx/current-workflow-id) (error/throwable->map t))
+            (log/warnf "Compensation failed, continuing: %s" (ex-message t)))))
+      (finally
+        (ctx/set-compensating! false)))
+    (when (seq comps)
+      (ctx/notify-observer p/on-compensation-completed (ctx/current-workflow-id)))))
+
+;; ============================================================================
 ;; Convenience Functions
 ;; ============================================================================
 
@@ -452,26 +677,29 @@
    - :scheduler-threads - Number of scheduler threads (default: 2)
    - :default-timeout-ms - Default activity timeout (default: 30000)
    - :enable-logging - Enable logging observer (default: false)
-   - :observer - Custom observer instance (overrides :enable-logging)"
-  [& {:keys [store threads scheduler-threads default-timeout-ms enable-logging observer]
+   - :enable-telemetry - Enable OpenTelemetry observer (default: false, JVM only)
+   - :observer - Additional observer instance, composed on top of built-in observers"
+  [& {:keys [store threads scheduler-threads default-timeout-ms enable-logging enable-telemetry observer]
       :or {store (store/->InMemoryStore (atom {}))
            threads 4
            scheduler-threads 2
            default-timeout-ms 30000
-           enable-logging false}}]
+           enable-logging false
+           enable-telemetry false}}]
   (let [registry (a/make-registry)
-        log-atom (when enable-logging (atom []))]
+        log-atom (when enable-logging (atom []))
+        logging-observer (when enable-logging (obs/make-logging-observer log-atom))
+        otel-observer #?(:clj (when enable-telemetry
+                                ((requiring-resolve 'intemporal.observer.otel/make-otel-observer)))
+                         :cljs nil)
+        composite-observer (obs/make-composite-observer [logging-observer otel-observer observer])]
     {:store store
      :executor (runtime/make-vthreads-executor registry
                                        :threads threads
                                        :default-timeout-ms default-timeout-ms)
      :scheduler (runtime/make-scheduler :threads scheduler-threads)
      :registry registry
-     ;; opts
-     :observer (or observer
-                   (if enable-logging
-                     (obs/make-logging-observer log-atom)
-                     (obs/noop-observer)))
+     :observer composite-observer
      :log (when enable-logging log-atom)}))
 
 (defn shutdown-engine

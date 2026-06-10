@@ -38,7 +38,7 @@
         200)
       (with-result [result (intemporal/start-workflow engine long-flow [1]
                                                       :workflow-id wf-id)]
-        (is (match? {:status :failed
+        (is (match? {:status :cancelled
                      :workflow-id wf-id
                      :error (m/embeds {:message #"cancelled"})}
                     result))))))
@@ -53,7 +53,7 @@
         150)
       (with-result [result (intemporal/start-workflow engine cancellable-flow [1]
                                                       :workflow-id wf-id)]
-        (is (match? {:status :failed
+        (is (match? {:status :cancelled
                      :workflow-id wf-id
                      :error (m/embeds {:message #"cancelled"})}
                     result))))))
@@ -66,7 +66,7 @@
       (intemporal/cancel-workflow (:store engine) wf-id)
       (with-result [result (intemporal/start-workflow engine cancellable-flow [1]
                                                       :workflow-id wf-id)]
-        (is (match? {:status :failed
+        (is (match? {:status :cancelled
                      :workflow-id wf-id
                      :error (m/embeds {:message #"cancelled"})}
                     result))))))
@@ -80,7 +80,7 @@
         100)
       (with-result [result (intemporal/start-workflow engine long-flow [1]
                                                       :workflow-id wf-id)]
-        (is (match? {:status :failed
+        (is (match? {:status :cancelled
                      :workflow-id wf-id
                      :error (m/embeds {:message #"cancelled"})}
                     result))))))

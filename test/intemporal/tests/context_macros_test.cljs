@@ -2,7 +2,7 @@
   (:require [intemporal.core :as intemporal]
             [cljs.test :refer [deftest is testing]]
             [intemporal.internal.context :as ctx]
-            [intemporal.tests.utils :refer [with-trace-logging]]
+            [intemporal.tests.utils :as utils]
             [promesa.core :as p])
   (:require-macros [intemporal.internal.context :as ctx :refer [blet bthen bfinally]]
                    [intemporal.tests.utils :refer [with-result]]))

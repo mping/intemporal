@@ -55,4 +55,14 @@
                       :ns-default  build}
 
               :test  {:jvm-opts  ["--enable-native-access=ALL-UNNAMED"]
-                      :main-opts ["-m" "kaocha.runner"]}}}
+                      :main-opts ["-m" "kaocha.runner"]}
+
+              ;; Run the chaos harness against a live Postgres instance:
+              ;;   clojure -X:dev:jdbc:jepsen intemporal.jepsen.runner/run
+              :jepsen {:extra-paths ["test" "test/resources"]
+                       :jvm-opts    ["--enable-native-access=ALL-UNNAMED"]
+                       :main-opts   ["-m" "intemporal.jepsen.runner"]}
+
+              ;; Entry point for forked worker JVMs launched by db.clj/fork!
+              :jepsen-worker {:extra-paths ["test" "test/resources"]
+                              :jvm-opts    ["--enable-native-access=ALL-UNNAMED"]}}}

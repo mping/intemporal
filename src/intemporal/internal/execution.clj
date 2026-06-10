@@ -37,6 +37,10 @@
          :pending-events @(:pending-events (ctx/current-context))}
 
         :else
+        ;; Real failure. Any saga rollback happens inside the workflow body (the
+        ;; user's catch calls intemporal/compensate); a compensating activity that
+        ;; suspends throws out of compensate and arrives here as a suspension,
+        ;; caught above, so the loop schedules + resumes it.
         {:status :failed
          :error e
          :pending-events @(:pending-events (ctx/current-context))}))))
@@ -159,40 +163,39 @@
           now (utils/current-time-ms)
 
           ;; Create completion events for both activities and async handles
-          completion-events
-              (mapcat (fn [{:keys [activity-name activity-seq] :as async-info} result]
-                        (log/with-mdc {:activity activity-name :seqnum activity-seq}
-                          (if (= :success (:status result))
-                            (do
-                              (-notify p/on-async-completed observer workflow-id (:handle-seq async-info) (:result result))
-                              (log/tracef "Got completion event: activity succeeded, result: %s" result))
-                            (do
-                              (-notify p/on-async-failed observer workflow-id (:handle-seq async-info) (:error result))
-                              (log/tracef "Got completion event: activity failed, error: %s" (:error result))))
-                          (if (= :success (:status result))
-                            [{:event-type    :activity-completed
-                              :seq           (:activity-seq async-info)
-                              :activity-name (:activity-name async-info)
-                              :result        (:result result)
-                              :duration-ms   (:duration result)
-                              :timestamp     now}
-                             {:event-type :async-completed
-                              :seq        (:handle-seq async-info)
-                              :last-seq   (:activity-seq async-info)
-                              :result     (:result result)
-                              :timestamp  now}]
-                            ;; else
-                            [{:event-type    :activity-failed
-                              :seq           (:activity-seq async-info)
-                              :activity-name (:activity-name async-info)
-                              :error         (:error result)
-                              :timestamp     now}
-                             {:event-type :async-failed
-                              :seq        (:handle-seq async-info)
-                              :last-seq   (:activity-seq async-info)
-                              :error      (:error result)
-                              :timestamp  now}])))
-                      pending-asyncs results)]
+          completion-events (mapcat (fn [{:keys [activity-name activity-seq] :as async-info} result]
+                                      (log/with-mdc {:activity activity-name :seqnum activity-seq}
+                                        (if (= :success (:status result))
+                                          (do
+                                            (-notify p/on-async-completed observer workflow-id (:handle-seq async-info) (:result result))
+                                            (log/tracef "Got completion event: activity succeeded, result: %s" result))
+                                          (do
+                                            (-notify p/on-async-failed observer workflow-id (:handle-seq async-info) (:error result))
+                                            (log/tracef "Got completion event: activity failed, error: %s" (:error result))))
+                                        (if (= :success (:status result))
+                                          [{:event-type    :activity-completed
+                                            :seq           (:activity-seq async-info)
+                                            :activity-name (:activity-name async-info)
+                                            :result        (:result result)
+                                            :duration-ms   (:duration result)
+                                            :timestamp     now}
+                                           {:event-type :async-completed
+                                            :seq        (:handle-seq async-info)
+                                            :last-seq   (:activity-seq async-info)
+                                            :result     (:result result)
+                                            :timestamp  now}]
+                                          ;; else
+                                          [{:event-type    :activity-failed
+                                            :seq           (:activity-seq async-info)
+                                            :activity-name (:activity-name async-info)
+                                            :error         (:error result)
+                                            :timestamp     now}
+                                           {:event-type :async-failed
+                                            :seq        (:handle-seq async-info)
+                                            :last-seq   (:activity-seq async-info)
+                                            :error      (:error result)
+                                            :timestamp  now}])))
+                                    pending-asyncs results)]
       (p/save-events store workflow-id completion-events)))
   :continue)
 
@@ -221,77 +224,81 @@
         :wait-timer))))
 
 (defn process-signal [store workflow-id suspension-data pending-events wake-fn observer]
-  (let [{:keys [seq signal-name]} suspension-data]
+  (let [{:keys [seq signal-name]} suspension-data
+        save-received (fn [signal-data]
+                        (p/save-event store workflow-id {:event-type  :signal-received
+                                                         :seq         seq
+                                                         :signal-name signal-name
+                                                         :signal-id   (:id signal-data)
+                                                         :payload     (:payload signal-data)
+                                                         :timestamp   (utils/current-time-ms)})
+                        (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data)))]
     ;; Save pending events
     (p/save-events store workflow-id pending-events)
+    ;; Register the wake callback FIRST, then check for an already-available
+    ;; signal (fixes bug 2.1: a signal arriving between the consume-check and
+    ;; the registration could previously be lost). consume-signal is atomic in
+    ;; every store, so exactly one of {the inline check below, the callback}
+    ;; consumes the signal — the other observes nil and no-ops. The callback
+    ;; only wakes if it was the one that consumed, so the inline :continue path
+    ;; never double-executes the workflow.
+    (p/register-signal-callback store workflow-id signal-name
+                               (fn []
+                                 (when-let [signal-data (p/consume-signal store workflow-id signal-name)]
+                                   (save-received signal-data)
+                                   (p/unregister-signal-callback store workflow-id signal-name)
+                                   (when wake-fn (wake-fn)))))
     (if-let [signal-data (p/consume-signal store workflow-id signal-name)]
-      ;; Signal already available - process immediately
+      ;; We won the race inline: handle the signal and continue synchronously.
       (do
-        (p/save-event store workflow-id {:event-type  :signal-received
-                                         :seq         seq
-                                         :signal-name signal-name
-                                         :signal-id   (:id signal-data)
-                                         :payload     (:payload signal-data)
-                                         :timestamp   (utils/current-time-ms)})
-        (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data))
+        (p/unregister-signal-callback store workflow-id signal-name)
+        (save-received signal-data)
         :continue)
-      ;; ELSE Signal not yet available - register callback and wait
-      (do
-        (p/register-signal-callback store workflow-id signal-name
-                                   (fn []
-                                     ;; When signal arrives, consume it and save event
-                                     (when-let [signal-data (p/consume-signal store workflow-id signal-name)]
-                                       (p/save-event store workflow-id {:event-type  :signal-received
-                                                                        :seq         seq
-                                                                        :signal-name signal-name
-                                                                        :signal-id   (:id signal-data)
-                                                                        :payload     (:payload signal-data)
-                                                                        :timestamp   (utils/current-time-ms)})
-                                       (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data)))
-                                     ;; Unregister callback
-                                     (p/unregister-signal-callback store workflow-id signal-name)
-                                     ;; Wake up the workflow
-                                     (when wake-fn (wake-fn))))
-        :wait-signal))))
+      ;; No signal yet: stay suspended; the armed callback will wake us.
+      :wait-signal)))
 
 (defn process-signal-with-timeout [store scheduler workflow-id suspension-data
                                     pending-events wake-fn observer]
   (let [{:keys [seq signal-name deadline]} suspension-data
-        now (utils/current-time-ms)]
+        now (utils/current-time-ms)
+        save-completed (fn [signal-data?]
+                         (p/save-event store workflow-id
+                                       (cond-> {:event-type  :signal-wait-completed
+                                                :seq         seq
+                                                :received    (some? signal-data?)
+                                                :signal-name signal-name
+                                                :timestamp   (utils/current-time-ms)}
+                                               (some? signal-data?) (assoc :payload (:payload signal-data?))))
+                         (when signal-data?
+                           (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data?))))]
     (p/save-events store workflow-id pending-events)
     ;; Check if signal already available
     (if-let [signal-data (p/consume-signal store workflow-id signal-name)]
       (do
-        (p/save-event store workflow-id {:event-type  :signal-wait-completed
-                                         :seq         seq
-                                         :received    true
-                                         :signal-name signal-name
-                                         :payload     (:payload signal-data)
-                                         :timestamp   now})
-        (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data))
+        (save-completed signal-data)
         :continue)
       ;; ELSE Check if already timed out
       (if (>= now deadline)
         (do
-          (p/save-event store workflow-id {:event-type  :signal-wait-completed
-                                           :seq         seq
-                                           :received    false
-                                           :signal-name signal-name
-                                           :timestamp   now})
+          (save-completed nil)
           :continue)
-        ;; Schedule timeout
+        ;; Register signal callback FIRST (mirrors the process-signal fix for bug 2.1):
+        ;; a signal arriving between the consume-check above and the timer firing would
+        ;; otherwise be silently lost. With the callback armed, exactly one of {the
+        ;; timer callback, the signal callback} wins the atomic consume-signal race.
         (do
+          (p/register-signal-callback store workflow-id signal-name
+                                      (fn []
+                                        (when-let [signal-data (p/consume-signal store workflow-id signal-name)]
+                                          (p/unregister-signal-callback store workflow-id signal-name)
+                                          (p/cancel-timer scheduler workflow-id seq)
+                                          (save-completed signal-data)
+                                          (when wake-fn (wake-fn)))))
           (p/schedule-timer scheduler workflow-id seq deadline
                             (fn []
-                              ;; Check one more time for signal
+                              (p/unregister-signal-callback store workflow-id signal-name)
                               (let [signal-data? (p/consume-signal store workflow-id signal-name)]
-                                (p/save-event store workflow-id (cond-> {:event-type  :signal-wait-completed
-                                                                         :seq         seq
-                                                                         :received    (some? signal-data?)
-                                                                         :signal-name signal-name
-                                                                         :timestamp   (utils/current-time-ms)}
-                                                                        (some? signal-data?) (assoc :payload (:payload signal-data?)))))
-
+                                (save-completed signal-data?))
                               (when wake-fn (wake-fn))))
           :wait-signal-timeout)))))
 
@@ -329,6 +336,7 @@
    :seq-counter (atom 0)
    :pending-events (atom [])
    :pending-asyncs (atom [])
+   :compensating? (atom false)
    :store store
    :registry registry
    :observer observer})
@@ -354,18 +362,20 @@
    :result result})
 
 (defn finalize-cancelled
-  "Save cancellation event and return result as failed."
+  "Save a dedicated cancellation event and return the cancelled result.
+   The history event is :workflow-cancelled (a first-class terminal state), so
+   history and the derived status agree rather than recording cancellation as a
+   failure."
   [store workflow-id pending-events observer]
   (p/save-events store workflow-id pending-events)
   (let [error-map {:type "clojure.lang.ExceptionInfo"
                    :message "Workflow cancelled"
                    :data {:workflow-id workflow-id}}]
-    (p/save-event store workflow-id {:event-type :workflow-failed
+    (p/save-event store workflow-id {:event-type :workflow-cancelled
                                      :error error-map
                                      :timestamp  (utils/current-time-ms)})
     (-notify p/on-workflow-cancelled observer workflow-id)
-    (-notify p/on-workflow-failed observer workflow-id error-map)
-    {:status :failed
+    {:status :cancelled
      :workflow-id workflow-id
      :error error-map}))
 
@@ -505,11 +515,19 @@
    {:keys [observer max-iterations wake-fn]
     :or {max-iterations 1000}}]
   (loop [iteration 0]
-    (when (>= iteration max-iterations)
-      (throw (ex-info "Max iterations exceeded" {:workflow-id workflow-id
-                                                 :iterations iteration})))
-
-    (log/debugf "Internal loop %d of %d" iteration max-iterations)
+    (if (>= iteration max-iterations)
+      ;; Replay budget exhausted (e.g. a non-terminating workflow loop). Persist a
+      ;; terminal :workflow-failed event so the workflow becomes resolvable instead
+      ;; of staying "running" forever with an un-recorded exception thrown out of
+      ;; the loop.
+      (do
+        (log/warnf "Workflow %s exceeded replay budget of %d iterations" workflow-id max-iterations)
+        (finalize-failed store workflow-id []
+                         (ex-info "Replay budget exceeded"
+                                  {:workflow-id workflow-id :iterations iteration})
+                         observer))
+      (do
+        (log/debugf "Internal loop %d of %d" iteration max-iterations)
 
     ;; Check if executor is shutting down - stop processing to avoid endless rejections
     (if (p/shutdown? executor)
@@ -518,28 +536,11 @@
         {:status :suspended
          :workflow-id workflow-id})
 
-      ;; Check cancellation at start of each iteration
-      (if (p/is-cancelled? store workflow-id)
-        (let [error-map {:type "clojure.lang.ExceptionInfo"
-                         :message "Workflow cancelled"
-                         :data {:workflow-id workflow-id}}]
-
-          (-notify p/on-workflow-cancelled observer workflow-id)
-          (p/save-event store workflow-id {:event-type :workflow-failed
-                                           :error      error-map
-                                           :timestamp  (utils/current-time-ms)})
-
-          (log/info "Workflow cancelled, failing")
-          (-notify p/on-workflow-failed observer workflow-id error-map)
-          {:status :failed
-           :workflow-id workflow-id
-           :error error-map})
-        ;; else
-        (let [history (p/load-history store workflow-id)
-              ctx (make-workflow-context workflow-id history store registry observer)
-              exec-result (binding [ctx/*workflow-context* ctx]
-                            (log/debugf "Executing workflow function %s..." workflow-fn)
-                            (execute-workflow-fn workflow-fn args))]
+      (let [history     (p/load-history store workflow-id)
+            ctx         (make-workflow-context workflow-id history store registry observer)
+            exec-result (binding [ctx/*workflow-context* ctx]
+                          (log/debugf "Executing workflow function %s..." workflow-fn)
+                          (execute-workflow-fn workflow-fn args))]
 
           (log/debugf "Workflow function executed, got: %s" (:status exec-result))
           (case (:status exec-result)
@@ -551,6 +552,9 @@
                                 observer)
 
             :cancelled
+            ;; Cancellation surfaced from the body (a stub's check-cancelled!).
+            ;; Any saga rollback already ran inside the user's catch before the
+            ;; cancel exception was rethrown, so just finalize.
             (finalize-cancelled store workflow-id
                                 (:pending-events exec-result)
                                 observer)
@@ -569,13 +573,28 @@
 
               (if (= action :continue)
                 (recur (inc iteration))
-                (action->result action workflow-id)))
+                ;; About to wait: register a generic wake callback so an external
+                ;; actor (e.g. cancel-workflow) can force this workflow to
+                ;; re-enter its loop and observe state such as the cancel flag.
+                (do
+                  (when wake-fn
+                    (p/register-wake-callback store workflow-id wake-fn))
+                  ;; C2: record when this workflow next needs attention so the
+                  ;; ownership scan can skip it until due. Timer waits carry a
+                  ;; clock deadline; signal/async waits are always eligible (nil).
+                  (let [sd (:suspension-data exec-result)
+                        wake-at (case action
+                                  :wait-timer          (:fire-at sd)
+                                  :wait-signal-timeout (:deadline sd)
+                                  nil)]
+                    (p/set-wake-at store workflow-id wake-at))
+                  (action->result action workflow-id))))
 
             :failed
             (finalize-failed store workflow-id
                              (:pending-events exec-result)
                              (:error exec-result)
-                             observer)))))))
+                             observer))))))))
 
 (defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
                                suspension-data pending-events observer]

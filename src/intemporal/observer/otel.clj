@@ -126,7 +126,25 @@
                               :event {:name "workflow.cancelled"
                                       :attributes {:intemporal/cancelled true}}})
       (otspan/end-span! {:context span-ctx})
-      (swap! spans-atom update :workflows dissoc workflow-id))))
+      (swap! spans-atom update :workflows dissoc workflow-id)))
+
+  ;; Compensations run before the workflow span is ended by on-workflow-failed/
+  ;; -cancelled, so we add events to the still-open workflow span.
+  (on-compensation-started [_ workflow-id]
+    (when-let [span-ctx (get-in @spans-atom [:workflows workflow-id])]
+      (otspan/add-span-data! {:context span-ctx
+                              :event {:name "compensation.started"}})))
+
+  (on-compensation-failed [_ workflow-id error]
+    (when-let [span-ctx (get-in @spans-atom [:workflows workflow-id])]
+      (otspan/add-span-data! {:context span-ctx
+                              :event {:name "compensation.failed"
+                                      :attributes {:intemporal/error (pr-str error)}}})))
+
+  (on-compensation-completed [_ workflow-id]
+    (when-let [span-ctx (get-in @spans-atom [:workflows workflow-id])]
+      (otspan/add-span-data! {:context span-ctx
+                              :event {:name "compensation.completed"}}))))
 
 (defn make-otel-observer
   "Create an OpenTelemetry observer that emits traces for workflows and activities"

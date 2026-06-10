@@ -8,7 +8,7 @@
 ;;;;
 ;; main code
 (defn activity-fn [a]
-  [:some a ])
+  [:some a])
 
 (defprotocol MyActivities
   (foo [this a]))
