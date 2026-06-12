@@ -45,87 +45,49 @@
          :error e
          :pending-events @(:pending-events (ctx/current-context))}))))
 
-(defn execute-with-retry
-  "Execute an activity with retry policy"
-  [executor activity-name args timeout-ms retry-policy observer workflow-id seq-num]
-  (if (nil? retry-policy)
-    ;; No retry - execute once
-    (let [start (utils/current-time-ms)]
-      (log/infof "Executing activity via executor %s" executor)
-      (-notify p/on-activity-started observer workflow-id seq-num activity-name)
-      (try
-        (let [result (p/execute-activity executor activity-name args timeout-ms)
-              duration (- (utils/current-time-ms) start)]
-          (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
-          (log/infof "Activity succeeded, result: %s" result)
-          {:status :success
-           :result result
-           :duration duration})
-        (catch RejectedExecutionException e
-                  (let [duration (- (utils/current-time-ms) start)
-                        error     (error/activity-rejected-exception activity-name e)
-                        error-map (error/throwable->map error)]
-                    (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
-                    (log/warnf e "Activity execution rejected")
-                    {:status :failed
-                     :error error-map
-                     :duration duration}))
-        (catch Exception e
-          (let [duration (- (utils/current-time-ms) start)
-                error-map (error/throwable->map e)]
-            (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
-            (log/warnf e "Activity failed")
-            {:status :failed
-             :error error-map
-             :duration duration}))))
-    ;; With retry
-    (loop [attempt 1]
-      (-notify p/on-activity-started observer workflow-id seq-num activity-name)
-      (log/infof "Executing activity (attempt %d)" attempt)
-      (let [start (utils/current-time-ms)
-            exec-result (try
-                          (log/infof "Executing activity via executor %s" executor)
-                          (let [result (p/execute-activity executor activity-name args timeout-ms)
-                                duration (- (utils/current-time-ms) start)]
-                            (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
-                            (log/infof "Activity succeeded (attempt %d), result: %s" attempt result)
-                            {:status   :success
-                             :result   result
-                             :duration duration
-                             :attempts attempt})
-                          (catch RejectedExecutionException e
-                                    (let [duration (- (utils/current-time-ms) start)
-                                          error     (error/activity-rejected-exception activity-name e)
-                                          error-map (error/throwable->map error)]
-                                      (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
-                                      (log/warnf e "Activity execution rejected")
-                                      {:status :failed
-                                       :error error-map
-                                       :duration duration}))
-                          (catch Exception e
-                            (let [duration (- (utils/current-time-ms) start)
-                                  error-map (error/throwable->map e)]
-                              (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
-                              (log/warnf e "Activity failed (attempt %d)" attempt)
-                              {:status :retry-or-fail
-                               :error error-map
-                               :exception e
-                               :duration duration})))]
-        (case (:status exec-result)
-          :success
-          exec-result
+(defn- attempt-once
+  "Execute an activity exactly once.
+   Returns {:status :success ...}, {:status :rejected ...}, or {:status :retryable-error ...}.
+   Rejection is never retried; retryable-error is subject to the caller's policy."
+  [executor activity-name args timeout-ms observer workflow-id seq-num attempt]
+  (let [start (utils/current-time-ms)]
+    (-notify p/on-activity-started observer workflow-id seq-num activity-name)
+    (log/infof "Executing activity via executor %s (attempt %d)" executor attempt)
+    (try
+      (let [result   (p/execute-activity executor activity-name args timeout-ms)
+            duration (- (utils/current-time-ms) start)]
+        (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
+        (log/infof "Activity succeeded (attempt %d), result: %s" attempt result)
+        {:status :success :result result :duration duration :attempts attempt})
+      (catch RejectedExecutionException e
+        (let [duration  (- (utils/current-time-ms) start)
+              error     (error/activity-rejected-exception activity-name e)
+              error-map (error/throwable->map error)]
+          (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
+          (log/warnf e "Activity execution rejected")
+          {:status :rejected :error error-map :duration duration}))
+      (catch Exception e
+        (let [duration  (- (utils/current-time-ms) start)
+              error-map (error/throwable->map e)]
+          (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
+          (log/warnf e "Activity failed (attempt %d)" attempt)
+          {:status :retryable-error :error error-map :exception e :duration duration})))))
 
-          :retry-or-fail
-          (if (a/should-retry? retry-policy (:exception exec-result) attempt)
-            (let [backoff (a/calculate-backoff retry-policy attempt)]
-              (log/debugf "Activity sleeping %s before retrying (attempt %d)" backoff attempt)
-              (Thread/sleep (long backoff))
-              (recur (inc attempt)))
-            ;; else
-            {:status :failed
-             :error (:error exec-result)
-             :duration (:duration exec-result)
-             :attempts attempt}))))))
+(defn execute-with-retry
+  "Execute an activity, retrying according to retry-policy (nil = no retry)."
+  [executor activity-name args timeout-ms retry-policy observer workflow-id seq-num]
+  (loop [attempt 1]
+    (let [result (attempt-once executor activity-name args timeout-ms observer workflow-id seq-num attempt)]
+      (case (:status result)
+        :success        result
+        :rejected       (assoc result :status :failed)
+        :retryable-error
+        (if (and retry-policy (a/should-retry? retry-policy (:exception result) attempt))
+          (let [backoff (a/calculate-backoff retry-policy attempt)]
+            (log/debugf "Activity sleeping %dms before retrying (attempt %d)" backoff attempt)
+            (Thread/sleep backoff)
+            (recur (inc attempt)))
+          (-> result (assoc :status :failed) (dissoc :exception)))))))
 
 (defn process-pending-activity [store executor workflow-id
                                 {:keys [seq activity-name args timeout-ms retry-policy] :as suspension-data}

@@ -14,17 +14,42 @@
             [intemporal.internal.macros :as im])
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
-                            [intemporal.internal.logging :as log])))
+                            [intemporal.internal.logging :as log]
+                            [intemporal.internal.error :as error])))
 
 ;; ============================================================================
 ;; Core Workflow Operations
 ;; ============================================================================
 
+(defn- schedule-activity!
+  "Emit an :activity-scheduled pending event and throw the suspension that hands
+   control back to the engine. Called from stub when an activity needs to run
+   (first execution or re-execution after interruption/rejection)."
+  [ctx activity-name seq-num args effective-timeout effective-retry]
+  (let [scheduled-event {:event-type    :activity-scheduled
+                         :seq           seq-num
+                         :activity-name activity-name
+                         :args          (vec args)
+                         :timeout-ms    effective-timeout
+                         :retry-policy  (when effective-retry
+                                          {:max-attempts (:max-attempts effective-retry)
+                                           :backoff-ms   (:backoff-ms effective-retry)})
+                         :timestamp     (utils/current-time-ms)}]
+    (ctx/add-pending-event! scheduled-event)
+    (ctx/notify-observer p/on-activity-scheduled
+                         (:workflow-id ctx) seq-num activity-name (vec args))
+    (log/infof "Scheduling activity suspension")
+    (throw (error/make-suspension :activity {:seq           seq-num
+                                             :activity-name activity-name
+                                             :args          (vec args)
+                                             :timeout-ms    effective-timeout
+                                             :retry-policy  effective-retry}))))
+
 (defn stub
   "Create a stubbed version of an activity function for use in workflows.
    Options:
-   - :timeout-ms - timeout for this activity (overrides default)
-   - :retry-policy - retry policy for this activity"
+   - :timeout-ms    timeout for this activity (overrides registered default)
+   - :retry-policy  retry policy for this activity (overrides registered default)"
   [activity-fn & {:keys [timeout-ms retry-policy]}]
   (let [ctx (ctx/current-context)
         registry (:registry ctx)
@@ -35,8 +60,7 @@
     (fn [& args]
       (let [seq-num (ctx/next-seq!)]            ;; next-seq! already checks cancellation
         (log/with-mdc {:activity activity-name :seqnum seq-num}
-          (let [ctx             (ctx/current-context)
-                store           (ctx/current-store)
+          (let [store           (ctx/current-store)
                 workflow-id     (ctx/current-workflow-id)
                 existing        (p/find-event store workflow-id :activity-completed seq-num)
                 existing-failed (p/find-event store workflow-id :activity-failed seq-num)
@@ -50,51 +74,42 @@
                 (log/infof "Found existing result for activity: %s" (pr-str (:result existing)))
                 (:result existing))
 
-              ;; Replay: throw cached error
-              ;; TODO decide how to handle interruptions, interrupt policy?
+              ;; Replay: rethrow cached failure (not an interruption or rejection,
+              ;; which need to be re-executed rather than replayed as an error)
               (and existing-failed (not interrupted?) (not rejected?))
               (do
                 (log/infof "Found existing error for activity")
                 (throw err))
 
-              ;; Execute: need to run the activity
-              ;; either due to rejection or interruption
+              ;; Execute: activity needs to run (first time, or re-run after
+              ;; interruption/rejection — both cases schedule the same way)
               :else
-              (let [scheduled-event {:event-type    :activity-scheduled
-                                     :seq           seq-num
-                                     :activity-name activity-name
-                                     :args          (vec args)
-                                     :timeout-ms    effective-timeout
-                                     :retry-policy  (when effective-retry
-                                                      {:max-attempts (:max-attempts effective-retry)
-                                                       :backoff-ms   (:backoff-ms effective-retry)})
-                                     :timestamp     (utils/current-time-ms)}]
-                ;; interruptions are scheduled just the same
-                (when interrupted?
-                  (log/infof "Activity was interrupted: rescheduling"))
-                ;; rejections are scheduled just the same
-                (when rejected?
-                  (log/infof "Activity execution was rejected: rescheduling"))
-
-                (ctx/add-pending-event! scheduled-event)
-                (ctx/notify-observer p/on-activity-scheduled
-                                     (:workflow-id ctx) seq-num activity-name (vec args))
-                (log/infof "Scheduling activity suspension")
-                (throw (error/make-suspension :activity {:seq           seq-num
-                                                         :activity-name activity-name
-                                                         :args          (vec args)
-                                                         :timeout-ms    effective-timeout
-                                                         :retry-policy  effective-retry}))))))))))
+              (do
+                (when interrupted? (log/infof "Activity was interrupted: rescheduling"))
+                (when rejected?    (log/infof "Activity execution was rejected: rescheduling"))
+                (schedule-activity! (ctx/current-context)
+                                    activity-name seq-num args
+                                    effective-timeout effective-retry)))))))))
 
 ;; ============================================================================
 ;; Async Support
 ;; ============================================================================
 
+;; Handle returned by `async`. Holds the sequence number of the async operation so
+;; `join` / `join-all` / `join-any` can locate its completion event in the history.
+;; Treat as an opaque token — only the intemporal engine reads :seq-num directly.
 (defrecord AsyncHandle [seq-num])
 
 (defn async
-  "Schedule an async operation (thunk) for later execution.
-   The thunk should contain a single activity call."
+  "Schedule an activity call for parallel (out-of-band) execution.
+   `thunk` must contain exactly one `stub` call (the activity to run asynchronously).
+
+   Returns an `AsyncHandle` immediately. The activity is batched with other pending
+   async operations and executed in parallel by the engine before the next workflow
+   loop iteration. Use `join`, `join-all`, or `join-any` to wait for the result.
+
+   Replay-safe: on resume the thunk is NOT re-invoked; the engine replays the cached
+   completion or failure event and advances the sequence counter appropriately."
   [thunk]
   (ctx/check-cancelled!)
   (let [ctx (ctx/current-context)
@@ -116,7 +131,6 @@
         (->AsyncHandle seq-num))
 
       ;; Already failed - advance seq past consumed numbers during replay
-      ;; TODO decide how to handle interruptions, interrupt policy?
       existing-failed #_(not interrupted?)
       (do
         (ctx/update-seq! existing-failed)
@@ -326,7 +340,6 @@
       existing
       (:result existing)
 
-      ;; TODO decide how to handle interruptions, interrupt policy?
       existing-failed #_(not interrupted?)
       (throw (error/map->exception (:error existing-failed)))
 
@@ -416,19 +429,18 @@
 (defn resume-workflow
   "Resume a waiting workflow (e.g., after signal delivery or timer).
 
-   Arguments:
-   - engine: must have:
-     - store: IStore implementation
-     - executor: IActivityExecutor
-     - scheduler: IScheduler
-     - registry: Activity registry atom
-   - workflow-id: ID of workflow to resume
-   - workflow-fn: The workflow function
-   - args: Original arguments
+   1-arity: (resume-workflow engine workflow-id)
+     Resolves the workflow function and original args from the :workflow-started event
+     stored in history. Requires the workflow fn to have been registered in this process
+     via start-workflow (or manually via the workflow registry). Throws if not found.
 
-   Options:
-   - :observer - IWorkflowObserver
-   - :max-iterations - Maximum replay iterations"
+   4-arity: (resume-workflow engine workflow-id workflow-fn args & opts)
+     Resumes with explicitly supplied function and args. The workflow replays its history
+     to reconstruct state, skipping already-completed activities.
+
+   Options (4-arity):
+   - :observer        IWorkflowObserver for monitoring/tracing
+   - :max-iterations  Maximum replay loop iterations before aborting (default: 1000)"
   ([{:keys [store] :as engine} workflow-id]
    ;; Resolve fn + args from the :workflow-started event via the workflow
    ;; registry (improvements.md §B3). Requires the workflow fn to have been
@@ -667,6 +679,10 @@
 ;; Convenience Functions
 ;; ============================================================================
 
+(def ^:const default-executor-threads    4)
+(def ^:const default-scheduler-threads   2)
+(def ^:const default-activity-timeout-ms 30000)
+
 (defn make-workflow-engine
   "Create a complete workflow engine with all components.
    Returns a map with :store, :executor, :scheduler, :registry, and :observer.
@@ -681,9 +697,9 @@
    - :observer - Additional observer instance, composed on top of built-in observers"
   [& {:keys [store threads scheduler-threads default-timeout-ms enable-logging enable-telemetry observer]
       :or {store (store/->InMemoryStore (atom {}))
-           threads 4
-           scheduler-threads 2
-           default-timeout-ms 30000
+           threads             default-executor-threads
+           scheduler-threads   default-scheduler-threads
+           default-timeout-ms  default-activity-timeout-ms
            enable-logging false
            enable-telemetry false}}]
   (let [registry (a/make-registry)

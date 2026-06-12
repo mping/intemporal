@@ -91,7 +91,8 @@
       ;; Phase 2: Resume workflow after simulated crash with new engine
       ;; ======================================================================
       (testing "Phase 2: Resume after crash - activities not re-executed"
-        (let [pre-resume-count @execution-counter
+        (let [pre-resume-count    @execution-counter
+              history-before-resume (p/load-history persistent-store workflow-id)
               ;; Create NEW engine with SAME store (simulates process restart)
               engine-2 (intemporal/make-workflow-engine
                          :store persistent-store
@@ -124,4 +125,11 @@
 
             ;; Verify: History has all 5 completed activities
             (is (= num-activities (verify-history persistent-store workflow-id))
-                (str "Final history should contain " num-activities " completed activities"))))))))
+                (str "Final history should contain " num-activities " completed activities"))
+
+            ;; Verify: The pre-crash history is a strict prefix of the post-resume history
+            ;; (no events were added or modified before the crash point)
+            (let [history-after-resume (p/load-history persistent-store workflow-id)
+                  prefix (take (count history-before-resume) history-after-resume)]
+              (is (= history-before-resume (vec prefix))
+                  "Pre-crash history events must be preserved unchanged after resume"))))))))

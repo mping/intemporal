@@ -88,7 +88,6 @@
 ;; Retry Policy
 ;; ============================================================================
 
-;; TODO no need for a record?
 (defrecord RetryPolicy [max-attempts
                         backoff-ms
                         max-backoff-ms
@@ -96,16 +95,23 @@
                         retryable-fn])
 
 (defn make-retry-policy
-  "Create a retry policy"
-  [& {:keys [max-attempts backoff-ms max-backoff-ms backoff-multiplier retryable-fn]
+  "Create a retry policy.
+   Options:
+   - :max-attempts       maximum number of attempts (default 3)
+   - :backoff-ms         initial backoff in ms (default 1000); alias :initial-backoff-ms accepted
+   - :initial-backoff-ms alias for :backoff-ms
+   - :max-backoff-ms     backoff ceiling in ms (default 60000)
+   - :backoff-multiplier exponential multiplier (default 2.0)
+   - :retryable-fn       1-arg predicate on the exception, returning true to retry (default: always retry)"
+  [& {:keys [max-attempts backoff-ms initial-backoff-ms max-backoff-ms backoff-multiplier retryable-fn]
       :or {max-attempts 3
-           backoff-ms 1000
            max-backoff-ms 60000
            backoff-multiplier 2.0
            retryable-fn (constantly true)}}]
-  (->RetryPolicy max-attempts backoff-ms max-backoff-ms backoff-multiplier retryable-fn))
+  (let [effective-backoff (or initial-backoff-ms backoff-ms 1000)]
+    (->RetryPolicy max-attempts effective-backoff max-backoff-ms backoff-multiplier retryable-fn)))
 
-(defn calculate-backoff [policy attempt]
+(defn calculate-backoff ^long [policy attempt]
   (let [base (:backoff-ms policy)
         multiplier (:backoff-multiplier policy)
         max-backoff (:max-backoff-ms policy)

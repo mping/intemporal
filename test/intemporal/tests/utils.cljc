@@ -56,3 +56,22 @@
 (def with-trace-logging
   #?(:cljs {:before setup-telemere}
      :clj  (fn with-trace-logging [f] (setup-telemere) (f))))
+
+#?(:clj
+   (defn wait-until
+     "Poll `pred` every `poll-ms` milliseconds until it returns truthy or
+      `timeout-ms` elapses. Returns the last truthy value of pred, or throws
+      AssertionError on timeout. Replaces bare Thread/sleep in tests that need to
+      wait for an asynchronous state change."
+     ([pred] (wait-until pred wait-default-timeout 50))
+     ([pred timeout-ms] (wait-until pred timeout-ms 50))
+     ([pred timeout-ms poll-ms]
+      (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+        (loop []
+          (let [v (pred)]
+            (cond
+              v v
+              (>= (System/currentTimeMillis) deadline)
+              (throw (AssertionError. (str "wait-until timed out after " timeout-ms "ms")))
+              :else
+              (do (Thread/sleep (long poll-ms)) (recur)))))))))

@@ -117,7 +117,7 @@
                                                                                    (if (activity/should-retry? retry-policy e attempt)
                                                                                      (do
                                                                                        ;; Perform side-effects (logging, sleeping) here
-                                                                                       (Thread/sleep (long (activity/calculate-backoff retry-policy attempt)))
+                                                                                       (Thread/sleep (activity/calculate-backoff retry-policy attempt))
                                                                                        ;; Return a signal value instead of recurring directly
                                                                                        {:status :retry})
                                                                                      ;; If we shouldn't retry, rethrow

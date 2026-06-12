@@ -58,27 +58,55 @@
     "Cancel a scheduled timer")
   (shutdown-scheduler [scheduler grace-period-secs]
     "Shutdown the scheduler")
-  (shutdown-scheduler? [executor]
-    "Indicates if the executor has shut down"))
+  (shutdown-scheduler? [scheduler]
+    "Indicates if the scheduler has shut down"))
 
 (defprotocol IWorkflowObserver
-  "Protocol for observing workflow execution"
-  (on-workflow-started [observer workflow-id args])
-  (on-workflow-suspended [observer workflow-id suspension-type])
-  (on-workflow-resumed [observer workflow-id])
-  (on-activity-scheduled [observer workflow-id seq-num activity-name args])
-  (on-activity-started [observer workflow-id seq-num activity-name])
-  (on-activity-completed [observer workflow-id seq-num activity-name result duration-ms])
-  (on-activity-failed [observer workflow-id seq-num activity-name error duration-ms])
-  (on-async-started [observer workflow-id seq-num])
-  (on-async-completed [observer workflow-id seq-num result])
-  (on-async-failed [observer workflow-id seq-num error])
-  (on-timer-scheduled [observer workflow-id seq-num fire-at])
-  (on-timer-fired [observer workflow-id seq-num])
-  (on-signal-received [observer workflow-id signal-name payload])
-  (on-workflow-completed [observer workflow-id result])
-  (on-workflow-failed [observer workflow-id error])
-  (on-workflow-cancelled [observer workflow-id])
-  (on-compensation-started [observer workflow-id])
-  (on-compensation-failed [observer workflow-id error])
-  (on-compensation-completed [observer workflow-id]))
+  "Protocol for observing workflow execution events.
+
+   All methods are called synchronously on the workflow execution thread.
+   Implementations must not throw — any exception escaping an observer method
+   will propagate through the engine and fail the workflow. Return values are ignored.
+
+   `error` parameters are serialized maps (see `throwable->map`), not live exceptions.
+   `result` parameters are the raw Clojure values returned by the activity or workflow."
+  (on-workflow-started [observer workflow-id args]
+    "Called once when a workflow is first started (not on resume/replay).")
+  (on-workflow-suspended [observer workflow-id suspension-type]
+    "Called when the workflow suspends. suspension-type is one of:
+     :activity, :timer, :wait-signal, :wait-signal-timeout, :join-pending,
+     :join-any-pending, :child-workflow.")
+  (on-workflow-resumed [observer workflow-id]
+    "Called when a suspended workflow re-enters its execution loop.")
+  (on-activity-scheduled [observer workflow-id seq-num activity-name args]
+    "Called when an activity stub schedules an activity (before it runs).")
+  (on-activity-started [observer workflow-id seq-num activity-name]
+    "Called just before the activity function is invoked by the executor.")
+  (on-activity-completed [observer workflow-id seq-num activity-name result duration-ms]
+    "Called after a successful activity execution.")
+  (on-activity-failed [observer workflow-id seq-num activity-name error duration-ms]
+    "Called after an activity fails (including mid-retry failures). error is a map.")
+  (on-async-started [observer workflow-id seq-num]
+    "Called when an async handle is created via `async`.")
+  (on-async-completed [observer workflow-id seq-num result]
+    "Called when a parallel async operation completes successfully.")
+  (on-async-failed [observer workflow-id seq-num error]
+    "Called when a parallel async operation fails. error is a map.")
+  (on-timer-scheduled [observer workflow-id seq-num fire-at]
+    "Called when a sleep/timer is scheduled. fire-at is epoch ms.")
+  (on-timer-fired [observer workflow-id seq-num]
+    "Called when a scheduled timer fires.")
+  (on-signal-received [observer workflow-id signal-name payload]
+    "Called when a workflow receives a signal it was waiting for.")
+  (on-workflow-completed [observer workflow-id result]
+    "Called when a workflow completes successfully. result is the return value.")
+  (on-workflow-failed [observer workflow-id error]
+    "Called when a workflow fails with an unhandled exception. error is a map.")
+  (on-workflow-cancelled [observer workflow-id]
+    "Called when a workflow is cancelled.")
+  (on-compensation-started [observer workflow-id]
+    "Called when saga compensation begins (first compensating step).")
+  (on-compensation-failed [observer workflow-id error]
+    "Called when an individual compensation step fails. Compensation continues.")
+  (on-compensation-completed [observer workflow-id]
+    "Called when all compensation steps have run."))

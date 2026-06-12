@@ -106,6 +106,7 @@
       ;; ======================================================================
       (testing "Phase 2: Resume after crash with new engine"
         (let [pre-resume-count @execution-counter
+              history-before-resume (p/load-history persistent-store workflow-id)
               ;; Create NEW engine with SAME store (simulates process restart)
               engine-2 (intemporal/make-workflow-engine
                          :store persistent-store  ;; Same store!
@@ -142,4 +143,10 @@
 
           ;; Verify: History has all 5 completed activities
           (is (= num-activities (verify-history persistent-store workflow-id))
-              (str "Final history should contain " num-activities " completed activities")))))))
+              (str "Final history should contain " num-activities " completed activities"))
+
+          ;; Verify: The pre-crash history is a strict prefix of post-resume history
+          (let [history-after-resume (p/load-history persistent-store workflow-id)
+                prefix (take (count history-before-resume) history-after-resume)]
+            (is (= history-before-resume (vec prefix))
+                "Pre-crash history events must be preserved unchanged after resume")))))))

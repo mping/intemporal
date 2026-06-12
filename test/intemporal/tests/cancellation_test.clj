@@ -1,6 +1,7 @@
 (ns intemporal.tests.cancellation-test
   (:require [intemporal.core :as intemporal]
             [intemporal.protocol :as p]
+            [intemporal.tests.utils :refer [wait-until]]
             [clojure.test :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]
             [matcher-combinators.matchers :as m]))
@@ -34,8 +35,8 @@
                             (intemporal/start-workflow engine
                                                        long-flow [1]
                                                        :workflow-id wf-id))]
-        ;; Wait a bit then cancel
-        (Thread/sleep 200)
+        ;; Wait until the workflow is actually running before cancelling
+        (wait-until #(= :running (p/get-workflow-status (:store engine) wf-id)))
         (intemporal/cancel-workflow (:store engine) wf-id)
 
         ;; Workflow should fail with cancellation error
@@ -53,8 +54,8 @@
                             (intemporal/start-workflow engine
                                                        cancellable-flow [1]
                                                        :workflow-id wf-id))]
-        ;; Cancel while sleeping
-        (Thread/sleep 150)
+        ;; Cancel while sleeping — wait until the workflow has started
+        (wait-until #(= :running (p/get-workflow-status (:store engine) wf-id)))
         (intemporal/cancel-workflow (:store engine) wf-id)
 
         (let [result @result-future]
@@ -87,7 +88,7 @@
                             (intemporal/start-workflow engine
                                                        long-flow [1]
                                                        :workflow-id wf-id))]
-        (Thread/sleep 100)
+        (wait-until #(= :running (p/get-workflow-status (:store engine) wf-id)))
         (intemporal/cancel-workflow (:store engine) wf-id)
 
         ;; Check result indicates failure with cancellation
@@ -113,7 +114,7 @@
             result-future (future
                             (intemporal/start-workflow engine long-flow [1]
                                                        :workflow-id wf-id))]
-        (Thread/sleep 100)
+        (wait-until #(= :running (p/get-workflow-status (:store engine) wf-id)))
         (intemporal/cancel-workflow (:store engine) wf-id)
         (intemporal/cancel-workflow (:store engine) wf-id)
         (is (match? {:status :cancelled} @result-future))))))

@@ -2,7 +2,6 @@
   #?(:cljs (:require [clojure.string :as str]))
   #?(:clj (:import (clojure.lang IExceptionInfo))))
 
-
 ;; ============================================================================
 ;; Exceptions and Error Handling
 ;; ============================================================================

@@ -1,5 +1,7 @@
 (ns intemporal.tests.signal-test
   (:require [intemporal.core :as intemporal]
+            [intemporal.protocol :as p]
+            [intemporal.tests.utils :refer [wait-until]]
             [clojure.test :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]))
 
@@ -31,9 +33,8 @@
                             (intemporal/start-workflow engine
                                                        signal-flow [123]
                                                        :workflow-id wf-id))]
-        ;; Give workflow time to start
-        (Thread/sleep 100)
-        ;; Send signal
+        ;; Wait until the workflow is suspended on the signal before sending it
+        (wait-until #(= :running (p/get-workflow-status (:store engine) wf-id)))
         (intemporal/send-signal (:store engine) wf-id "approval" {:user "alice"})
         ;; Wait for completion
         (let [result @result-future]
@@ -51,7 +52,7 @@
                             (intemporal/start-workflow engine
                                                        signal-timeout-flow [456 5000]
                                                        :workflow-id wf-id))]
-        (Thread/sleep 100)
+        (wait-until #(= :running (p/get-workflow-status (:store engine) wf-id)))
         (intemporal/send-signal (:store engine) wf-id "approval" {:user "bob"})
         (let [result @result-future]
           (is (match? {:status :completed
@@ -79,7 +80,8 @@
                                                     :workflow-id wf-id-1))
             fut2 (future (intemporal/start-workflow engine signal-flow [200]
                                                     :workflow-id wf-id-2))]
-        (Thread/sleep 100)
+        (wait-until #(and (= :running (p/get-workflow-status (:store engine) wf-id-1))
+                          (= :running (p/get-workflow-status (:store engine) wf-id-2))))
         (intemporal/send-signal (:store engine) wf-id-1 "approval" {:user "alice"})
         (intemporal/send-signal (:store engine) wf-id-2 "approval" {:user "bob"})
         (is (match? {:result {:approved {:user "alice"}}} @fut1))

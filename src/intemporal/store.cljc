@@ -1,6 +1,7 @@
 (ns intemporal.store
   (:require [intemporal.protocol :as p]
-            [intemporal.utils :as utils]))
+            [intemporal.utils :as utils]
+            [intemporal.internal.logging :as log]))
 
 (def ^:private terminal-status? #{:completed :failed :cancelled})
 
@@ -41,8 +42,8 @@
                    s)))))
     events)
 
-  (find-event [this worfklow-id event-type seq-num]
-    (let [history (p/load-history this worfklow-id)]
+  (find-event [this workflow-id event-type seq-num]
+    (let [history (p/load-history this workflow-id)]
       (->> history
            (filter #(and (= (:event-type %) event-type)
                          (= (:seq %) seq-num)))
@@ -54,11 +55,20 @@
   (add-signal [_ workflow-id signal-name signal-data]
     (swap! state update-in [:workflows workflow-id :signals signal-name]
            (fnil conj []) signal-data)
-    ;; In-process wake for an embedded (no-worker) engine in THIS process.
-    ;; Worker mode picks the workflow up via the ownership scan (list-pending).
-    (when-let [callback (get-in @state [:workflows workflow-id :signal-callbacks signal-name])]
-      #?(:clj (future (callback))
-         :cljs (js/setTimeout callback 0)))
+    ;; Atomically remove the callback before firing it so rapid successive signals
+    ;; for the same name don't re-fire the same callback multiple times, which
+    ;; would consume later signals at the wrong seq-num.
+    (let [[old-state] (swap-vals! state update-in [:workflows workflow-id :signal-callbacks] dissoc signal-name)]
+      (when-let [callback (get-in old-state [:workflows workflow-id :signal-callbacks signal-name])]
+        #?(:clj (future
+                  (try (callback)
+                       (catch Throwable t
+                         (log/warnf t "Signal callback threw for workflow %s signal %s" workflow-id signal-name))))
+           :cljs (js/setTimeout (fn []
+                                  (try (callback)
+                                       (catch js/Error e
+                                         (log/warnf e "Signal callback threw for workflow %s signal %s" workflow-id signal-name))))
+                                0))))
     signal-data)
 
   (consume-signal [_ workflow-id signal-name]
@@ -85,8 +95,15 @@
 
   (wake-workflow [_ workflow-id]
     (when-let [callback (get-in @state [:workflows workflow-id :wake-callback])]
-      #?(:clj (future (callback))
-         :cljs (js/setTimeout callback 0))))
+      #?(:clj (future
+                (try (callback)
+                     (catch Throwable t
+                       (log/warnf t "Wake callback threw for workflow %s" workflow-id))))
+         :cljs (js/setTimeout (fn []
+                                (try (callback)
+                                     (catch js/Error e
+                                       (log/warnf e "Wake callback threw for workflow %s" workflow-id))))
+                              0))))
 
   (is-cancelled? [_ workflow-id]
     (get-in @state [:workflows workflow-id :cancelled] false))
@@ -131,6 +148,9 @@
                           ;; C2: skip workflows not yet due to wake
                           (let [wa (:wake-at wf)] (or (nil? wa) (<= wa now)))
                           (let [o (:owner wf)] (or (nil? o) (= o owner-id))))))
+           ;; Sort by wake-at ascending (nil = always eligible = priority 0)
+           ;; so the earliest-due workflows are scheduled first; prevents starvation.
+           (sort-by (fn [[_ wf]] (or (:wake-at wf) 0)))
            (map first)
            (take limit)
            vec)))
