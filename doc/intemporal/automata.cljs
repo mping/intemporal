@@ -180,7 +180,6 @@
     (reset! app-state {:engine engine :state init-state})
     (setup-controls-listener!)
     (render-all!)
-    (render-tables! engine wf-id)
     ;; start the durable workflow; it suspends immediately waiting for the
     ;; first `fsm-event` signal and resolves once a terminal state is reached.
     (-> (intemporal/start-workflow engine run-fsm-workflow [resource-rules init-state]
@@ -191,7 +190,9 @@
                  (render-tables! engine wf-id)))
         (p/catch (fn [err]
                    (js/console.error "error" err)
-                   (set-results! (prn-str err)))))))
+                   (set-results! (prn-str err)))))
+    ;; show the initial invoke + first suspension once the workflow has started
+    (js/setTimeout #(render-tables! engine wf-id) 0)))
 
 
 (comment
