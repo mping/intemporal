@@ -10,12 +10,16 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/clojure.min.js"></script>
     <script>hljs.highlightAll();</script>
 
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+
     <title>Intemporal demo</title>
     <style>
         table {font-size: small}
         tr.\:intemporal\.workflow\/failure,
         tr.\:intemporal\.activity\/failure {background: #ffbaad}
         tr.\:intemporal\.workflow\/invoke {font-size: large !important}
+        #diagram svg {max-width: 100%; height: auto}
+        #controls button {margin: 0}
     </style>
 </head>
 <body>
@@ -61,59 +65,40 @@
 
 </code>
 </pre>
-            <h3>Implementation</h3>
-            <pre><code>
-;; event producer
-(defprotocol EventHandler
-  (process-event [this event] "Processes the event, returns the next event"))
-
-(defn make-event-handler []
-  (reify EventHandler
-    (process-event [this event]
-      (let [nxt (condp = event
-                  :event/create :event/created
-                  :event/created :event/start
-                  :event/start :event/started
-                  :event/started :event/stop
-                  :event/stop :event/stopped
-                  :event/stopped :event/kill
-                  :event/kill :event/killed
-                  nil)]
-        nxt))))
-</code>
-</pre>
             <h3>Workflow definition</h3>
+            <p>The workflow waits for an <code>fsm-event</code> signal at each step.
+               Every button below sends one signal; the workflow durably records it,
+               applies the transition via <code>fsm/transit</code> and suspends again
+               until the next event. It completes once a terminal state is reached.</p>
             <pre><code>
-
-(defn run-fsm-workflow [rules init-state init-event]
-  (let [stub      (intemporal/stub process-event)
-        initstate {::fsm/rules rules ::fsm/state init-state}]
-
-    (p/loop [state initstate
-             evt   init-event]
-      (if evt
-        (p/recur (fsm/transit state evt)
-                 (stub evt))
-        (::fsm/state state)))))
+(defn run-fsm-workflow [rules init-state]
+  (bloop [state {::fsm/rules rules ::fsm/state init-state}]
+    (let [current     (::fsm/state state)
+          transitions (get rules current)]
+      (if (empty? transitions)
+        ;; terminal state -> workflow completes
+        current
+        ;; wait for the next event emitted from the UI, then transit
+        (let [evt (intemporal/wait-for-signal "fsm-event")]
+          (p/recur (fsm/transit state evt)))))))
 </code>
 </pre>
 
-            <h3>Execution</h3>
+            <h3>Emitting events</h3>
             <pre><code>
-(try
-  (run-fsm-workflow resource-rules :state/init :event/create)
-  (catch  js/Object err
-    (js/console.error "Workflow failed!" err)))
-
+;; each UI button sends one signal to the running workflow
+(intemporal/send-signal (:store engine) "my-wflow" "fsm-event" :event/create)
 </code>
 </pre>
             <h3>Live example</h3>
+            <h4>State machine</h4>
+            <div id="diagram"></div>
+
+            <h4>Emit next event</h4>
+            <div id="controls"></div>
+
             <h4>Results</h4>
             <pre id="results">;;Results go here</pre>
-
-            <h3>In-browser results</h3>
-            <h4>Tasks</h4>
-            <div id="tasks"></div>
 
             <h4>Events</h4>
             <div id="events"></div>
