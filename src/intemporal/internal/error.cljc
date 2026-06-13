@@ -5,9 +5,19 @@
 ;; ============================================================================
 ;; Exceptions and Error Handling
 ;; ============================================================================
+
+;; In ClojureScript every js/Error is caught by (catch js/Error e). To mirror
+;; the JVM split — where suspensions subclass Error and are excluded from
+;; (catch Exception e) — we define WorkflowSuspension as a plain deftype that
+;; does NOT extend js/Error. This means (catch js/Error e) in user saga code
+;; never intercepts a suspension, exactly like (catch Exception e) on the JVM.
+#?(:cljs
+   (deftype WorkflowSuspension [message data cause]))
+
 (defn- internal-error
-  "Internal exception constructor, subclasses error to prevent userland code to caught this
-  exception in `(try ... (catch Exception e))` blocks"
+  "Internal exception constructor. On JVM subclasses Error so (catch Exception)
+   excludes it. On CLJS uses WorkflowSuspension (not a js/Error subclass) so
+   (catch js/Error) excludes it."
   ([message data]
    (internal-error message data nil))
   ([message data cause]
@@ -19,10 +29,7 @@
                (when data (str " " (pr-str data)))
                (when cause (str "\nCaused by: " cause)))))
       :cljs
-      (let [err (js/Error. message)]
-        (set! (.-data err) data)
-        (set! (.-cause err) cause)
-        err))))
+      (WorkflowSuspension. message data cause))))
 
 (defn make-suspension [type data]
   (internal-error "Workflow suspended" {:type type :data data ::suspension true}))
@@ -33,8 +40,7 @@
           (instance? IExceptionInfo e)
           (::suspension (ex-data e)))
      :cljs
-     (and (instance? js/Error e)
-          (.-data e)
+     (and (instance? WorkflowSuspension e)
           (::suspension (.-data e)))))
 
 (defn interruption? [e]

@@ -63,7 +63,7 @@
            :result result
            :pending-asyncs @pending-asyncs
            :pending-events @pending-events}))
-      (catch js/Error e
+      (catch :default e
         (cond
           (error/suspension? e)
           {:status :suspended

@@ -13,7 +13,9 @@
                           :automata {:init-fn intemporal.automata/init
                                      :depends-on #{:shared}}
                           :provision-saga {:init-fn intemporal.provision-saga/init
-                                           :depends-on #{:shared}}}}
+                                           :depends-on #{:shared}}
+                          :provision-automata {:init-fn intemporal.provision-automata/init
+                                               :depends-on #{:shared}}}}
 
           :node {:target    :node-test
                  :output-to "target/tests.js"

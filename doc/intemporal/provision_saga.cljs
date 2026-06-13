@@ -68,8 +68,7 @@
         (detach (:volume-id vol))
         (depr (:instance-id inst))
         {:status :deprovisioned :instance-id (:instance-id inst)})
-      (catch :default e
-        (when (intemporal/suspension? e) (throw e))
+      (catch js/Error e
         (intemporal/compensate s)
         (throw e)))))
 

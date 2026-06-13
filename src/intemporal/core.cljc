@@ -168,7 +168,7 @@
             (ctx/notify-observer p/on-async-completed (:workflow-id ctx) start-seq result)
             (log/tracef "Async completed successfully with result %s" result)
             (->AsyncHandle start-seq))
-          (catch #?(:clj Throwable :cljs js/Error) e
+          (catch #?(:clj Throwable :cljs :default) e
             (if (error/suspension? e)
               ;; The thunk suspended on an activity - capture it for parallel execution
               (let [suspension-info (error/suspension-data e)
@@ -617,24 +617,17 @@
    Both real failures and workflow cancellation flow through the catch (so this
    rolls back in either case); the engine's normal control-flow suspensions do
    not. On the JVM, catch `Exception` - suspensions subclass Error and are
-   excluded automatically:
+   excluded automatically. On ClojureScript, catch `js/Error` - suspensions use
+   a non-js/Error type and are excluded in the same way:
 
    (let [s (saga)]
      (try
        (let [h (book-hotel order)
              _ (add-compensation s #(cancel-hotel h))]
          (charge-card order))
-       (catch Exception e
+       (catch #?(:clj Exception :cljs js/Error) e
          (compensate s)             ;; rolls back completed steps, LIFO
-         (throw e))))
-
-   In ClojureScript there is no Error/Exception split, so catch :default and
-   rethrow suspensions explicitly:
-
-       (catch :default e
-         (when (suspension? e) (throw e))
-         (compensate s)
-         (throw e))"
+         (throw e))))"
   []
   {::compensations (atom [])})
 
@@ -665,7 +658,7 @@
       (doseq [c (reverse comps)]
         (try
           (c)
-          (catch #?(:clj Throwable :cljs js/Error) t
+          (catch #?(:clj Throwable :cljs :default) t
             (when (error/suspension? t) (throw t))
             (ctx/notify-observer p/on-compensation-failed
                                  (ctx/current-workflow-id) (error/throwable->map t))

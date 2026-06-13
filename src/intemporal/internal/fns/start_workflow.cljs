@@ -50,7 +50,7 @@
                     (bthen (fn [result]
                                  (when-not (waiting-status? result)
                                    (prom/resolve! d result))))
-                    (prom/catch js/Error
+                    (prom/catch
                       (fn [e]
                         (prom/reject! d e)))))]
         (run-step)

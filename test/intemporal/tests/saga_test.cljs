@@ -46,8 +46,7 @@
             _ (intemporal/add-compensation s #(cflight f))]
         (charge order)
         :booked)
-      (catch :default e
-        (when (intemporal/suspension? e) (throw e))
+      (catch js/Error e
         (intemporal/compensate s)
         (throw e)))))
 
@@ -65,8 +64,7 @@
             _ (intemporal/add-compensation s #(cflight f))]
         (charge order)
         :booked)
-      (catch :default e
-        (when (intemporal/suspension? e) (throw e))
+      (catch js/Error e
         (intemporal/compensate s)
         (throw e)))))
 
@@ -82,8 +80,7 @@
             f (flight order)
             _ (intemporal/add-compensation s #(cflight f))]
         :booked)
-      (catch :default e
-        (when (intemporal/suspension? e) (throw e))
+      (catch js/Error e
         (intemporal/compensate s)
         (throw e)))))
 
