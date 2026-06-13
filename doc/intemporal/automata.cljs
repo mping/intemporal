@@ -29,34 +29,44 @@
 
 (def init-state :state/init)
 (def wf-id "my-wflow")
-(def signal-name "fsm-event")
 
 ;;;;
 ;; workflow definition
 ;;
-;; Instead of auto-advancing through the whole machine, the workflow now waits
-;; for an `fsm-event` signal at each step. Every button click in the UI sends
-;; one signal, the workflow resumes, applies the transition via `fsm/transit`
-;; and suspends again until the next event. The workflow completes once it
-;; reaches a terminal state (one with no outgoing transitions).
+;; apply-transition is an activity (stub) that returns the next event keyword.
+;; For states with exactly one outgoing transition the event auto-fires via a
+;; resolved Promise — no user interaction needed. For states with multiple
+;; transitions it returns a pending Promise and stores the resolve function so
+;; the UI can fulfill it when the user clicks a button.
+;;
+;; The FSM state transition (fsm/transit) happens inside the workflow body, so
+;; it is fully deterministic and does not need to be wrapped in an activity.
+;; On replay the stub returns the cached event keyword, fsm/transit is called
+;; again with the same arguments, and the workflow advances without re-executing
+;; the activity function itself.
+
+(defonce app-state (atom {:engine nil :state init-state}))
+(defonce pending-resolve (atom nil))
+
+(defn apply-transition [rules current-state]
+  (let [transitions (get rules current-state)]
+    (if (= 1 (count transitions))
+      (p/resolved (::fsm/event (first transitions)))
+      (do
+        (swap! app-state assoc :state current-state)
+        (render-all!)
+        (js/Promise. (fn [resolve _]
+                       (reset! pending-resolve resolve)))))))
 
 (defn run-fsm-workflow [rules init-state]
-  (bloop [state {::fsm/rules rules ::fsm/state init-state}]
-    (let [current     (::fsm/state state)
-          transitions (get rules current)]
-      (if (empty? transitions)
-        ;; terminal state -> workflow completes
-        current
-        ;; wait for the next event to be emitted from the UI, then transit
-        (let [evt (intemporal/wait-for-signal signal-name)]
-          (p/recur (fsm/transit state evt)))))))
-
-;;;;
-;; UI state
-
-;; Mirrors the workflow's current FSM state on the client so we can render the
-;; diagram and the available event buttons without reaching into the engine.
-(defonce app-state (atom {:engine nil :state init-state}))
+  (let [get-next-event (intemporal/stub #'apply-transition)]
+    (bloop [current init-state]
+      (let [transitions (get rules current)]
+        (if (empty? transitions)
+          current
+          (let [evt (get-next-event rules current)]
+            (p/recur (-> (fsm/transit {::fsm/rules rules ::fsm/state current} evt)
+                         ::fsm/state))))))))
 
 ;;;;
 ;; rendering helpers
@@ -77,7 +87,7 @@
                 (for [h header] [:td h])]]
         tbody [:tbody
                (for [r rows]
-                 [:tr ;{:class (get r :type)}
+                 [:tr
                   (for [h header]
                     [:td (pr-str (get r h))])])]
         tbl   (html
@@ -97,8 +107,6 @@
 (defn- state-name [kw] (name kw))
 
 (defn diagram-source
-  "Builds a mermaid `stateDiagram-v2` definition from the ruleset, highlighting
-   the current state."
   [rules current]
   (let [edges    (for [[st transitions] rules
                        t               transitions]
@@ -145,53 +153,48 @@
     (render-controls! resource-rules state)))
 
 ;;;;
-;; emitting events
+;; fulfilling the pending Promise (previously: send-signal)
 
-(defn emit-event!
-  "Looks up the transition for `ename` from the current state, signals the
-   workflow so it durably records and applies it, then advances the local
-   mirror and re-renders."
+(defn fulfill-pending!
+  "Resolve the pending Promise with the event keyword matching `ename`."
   [ename]
-  (let [{:keys [engine state]} @app-state
-        transitions (get resource-rules state)
-        t           (some #(when (= (name (::fsm/event %)) ename) %) transitions)
-        evt         (::fsm/event t)]
-    (when evt
-      (intemporal/send-signal (:store engine) wf-id signal-name evt)
-      (let [nxt (-> (fsm/transit {::fsm/rules resource-rules ::fsm/state state} evt)
-                    ::fsm/state)]
-        (swap! app-state assoc :state nxt)
-        (render-all!)
-        ;; let the workflow resume (microtasks) flush before reading history
-        (js/setTimeout #(render-tables! engine wf-id) 0)))))
+  (when-let [resolve @pending-resolve]
+    (let [{:keys [state]} @app-state
+          transitions (get resource-rules state)
+          t   (some #(when (= (name (::fsm/event %)) ename) %) transitions)
+          evt (::fsm/event t)]
+      (when evt
+        (reset! pending-resolve nil)
+        (resolve evt)
+        (js/setTimeout #(render-tables! (:engine @app-state) wf-id) 0)))))
 
 (defn setup-controls-listener! []
   (.addEventListener (.getElementById js/document "controls") "click"
                      (fn [e]
                        (when-let [btn (.closest (.-target e) "button[data-event]")]
-                         (emit-event! (.getAttribute btn "data-event"))))))
+                         (fulfill-pending! (.getAttribute btn "data-event"))))))
 
 ;;;;
 ;; bootstrap
 (defn init []
   (when (exists? js/mermaid)
     (js/mermaid.initialize (clj->js {:startOnLoad false})))
-  (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)]
+  (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true
+                                                :default-timeout-ms nil)]
     (reset! app-state {:engine engine :state init-state})
     (setup-controls-listener!)
     (render-all!)
-    ;; start the durable workflow; it suspends immediately waiting for the
-    ;; first `fsm-event` signal and resolves once a terminal state is reached.
     (-> (intemporal/start-workflow engine run-fsm-workflow [resource-rules init-state]
                                    :workflow-id wf-id)
         (bthen (fn [res]
+                 (swap! app-state assoc :state res)
+                 (render-all!)
                  (js/console.log "workflow finished" (clj->js res))
                  (set-results! (prn-str res))
                  (render-tables! engine wf-id)))
         (p/catch (fn [err]
                    (js/console.error "error" err)
                    (set-results! (prn-str err)))))
-    ;; show the initial invoke + first suspension once the workflow has started
     (js/setTimeout #(render-tables! engine wf-id) 0)))
 
 

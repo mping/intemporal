@@ -68,28 +68,43 @@
 </code>
 </pre>
             <h3>Workflow definition</h3>
-            <p>The workflow waits for an <code>fsm-event</code> signal at each step.
-               Every button below sends one signal; the workflow durably records it,
-               applies the transition via <code>fsm/transit</code> and suspends again
-               until the next event. It completes once a terminal state is reached.</p>
+            <p>The <code>apply-transition</code> activity returns a Promise of the next event keyword.
+               States with a single outgoing transition auto-fire immediately; states with multiple
+               transitions return a pending Promise that is fulfilled when the user clicks a button.
+               <code>fsm/transit</code> runs inside the workflow body for deterministic replay.</p>
             <pre><code>
+(defn apply-transition [rules current-state]
+  (let [transitions (get rules current-state)]
+    (if (= 1 (count transitions))
+      (p/resolved (::fsm/event (first transitions)))
+      (do
+        (swap! app-state assoc :state current-state)
+        (render-all!)
+        (js/Promise. (fn [resolve _]
+                       (reset! pending-resolve resolve)))))))
+
 (defn run-fsm-workflow [rules init-state]
-  (bloop [state {::fsm/rules rules ::fsm/state init-state}]
-    (let [current     (::fsm/state state)
-          transitions (get rules current)]
-      (if (empty? transitions)
-        ;; terminal state -> workflow completes
-        current
-        ;; wait for the next event emitted from the UI, then transit
-        (let [evt (intemporal/wait-for-signal "fsm-event")]
-          (p/recur (fsm/transit state evt)))))))
+  (let [get-next-event (intemporal/stub #'apply-transition)]
+    (bloop [current init-state]
+      (let [transitions (get rules current)]
+        (if (empty? transitions)
+          current
+          (let [evt (get-next-event rules current)]
+            (p/recur (-> (fsm/transit {::fsm/rules rules ::fsm/state current} evt)
+                         ::fsm/state))))))))
 </code>
 </pre>
 
-            <h3>Emitting events</h3>
+            <h3>Fulfilling events</h3>
             <pre><code>
-;; each UI button sends one signal to the running workflow
-(intemporal/send-signal (:store engine) "my-wflow" "fsm-event" :event/create)
+;; called when the user clicks a button; resolves the pending Promise
+(defn fulfill-pending! [ename]
+  (when-let [resolve @pending-resolve]
+    (let [evt (::fsm/event (some #(when (= (name (::fsm/event %)) ename) %)
+                                 (get resource-rules (:state @app-state))))]
+      (when evt
+        (reset! pending-resolve nil)
+        (resolve evt)))))
 </code>
 </pre>
             <h3>Live example</h3>
