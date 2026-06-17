@@ -48,6 +48,8 @@
 (defonce app-state (atom {:engine nil :state init-state}))
 (defonce pending-resolve (atom nil))
 
+(declare render-all!)
+
 (defn apply-transition [rules current-state]
   (let [transitions (get rules current-state)]
     (if (= 1 (count transitions))

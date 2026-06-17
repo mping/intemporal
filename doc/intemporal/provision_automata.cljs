@@ -11,17 +11,18 @@
 ;;;;
 ;; State machine — VM provisioning lifecycle
 ;;
-;; States with a single transition auto-fire immediately (no user click needed).
-;; States with multiple transitions wait for the user to pick an outcome button.
+;; Two kinds of states:
+;;   User-driven  — workflow waits for a button click (apply-transition stub)
+;;   I/O states   — workflow calls an activity that runs I/O and emits the next event
 ;;
-;;   :state/init          (1 transition) → auto-fires :event/provision
-;;   :state/provisioning  (2 transitions) → user picks provisioned / error
-;;   :state/attaching     (2 transitions) → user picks attached / error
-;;   :state/booting       (2 transitions) → user picks booted / error
-;;   :state/running       (1 transition) → auto-fires :event/halt
-;;   :state/halting       (2 transitions) → user picks halted / error
-;;   :state/detaching     (1 transition) → auto-fires :event/detached
-;;   :state/deprovisioning (1 transition) → auto-fires :event/deprovisioned
+;;   :state/init          user clicks "provision"
+;;   :state/provisioning  provision-vm!    → {:event :event/provisioned :instance-id ...} | {:event :event/error}
+;;   :state/attaching     attach-volume!   → {:event :event/attached    :volume-id ...}   | {:event :event/error}
+;;   :state/booting       boot-vm!         → {:event :event/booted}                       | {:event :event/error}
+;;   :state/running       user clicks "halt"
+;;   :state/halting       halt-vm!         → {:event :event/halted}                       | {:event :event/error}
+;;   :state/detaching     detach-volume!   → {:event :event/detached}
+;;   :state/deprovisioning deprovision!    → {:event :event/deprovisioned}
 ;;   :state/done / :state/failed → terminal
 
 (def provision-rules
@@ -44,49 +45,141 @@
 (def wf-id "provision-automata-wflow")
 
 ;;;;
-;; Workflow definition
+;; Failure injection
+
+(def fail-at (atom nil))
+
+(defn- maybe-fail! [step]
+  (when (= @fail-at step)
+    (throw (ex-info (str "Injected failure at " (name step)) {:step step}))))
+
+;;;;
+;; I/O Activities
 ;;
-;; apply-transition is an activity (stub) that returns the next event keyword.
-;; Single-transition states auto-fire via a resolved Promise. Multi-transition
-;; states return a pending Promise fulfilled by the UI on button click.
+;; Each activity handles its own try/catch and returns a map with :event (the
+;; next FSM event keyword) plus any data produced (e.g. :instance-id, :volume-id).
+;; On failure the returned map has :event :event/error; upstream context is left
+;; intact so cleanup states (detaching, deprovisioning) can still use the ids.
+
+(defn provision-vm! []
+  (try
+    (maybe-fail! :provision)
+    {:event :event/provisioned :instance-id "i-demo"}
+    (catch js/Error _
+      {:event :event/error})))
+
+(defn attach-volume! [instance-id]
+  (try
+    (maybe-fail! :attach)
+    {:event :event/attached :volume-id "vol-demo"}
+    (catch js/Error _
+      {:event :event/error})))
+
+(defn boot-vm! [instance-id volume-id]
+  (try
+    (maybe-fail! :boot)
+    {:event :event/booted}
+    (catch js/Error _
+      {:event :event/error})))
+
+(defn halt-vm! [instance-id]
+  (try
+    {:event :event/halted}
+    (catch js/Error _
+      {:event :event/error})))
+
+(defn detach-volume! [volume-id]
+  (try
+    {:event :event/detached}
+    (catch js/Error _
+      {:event :event/error})))
+
+(defn deprovision! [instance-id]
+  (try
+    {:event :event/deprovisioned}
+    (catch js/Error _
+      {:event :event/error})))
+
+;;;;
+;; User-input activity
 ;;
-;; fsm/transit runs in the workflow body (not inside the activity), so it is
-;; deterministic and safe to re-run on replay.
+;; Called for :state/init and :state/running — the only states where the user
+;; decides what happens. Updates the UI, saves history (all preceding I/O has
+;; finished by the time the workflow pauses here), and returns a Promise that
+;; fulfills with the chosen event keyword when the user clicks a button.
 
 (defonce app-state (atom {:engine nil :state init-state}))
 (defonce pending-resolve (atom nil))
 
+(declare render-all! render-tables! save-history!)
+
 (defn apply-transition [rules current-state]
-  (let [transitions (get rules current-state)]
-    (if (= 1 (count transitions))
-      (p/resolved (::fsm/event (first transitions)))
-      (do
-        (swap! app-state assoc :state current-state)
-        (render-all!)
-        (js/Promise. (fn [resolve _]
-                       (reset! pending-resolve resolve)))))))
+  (swap! app-state assoc :state current-state)
+  (render-all!)
+  (js/setTimeout
+    (fn []
+      (when-let [engine (:engine @app-state)]
+        (save-history! engine)
+        (render-tables! engine)))
+    0)
+  (js/Promise. (fn [resolve _]
+                 (reset! pending-resolve resolve))))
+
+;;;;
+;; Workflow
+;;
+;; I/O stubs are created once and called inside the bloop. Each returns
+;; {:event <keyword> & data}; the event drives fsm/transit and the data merges
+;; into ctx so downstream activities receive ids from upstream ones.
+;; No try/catch here — error handling lives inside each activity function.
 
 (defn run-fsm-workflow [rules init-state]
-  (let [get-next-event (intemporal/stub #'apply-transition)]
-    (bloop [current init-state]
+  (let [get-next-event (intemporal/stub #'apply-transition)
+        provision-vm   (intemporal/stub #'provision-vm!)
+        attach-vol     (intemporal/stub #'attach-volume!)
+        boot-vm        (intemporal/stub #'boot-vm!)
+        halt-vm        (intemporal/stub #'halt-vm!)
+        detach-vol     (intemporal/stub #'detach-volume!)
+        deprovision    (intemporal/stub #'deprovision!)]
+    (bloop [current init-state ctx {}]
       (let [transitions (get rules current)]
         (if (empty? transitions)
           current
-          (let [evt (get-next-event rules current)]
+          (let [[evt ctx']
+                (case current
+                  :state/provisioning
+                  (let [r (provision-vm)]
+                    [(:event r) (merge ctx (dissoc r :event))])
+
+                  :state/attaching
+                  (let [r (attach-vol (:instance-id ctx))]
+                    [(:event r) (merge ctx (dissoc r :event))])
+
+                  :state/booting
+                  (let [r (boot-vm (:instance-id ctx) (:volume-id ctx))]
+                    [(:event r) ctx])
+
+                  :state/halting
+                  (let [r (halt-vm (:instance-id ctx))]
+                    [(:event r) ctx])
+
+                  :state/detaching
+                  (let [r (detach-vol (:volume-id ctx))]
+                    [(:event r) ctx])
+
+                  :state/deprovisioning
+                  (let [r (deprovision (:instance-id ctx))]
+                    [(:event r) ctx])
+
+                  ;; :state/init and :state/running: user picks via button
+                  [(get-next-event rules current) ctx])]
+
             (p/recur (-> (fsm/transit {::fsm/rules rules ::fsm/state current} evt)
-                         ::fsm/state))))))))
+                         ::fsm/state)
+                     ctx')))))))
 
 ;;;;
 ;; localStorage persistence
-;;
-;; Saves the full workflow event history after each user-driven transition so the
-;; page can restore the exact intemporal state after a browser refresh. On reload:
-;;  1. Pre-seed InMemoryStore with the saved history.
-;;  2. Call start-workflow — the engine replays the stored activity-completed events,
-;;     fast-forwarding bloop iterations without blocking, and lands back in the
-;;     apply-transition call for the current position.
-;;  3. Derive the UI state (current FSM node) from the history by replaying
-;;     the activity-result values through fsm/transit.
 
 (def storage-key "provision-automata-history")
 
@@ -103,13 +196,17 @@
   (.reload js/location))
 
 (defn state-from-history
-  "Replay activity-completed events to derive the current FSM state."
+  "Replay activity-completed events to derive the current FSM state.
+   I/O activity results are maps {:event <kw> ...}; the :event field drives transit.
+   User-input activity results are plain keywords."
   [rules starting-state history]
   (reduce
     (fn [s event]
       (if (= :activity-completed (:event-type event))
-        (-> (fsm/transit {::fsm/rules rules ::fsm/state s} (:result event))
-            ::fsm/state)
+        (let [result (:result event)
+              evt    (if (map? result) (:event result) result)]
+          (-> (fsm/transit {::fsm/rules rules ::fsm/state s} evt)
+              ::fsm/state))
         s))
     starting-state
     history))
@@ -124,7 +221,7 @@
   (set-html! "results" h))
 
 (defn render-table! [id rows]
-  (let [header [:event-type :workflow-id :args :timestamp :seq :signal-name :payload :activity-name :result]
+  (let [header [:event-type :workflow-id :args :timestamp :seq :activity-name :result]
         thead  [:thead [:tr (for [h header] [:td h])]]
         tbody  [:tbody
                 (for [r rows]
@@ -187,23 +284,17 @@
     (render-controls! provision-rules state)))
 
 ;;;;
-;; Fulfilling the pending Promise (replaces send-signal)
+;; Fulfilling user-input Promises
 
 (defn fulfill-pending! [ename]
   (when-let [resolve @pending-resolve]
-    (let [{:keys [state engine]} @app-state
+    (let [{:keys [state]} @app-state
           transitions (get provision-rules state)
           t   (some #(when (= (name (::fsm/event %)) ename) %) transitions)
           evt (::fsm/event t)]
       (when evt
         (reset! pending-resolve nil)
-        (resolve evt)
-        ;; Let the workflow process the result (microtasks) before saving history.
-        (js/setTimeout
-          (fn []
-            (save-history! engine)
-            (render-tables! engine))
-          0)))))
+        (resolve evt)))))
 
 (defn setup-controls-listener! []
   (.addEventListener (.getElementById js/document "controls") "click"
