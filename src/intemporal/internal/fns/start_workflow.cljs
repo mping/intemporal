@@ -1,6 +1,7 @@
 (ns intemporal.internal.fns.start-workflow
   (:require [intemporal.internal.execution :as exec]
             [intemporal.internal.logging :as log]
+            [intemporal.internal.workflow-registry :as wreg]
             [intemporal.protocol :as p]
             [intemporal.utils :as utils]
             [promesa.core :as prom])
@@ -32,16 +33,17 @@
       :or {max-iterations 1000}}]
   (let [engine   (cond-> engine
                    protocols (assoc :protocols protocols))
-        wf-id    (or workflow-id (str (random-uuid)))
-        observer (or observer (get engine :observer))]
-    (p/save-event store wf-id {:event-type :workflow-started
-                               :workflow-id wf-id
-                               :args        (vec args)
-                               :timestamp   (utils/current-time-ms)})
-    (when observer
-      (p/on-workflow-started observer wf-id args))
-    (log/info "Workflow started")
-    (let [d (prom/deferred)]
+         wf-id    (or workflow-id (str (random-uuid)))
+         observer (or observer (get engine :observer))]
+     (p/save-event store wf-id {:event-type :workflow-started
+                                :workflow-id wf-id
+                                :workflow-fn-name (wreg/register-workflow! workflow-fn)
+                                :args        (vec args)
+                                :timestamp   (utils/current-time-ms)})
+     (when observer
+       (p/on-workflow-started observer wf-id args))
+     (log/info "Workflow started")
+     (let [d (prom/deferred)]
       (letfn [(run-step []
                 (-> (exec/run-workflow-internal engine wf-id workflow-fn args
                       {:observer       observer
@@ -99,13 +101,14 @@
                            (fn [e]
                              (when on-complete
                                (on-complete {:status :failed :error e})))))))]
-    (log/with-mdc {:workflow-id wf-id}
-      (p/save-event store wf-id {:event-type  :workflow-started
-                                 :workflow-id wf-id
-                                 :args        (vec args)
-                                 :timestamp   (utils/current-time-ms)})
-      (when observer (p/on-workflow-started observer wf-id args))
-      (log/info "Workflow started (async)")
+     (log/with-mdc {:workflow-id wf-id}
+       (p/save-event store wf-id {:event-type  :workflow-started
+                                  :workflow-id wf-id
+                                  :workflow-fn-name (wreg/register-workflow! workflow-fn)
+                                  :args        (vec args)
+                                  :timestamp   (utils/current-time-ms)})
+       (when observer (p/on-workflow-started observer wf-id args))
+       (log/info "Workflow started (async)")
       (-> (exec/run-workflow-internal engine wf-id workflow-fn args
                                       {:observer       observer
                                        :max-iterations max-iterations

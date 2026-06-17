@@ -1,10 +1,11 @@
 (ns intemporal.store.fdb
   (:require [intemporal.protocol :as p]
+            [intemporal.internal.logging :as log]
             [me.vedang.clj-fdb.core :as fdb-core]
             [me.vedang.clj-fdb.transaction :as ftr]
             [me.vedang.clj-fdb.subspace.subspace :as fsub]
             [cheshire.core :as json])
-  (:import [com.apple.foundationdb.tuple Tuple]
+  (:import [com.apple.foundation.tuple Tuple]
            (java.lang AutoCloseable)))
 
 ;; ============================================================================
@@ -140,7 +141,10 @@
       ;; In-process fast path for an embedded (no-worker) engine in THIS process.
       ;; Worker mode picks the workflow up via the ownership scan (list-pending).
       (when-let [callback (get-in @callbacks [workflow-id signal-name])]
-        (future (callback)))
+        (future
+          (try (callback)
+               (catch Throwable t
+                 (log/warnf t "Signal callback threw for workflow %s signal %s" workflow-id signal-name)))))
 
       signal-data))
 
@@ -166,7 +170,10 @@
 
   (wake-workflow [_ workflow-id]
     (when-let [callback (get-in @callbacks [workflow-id ::wake])]
-      (future (callback))))
+      (future
+        (try (callback)
+             (catch Throwable t
+               (log/warnf t "Wake callback threw for workflow %s" workflow-id))))))
 
   (is-cancelled? [_ workflow-id]
     (ftr/run db

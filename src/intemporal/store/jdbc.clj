@@ -1,5 +1,6 @@
 (ns intemporal.store.jdbc
   (:require [intemporal.protocol :as p]
+            [intemporal.internal.logging :as log]
             [migratus.core :as migratus]
             [next.jdbc :as jdbc]
             [next.jdbc.prepare :as prepare]
@@ -140,7 +141,10 @@
     ;; In-process fast path for an embedded (no-worker) engine in THIS process.
     ;; Worker mode picks the workflow up via the ownership scan (list-pending).
     (when-let [callback (get-in @callbacks [workflow-id signal-name])]
-      (future (callback)))
+      (future
+        (try (callback)
+             (catch Throwable t
+               (log/warnf t "Signal callback threw for workflow %s signal %s" workflow-id signal-name)))))
     signal-data)
 
   (consume-signal [_ workflow-id signal-name]
@@ -163,7 +167,10 @@
 
   (wake-workflow [_ workflow-id]
     (when-let [callback (get-in @callbacks [workflow-id ::wake])]
-      (future (callback))))
+      (future
+        (try (callback)
+             (catch Throwable t
+               (log/warnf t "Wake callback threw for workflow %s" workflow-id))))))
 
   (is-cancelled? [_ workflow-id]
     (let [row (jdbc/execute-one! datasource
