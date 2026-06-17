@@ -5,7 +5,7 @@
             [me.vedang.clj-fdb.transaction :as ftr]
             [me.vedang.clj-fdb.subspace.subspace :as fsub]
             [cheshire.core :as json])
-  (:import [com.apple.foundation.tuple Tuple]
+  (:import [com.apple.foundationdb.tuple Tuple]
            (java.lang AutoCloseable)))
 
 ;; ============================================================================
