@@ -169,4 +169,22 @@
 
   (set-wake-at [_ workflow-id wake-at-ms]
     (swap! state assoc-in [:workflows workflow-id :wake-at] wake-at-ms)
-    nil))
+    nil)
+
+  ;; --- Tier 2: independent child workflows ---
+  (link-child! [_ parent-id parent-seq child-id policy]
+    ;; Idempotent: re-linking the same child (parent replay / crash) is a no-op.
+    (swap! state update-in [:workflows parent-id :children]
+           (fn [children]
+             (if (contains? children child-id)
+               children
+               (assoc children child-id {:parent-seq parent-seq :policy policy}))))
+    nil)
+
+  (list-children [this parent-id]
+    (->> (get-in @state [:workflows parent-id :children])
+         (mapv (fn [[child-id {:keys [parent-seq policy]}]]
+                 {:child-id   child-id
+                  :parent-seq parent-seq
+                  :policy     policy
+                  :status     (p/get-workflow-status this child-id)})))))

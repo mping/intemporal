@@ -341,11 +341,12 @@
       (do
         (when (seq pending-events)
           (p/save-events store workflow-id pending-events))
-        ;; Check if the handle is now complete
-        (let [store (ctx/current-store)
-              workflow-id (ctx/current-workflow-id)
-              completed (p/find-event store workflow-id :async-completed handle-seq)
-              failed (p/find-event store workflow-id :async-failed handle-seq)]
+        ;; Check if the handle is now complete. Use the passed-in store/workflow-id:
+        ;; handle-suspension runs outside the dynamic workflow-context binding, so
+        ;; (ctx/current-store) would throw here. (This else branch is always taken
+        ;; for independent child joins, which have no pending-asyncs.)
+        (let [completed (p/find-event store workflow-id :async-completed handle-seq)
+              failed    (p/find-event store workflow-id :async-failed handle-seq)]
           (if (or completed failed)
             :continue
             :wait-async))))))
@@ -368,6 +369,67 @@
            :observer observer}
     protocols (assoc :protocols protocols)))
 
+;; ============================================================================
+;; Tier 2: independent child workflows — parent/child lifecycle linkage
+;; (mirrors execution.clj; store ops on InMemoryStore are synchronous in CLJS)
+;; ============================================================================
+
+(declare finalize-failed)
+
+(def ^:private terminal-status? #{:completed :failed :cancelled})
+
+(defn- parent-link [store workflow-id]
+  (let [started (->> (p/load-history store workflow-id)
+                     (filter #(= :workflow-started (:event-type %)))
+                     first)]
+    (when (:parent-id started)
+      {:parent-id  (:parent-id started)
+       :parent-seq (:parent-seq started)})))
+
+(defn- notify-parent-terminal
+  "Record a child's terminal outcome in the parent's history (a :child-workflow-*
+   event plus an :async-* alias so `join` resolves) and wake the parent. Idempotent."
+  [store workflow-id completed? payload]
+  (when-let [{:keys [parent-id parent-seq]} (parent-link store workflow-id)]
+    (let [now     (utils/current-time-ms)
+          already (or (p/find-event store parent-id :child-workflow-completed parent-seq)
+                      (p/find-event store parent-id :child-workflow-failed parent-seq))]
+      (when-not already
+        (let [child-ev (cond-> {:event-type        (if completed? :child-workflow-completed :child-workflow-failed)
+                                :seq               parent-seq
+                                :child-workflow-id workflow-id
+                                :timestamp         now}
+                         completed?       (assoc :result payload)
+                         (not completed?) (assoc :error payload))
+              async-ev (cond-> {:event-type (if completed? :async-completed :async-failed)
+                                :seq        parent-seq
+                                :last-seq   parent-seq
+                                :timestamp  now}
+                         completed?       (assoc :result payload)
+                         (not completed?) (assoc :error payload))]
+          (p/save-events store parent-id [child-ev async-ev])))
+      (p/set-wake-at store parent-id nil)
+      (p/wake-workflow store parent-id))))
+
+(defn- has-children? [store workflow-id]
+  (boolean (some #(= :child-workflow-scheduled (:event-type %))
+                 (p/load-history store workflow-id))))
+
+(defn- apply-close-policy! [store workflow-id]
+  (when (has-children? store workflow-id)
+    (doseq [{:keys [child-id status policy]} (p/list-children store workflow-id)]
+      (when-not (terminal-status? status)
+        (when (= policy :cascade-cancel)
+          (p/mark-cancelled store child-id)
+          (p/wake-workflow store child-id))))))
+
+(defn- unjoined-require-join-child? [store workflow-id]
+  (and (has-children? store workflow-id)
+       (boolean
+         (some (fn [{:keys [status policy]}]
+                 (and (= policy :require-join) (not (terminal-status? status))))
+               (p/list-children store workflow-id)))))
+
 (defn finalize-completed
   "Save completion events and return result. Returns a promise."
   [store executor workflow-id pending-asyncs pending-events result observer]
@@ -378,13 +440,22 @@
                    (when (seq pending-events)
                      (p/save-events store workflow-id pending-events))
                    nil))]
-    (p/save-event store workflow-id {:event-type :workflow-completed
-                                     :result     result
-                                     :timestamp  (utils/current-time-ms)})
-    (-notify p/on-workflow-completed observer workflow-id result)
-    {:status :completed
-     :workflow-id workflow-id
-     :result result}))
+    ;; Tier 2: a parent must not complete with a live :require-join child.
+    (if (unjoined-require-join-child? store workflow-id)
+      (finalize-failed store workflow-id []
+                       (ex-info "Workflow completed with un-joined :require-join child workflows"
+                                {:workflow-id workflow-id})
+                       observer)
+      (do
+        (p/save-event store workflow-id {:event-type :workflow-completed
+                                         :result     result
+                                         :timestamp  (utils/current-time-ms)})
+        (-notify p/on-workflow-completed observer workflow-id result)
+        (apply-close-policy! store workflow-id)
+        (notify-parent-terminal store workflow-id true result)
+        {:status :completed
+         :workflow-id workflow-id
+         :result result}))))
 
 (defn finalize-cancelled
   "Save a dedicated cancellation event and return the cancelled result.
@@ -400,6 +471,9 @@
                                      :error error-map
                                      :timestamp  (utils/current-time-ms)})
     (-notify p/on-workflow-cancelled observer workflow-id)
+    ;; Tier 2: cascade to children and surface cancellation to the parent.
+    (apply-close-policy! store workflow-id)
+    (notify-parent-terminal store workflow-id false error-map)
     {:status :cancelled
      :workflow-id workflow-id
      :error error-map}))
@@ -413,6 +487,9 @@
                                      :error      error-map
                                      :timestamp  (utils/current-time-ms)})
     (-notify p/on-workflow-failed observer workflow-id error-map)
+    ;; Tier 2: enforce close policy on children, then propagate failure to parent.
+    (apply-close-policy! store workflow-id)
+    (notify-parent-terminal store workflow-id false error-map)
     {:status :failed
      :workflow-id workflow-id
      :error error-map}))
@@ -556,76 +633,76 @@
       (do
         (log/debugf "Internal loop %d of %d" iteration max-iterations)
 
-    ;; Check if executor is shutting down - stop processing to avoid endless rejections
-    (if (p/shutdown? executor)
-      (do
-        (log/infof "Executor shutting down, suspending workflow")
-        {:status :suspended
-         :workflow-id workflow-id})
+        ;; Check if executor is shutting down - stop processing to avoid endless rejections
+        (if (p/shutdown? executor)
+          (do
+            (log/infof "Executor shutting down, suspending workflow")
+            {:status :suspended
+             :workflow-id workflow-id})
 
-      (let [history     (p/load-history store workflow-id)
-            ctx         (make-workflow-context workflow-id history store registry observer
-                                               :protocols (:protocols engine))
-            exec-result (binding [ctx/*workflow-context* ctx]
-                          (log/debugf "Executing workflow function %s..." workflow-fn)
-                          (execute-workflow-fn workflow-fn args))
-              dispatch (fn [exec-result]
-                         (log/debugf "Workflow function executed, got: %s" (:status exec-result))
-                         (case (:status exec-result)
-                           :completed
-                           (finalize-completed store executor workflow-id
-                                               (:pending-asyncs exec-result)
-                                               (:pending-events exec-result)
-                                               (:result exec-result)
-                                               observer)
+          (let [history     (p/load-history store workflow-id)
+                ctx         (make-workflow-context workflow-id history store registry observer
+                                                   :protocols (:protocols engine))
+                exec-result (binding [ctx/*workflow-context* ctx]
+                              (log/debugf "Executing workflow function %s..." workflow-fn)
+                              (execute-workflow-fn workflow-fn args))
+                  dispatch (fn [exec-result]
+                             (log/debugf "Workflow function executed, got: %s" (:status exec-result))
+                             (case (:status exec-result)
+                               :completed
+                               (finalize-completed store executor workflow-id
+                                                   (:pending-asyncs exec-result)
+                                                   (:pending-events exec-result)
+                                                   (:result exec-result)
+                                                   observer)
 
-                           :cancelled
-                           ;; Cancellation surfaced from the body (a stub's
-                           ;; check-cancelled!). Any saga rollback already ran
-                           ;; inside the user's catch before the cancel exception
-                           ;; was rethrown, so just finalize.
-                           (finalize-cancelled store workflow-id
-                                               (:pending-events exec-result)
-                                               observer)
+                               :cancelled
+                               ;; Cancellation surfaced from the body (a stub's
+                               ;; check-cancelled!). Any saga rollback already ran
+                               ;; inside the user's catch before the cancel exception
+                               ;; was rethrown, so just finalize.
+                               (finalize-cancelled store workflow-id
+                                                   (:pending-events exec-result)
+                                                   observer)
 
-                           :suspended
-                           (blet [action (handle-suspension engine
-                                                                workflow-id
-                                                                (:suspension-type exec-result)
-                                                                (:suspension-data exec-result)
-                                                                (:pending-asyncs exec-result)
-                                                                (:pending-events exec-result)
-                                                                wake-fn
-                                                                observer)]
-                             (when (and observer (= action :continue))
-                               (p/on-workflow-resumed observer workflow-id))
+                               :suspended
+                               (blet [action (handle-suspension engine
+                                                                    workflow-id
+                                                                    (:suspension-type exec-result)
+                                                                    (:suspension-data exec-result)
+                                                                    (:pending-asyncs exec-result)
+                                                                    (:pending-events exec-result)
+                                                                    wake-fn
+                                                                    observer)]
+                                 (when (and observer (= action :continue))
+                                   (p/on-workflow-resumed observer workflow-id))
 
-                             (if (= action :continue)
-                               (prom/recur (inc iteration))
-                               ;; About to wait: register a generic wake callback so an
-                               ;; external actor (e.g. cancel-workflow) can force this
-                               ;; workflow to re-enter and observe the cancel flag.
-                               (do
-                                 (when wake-fn
-                                   (p/register-wake-callback store workflow-id wake-fn))
-                                 ;; C2: record when this workflow next needs attention.
-                                 (let [sd (:suspension-data exec-result)
-                                       wake-at (case action
-                                                 :wait-timer          (:fire-at sd)
-                                                 :wait-signal-timeout (:deadline sd)
-                                                 nil)]
-                                   (p/set-wake-at store workflow-id wake-at))
-                                 (action->result action workflow-id))))
+                                 (if (= action :continue)
+                                   (prom/recur (inc iteration))
+                                   ;; About to wait: register a generic wake callback so an
+                                   ;; external actor (e.g. cancel-workflow) can force this
+                                   ;; workflow to re-enter and observe the cancel flag.
+                                   (do
+                                     (when wake-fn
+                                       (p/register-wake-callback store workflow-id wake-fn))
+                                     ;; C2: record when this workflow next needs attention.
+                                     (let [sd (:suspension-data exec-result)
+                                           wake-at (case action
+                                                     :wait-timer          (:fire-at sd)
+                                                     :wait-signal-timeout (:deadline sd)
+                                                     nil)]
+                                       (p/set-wake-at store workflow-id wake-at))
+                                     (action->result action workflow-id))))
 
-                           :failed
-                           (finalize-failed store workflow-id
-                                            (:pending-events exec-result)
-                                            (:error exec-result)
-                                            observer)))]
-          ;; exec-result may be a Promise if workflow-fn returned a Promise (e.g. from p/let)
-          (if (prom/promise? exec-result)
-            (bthen exec-result dispatch)
-            (dispatch exec-result)))))))) ; close inner (if shutdown? let), outer (do) and budget (if)
+                               :failed
+                               (finalize-failed store workflow-id
+                                                (:pending-events exec-result)
+                                                (:error exec-result)
+                                                observer)))]
+              ;; exec-result may be a Promise if workflow-fn returned a Promise (e.g. from p/let)
+              (if (prom/promise? exec-result)
+                (bthen exec-result dispatch)
+                (dispatch exec-result)))))))) ; close inner (if shutdown? let), outer (do) and budget (if)
 
 (defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
                                suspension-data pending-events observer]

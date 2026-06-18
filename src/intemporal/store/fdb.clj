@@ -41,6 +41,12 @@
 (defn- owner-index-key [root-subspace bucket workflow-id]
   (->tuple ["wf-owner" bucket workflow-id]))
 
+;; Tier 2: parent->child index. Children of `parent-id` live under
+;; ["wf-child" <parent-id> <child-id>] with value {:parent-seq .. :policy ..},
+;; so list-children can range-scan a parent's children for close-policy.
+(defn- child-index-key [parent-id child-id]
+  (->tuple ["wf-child" parent-id child-id]))
+
 (defn- maintain-owner-index! [tx root-subspace workflow-id events]
   (let [started?  (some #(= :workflow-started (:event-type %)) events)
         terminal? (some #(#{:workflow-completed :workflow-failed :workflow-cancelled} (:event-type %)) events)
@@ -270,7 +276,31 @@
               k      (owner-index-key root-subspace bucket workflow-id)
               entry  (or (<-bytes (fdb-core/get tx root-subspace k)) {})]
           (fdb-core/set tx root-subspace k (->bytes (assoc entry :wake-at wake-at-ms))))))
-    nil))
+    nil)
+
+  ;; --- Tier 2: independent child workflows ---
+  (link-child! [_ parent-id parent-seq child-id policy]
+    ;; The child's :workflow-started event (and thus its ownership-index entry)
+    ;; was already written; here we just record the parent->child relationship.
+    (ftr/run db
+      (fn [tx]
+        (fdb-core/set tx root-subspace (child-index-key parent-id child-id)
+                      (->bytes {:parent-seq parent-seq :policy (name policy)}))))
+    nil)
+
+  (list-children [this parent-id]
+    (let [entries (ftr/run db
+                    (fn [tx]
+                      (let [sub (fsub/get root-subspace (->tuple ["wf-child" parent-id]))]
+                        (->> (fdb-core/get-range tx (fsub/range sub))
+                             (mapv (fn [[key value]]
+                                     [(nth key (dec (count key))) (<-bytes value)]))))))]
+      (mapv (fn [[child-id entry]]
+              {:child-id   child-id
+               :parent-seq (:parent-seq entry)
+               :policy     (keyword (:policy entry))
+               :status     (p/get-workflow-status this child-id)})
+            entries))))
 
 (defn make-fdb-store [db subspace-name]
   (let [root (fsub/create (->tuple [subspace-name]))]

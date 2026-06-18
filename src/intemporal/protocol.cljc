@@ -37,7 +37,18 @@
   (set-wake-at [store workflow-id wake-at-ms]
     "Record the earliest time (epoch ms) this workflow next needs attention, or
      nil for 'always eligible' (waiting on an external event, not the clock).
-     list-pending skips workflows whose wake-at is still in the future (C2)."))
+     list-pending skips workflows whose wake-at is still in the future (C2).")
+
+  ;; --- Tier 2: independent child workflows ---
+  (link-child! [store parent-id parent-seq child-id policy]
+    "Record a parent->child relationship and create the child as a claimable,
+     non-terminal workflow row. `parent-seq` is the parent's sequence number for
+     the :child-workflow-scheduled marker (used to write the parent's completion
+     event back). `policy` is the parent-close-policy keyword (:cascade-cancel,
+     :abandon, :require-join). Idempotent: re-linking an existing child is a no-op.")
+  (list-children [store parent-id]
+    "Return a seq of {:child-id .. :parent-seq .. :policy .. :status ..} maps for
+     every child linked to `parent-id`. Empty if the workflow has no children."))
 
 (defprotocol IActivityExecutor
   "Protocol for executing activities"

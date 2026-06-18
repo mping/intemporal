@@ -11,7 +11,8 @@
             [intemporal.store :as store]
             [intemporal.observer :as obs]
             [intemporal.utils :as utils]
-            [intemporal.internal.macros :as im])
+            [intemporal.internal.macros :as im]
+            #?@(:cljs [[promesa.core :as prom]]))
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
                             [intemporal.internal.logging :as log]
@@ -356,6 +357,88 @@
                                        :workflow-fn       child-workflow-fn
                                        :args              args}))))))
 
+(def ^:private parent-close-policies #{:cascade-cancel :abandon :require-join})
+
+(defn- schedule-independent-child!
+  "Create a child as an independent, claimable workflow (Tier 2): seed its
+   :workflow-started event (so the worker scan can resolve+run it by id and wake
+   the parent on completion), record the parent->child link for close-policy
+   enumeration, and persist the parent's :child-workflow-scheduled marker.
+   Idempotent across parent replay/crash: guarded by the parent's scheduled
+   marker and the child's existing history. Returns the child workflow id."
+  [parent-id seq-num child-wf-id child-workflow-fn args policy]
+  (let [store (ctx/current-store)]
+    ;; If we already scheduled this child (replay), do nothing structural.
+    (when-not (p/find-event store parent-id :child-workflow-scheduled seq-num)
+      (let [fn-name (wreg/register-workflow! child-workflow-fn)]
+        ;; Seed the child's own history once (crash-safe: parent may re-run this
+        ;; if it died before flushing the scheduled marker).
+        (when (empty? (p/load-history store child-wf-id))
+          (p/save-event store child-wf-id
+                        {:event-type       :workflow-started
+                         :workflow-id      child-wf-id
+                         :workflow-fn-name fn-name
+                         :args             (vec args)
+                         ;; parent linkage, read by the child's finalizers to
+                         ;; write the parent's completion event and wake it.
+                         :parent-id        parent-id
+                         :parent-seq       seq-num
+                         :timestamp        (utils/current-time-ms)}))
+        (p/link-child! store parent-id seq-num child-wf-id policy)
+        (ctx/add-pending-event! {:event-type        :child-workflow-scheduled
+                                 :seq               seq-num
+                                 :child-workflow-id child-wf-id
+                                 :workflow-fn-name  fn-name
+                                 :args              (vec args)
+                                 :timestamp         (utils/current-time-ms)})))
+    child-wf-id))
+
+(defn run-child-workflow-async
+  "Start `child-workflow-fn` as an INDEPENDENT child workflow and return an
+   AsyncHandle immediately — the parent continues running in parallel and can
+   `join` the handle later to retrieve the child's result.
+
+   Unlike the synchronous `run-child-workflow`, the child becomes a first-class
+   persisted workflow with its own ownership claim and lifecycle, so it may itself
+   suspend (signals/timers) without blocking the parent. The parent is re-resumed
+   by the worker scan when the child terminates.
+
+   Options:
+   - :child-id              custom child workflow id (default: <parent-id>/child-<seq>)
+   - :parent-close-policy   one of :cascade-cancel (default), :abandon, :require-join
+                            — what happens to this child if the parent closes first."
+  [child-workflow-fn args & {:keys [child-id parent-close-policy]
+                             :or   {parent-close-policy :cascade-cancel}}]
+  (ctx/check-cancelled!)
+  (assert (parent-close-policies parent-close-policy)
+          (str "Invalid :parent-close-policy " parent-close-policy))
+  (let [ctx         (ctx/current-context)
+        seq-num     (ctx/next-seq!)
+        parent-id   (:workflow-id ctx)
+        child-wf-id (or child-id (str parent-id "/child-" seq-num))]
+    (schedule-independent-child! parent-id seq-num child-wf-id
+                                 child-workflow-fn args parent-close-policy)
+    (->AsyncHandle seq-num)))
+
+(defn run-child-workflow-detached
+  "Fire-and-forget variant of `run-child-workflow-async`: schedule an independent
+   child and return its workflow id without any joinable handle. Pair with
+   :parent-close-policy :abandon for true background work that outlives the parent.
+
+   Options: same as `run-child-workflow-async` (default policy here is :abandon)."
+  [child-workflow-fn args & {:keys [child-id parent-close-policy]
+                             :or   {parent-close-policy :abandon}}]
+  (ctx/check-cancelled!)
+  (assert (parent-close-policies parent-close-policy)
+          (str "Invalid :parent-close-policy " parent-close-policy))
+  (let [ctx         (ctx/current-context)
+        seq-num     (ctx/next-seq!)
+        parent-id   (:workflow-id ctx)
+        child-wf-id (or child-id (str parent-id "/child-" seq-num))]
+    (schedule-independent-child! parent-id seq-num child-wf-id
+                                 child-workflow-fn args parent-close-policy)
+    child-wf-id))
+
 ;; ============================================================================
 ;; Public API
 ;; ============================================================================
@@ -535,6 +618,67 @@
          ;; executing here (#7). Bounded so stop never blocks indefinitely.
          (.join thread (long poll-ms))
          (p/release-owner store owner-id)))))
+
+#?(:cljs
+   (defn start-worker
+     "ClojureScript recovery worker — the ownership-scan drive that runs
+      independent child workflows in a single-process CLJS runtime (there is no
+      thread pool). Each tick scans list-pending and resumes every due, claimed
+      workflow sequentially through the promise chain; JS is single-threaded so
+      no intra-pod double-execution occurs. The next tick is scheduled only after
+      the current batch settles. Returns a 0-arg stop fn that halts polling and
+      releases this owner's workflows.
+
+      Resumes via resume-workflow [engine workflow-id], so the workflow function
+      must be registered in this process (start-workflow registers it
+      automatically; otherwise register the workflow vars at startup).
+
+      Options:
+        :owner-id    stable id for this worker (default: random uuid)
+        :poll-ms     poll interval (default 50)
+        :batch-size  max workflows scanned per poll (default 100)"
+     [{:keys [store] :as engine}
+      & {:keys [owner-id poll-ms batch-size]
+         :or   {owner-id (str (random-uuid)) poll-ms 50 batch-size 100}}]
+     (let [running     (atom true)
+           timer       (atom nil)
+           process-one (fn [wf-id]
+                         ;; resume-workflow can throw synchronously (e.g. fn not
+                         ;; registered) or reject async; swallow both so one bad
+                         ;; workflow never stalls the scan.
+                         (try
+                           (-> (resume-workflow engine wf-id)
+                               (prom/catch (fn [e]
+                                             (log/warnf "Worker %s failed resuming %s: %s" owner-id wf-id e)
+                                             nil)))
+                           (catch :default e
+                             (log/warnf "Worker %s failed resuming %s: %s" owner-id wf-id e)
+                             (prom/resolved nil))))]
+       (letfn [(schedule-next []
+                 (when @running
+                   (reset! timer (js/setTimeout tick poll-ms))))
+               (tick []
+                 (when @running
+                   (try
+                     (let [ids (p/list-pending store owner-id batch-size)]
+                       (-> (reduce (fn [pchain wf-id]
+                                     (prom/then pchain
+                                                (fn [_]
+                                                  (if (and @running (p/claim-owner store wf-id owner-id))
+                                                    (process-one wf-id)
+                                                    (prom/resolved nil)))))
+                                   (prom/resolved nil)
+                                   ids)
+                           (prom/then    (fn [_] (schedule-next)))
+                           (prom/catch   (fn [_] (schedule-next)))))
+                     (catch :default e
+                       (log/warnf "Worker %s loop error: %s" owner-id e)
+                       (schedule-next)))))]
+         (reset! timer (js/setTimeout tick 0))
+         (fn stop-worker []
+           (reset! running false)
+           (when-let [t @timer] (js/clearTimeout t))
+           (p/release-owner store owner-id))))))
 
 (defn send-signal
   "Send a signal to a workflow.

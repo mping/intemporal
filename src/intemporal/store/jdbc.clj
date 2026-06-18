@@ -240,7 +240,34 @@
                            ELSE to_timestamp(?::bigint / 1000.0) END
         WHERE id = ?"
        wake-at-ms wake-at-ms workflow-id])
-    nil))
+    nil)
+
+  ;; --- Tier 2: independent child workflows ---
+  (link-child! [_ parent-id parent-seq child-id policy]
+    ;; The child row already exists (its :workflow-started event was saved just
+    ;; before this call). Stamp the parent linkage on it; idempotent — re-linking
+    ;; writes the same values. ON CONFLICT guards the case where the row is not
+    ;; yet present (defensive).
+    (jdbc/with-transaction [tx datasource]
+      (jdbc/execute! tx ["INSERT INTO intemporal_workflows (id) VALUES (?) ON CONFLICT (id) DO NOTHING"
+                         child-id])
+      (jdbc/execute! tx ["UPDATE intemporal_workflows
+                          SET parent_workflow_id = ?, parent_seq = ?, parent_close_policy = ?
+                          WHERE id = ?"
+                         parent-id parent-seq (name policy) child-id]))
+    nil)
+
+  (list-children [this parent-id]
+    (let [rows (jdbc/execute! datasource
+                 ["SELECT id, parent_seq, parent_close_policy
+                   FROM intemporal_workflows WHERE parent_workflow_id = ?"
+                  parent-id])]
+      (mapv (fn [{:intemporal_workflows/keys [id parent_seq parent_close_policy]}]
+              {:child-id   id
+               :parent-seq parent_seq
+               :policy     (keyword parent_close_policy)
+               :status     (p/get-workflow-status this id)})
+            rows))))
 
 ;; TODO use more complete opts
 (defn make-jdbc-store
