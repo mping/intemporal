@@ -62,8 +62,9 @@
 
 (defn-workflow deploy-service [service regions]
   (let [handles     (mapv (fn [region]
+                            ;; if this workflow fails ,
                             (intemporal/run-child-workflow-async #'deploy-region [region]
-                                                                :parent-close-policy :cascade-cancel))
+                                                                :parent-close-policy :abandon))
                           regions)
         deployments (intemporal/join-all handles)]
     {:service      service

@@ -406,7 +406,18 @@
    Options:
    - :child-id              custom child workflow id (default: <parent-id>/child-<seq>)
    - :parent-close-policy   one of :cascade-cancel (default), :abandon, :require-join
-                            — what happens to this child if the parent closes first."
+                            — what happens to this child if the parent closes first.
+
+*   `cascade-cancel` (Default for `run-child-workflow-async`)
+    *   Behavior: Child is cancelled when the parent closes.
+    *   Typical Use Case: The child workflow is tightly coupled and part of the parent's unit of work.
+*   `abandon` (Default for `run-child-workflow-detached`)
+    *   Behavior: Child keeps running when the parent closes.
+    *   Typical Use Case: Fire-and-forget background work.
+*   `require-join`
+    *   Behavior: Parent fails if the child is unfinished when the parent tries to close.
+    *   Typical Use Case: Unfinished child = a bug to surface (ensures the child must complete before the parent can successfully close).
+"
   [child-workflow-fn args & {:keys [child-id parent-close-policy]
                              :or   {parent-close-policy :cascade-cancel}}]
   (ctx/check-cancelled!)
@@ -702,20 +713,42 @@
       (log/debugf "Adding signal %s" signal-name))
     {:signal-id id}))
 
+(def ^:private terminal-status? #{:completed :failed :cancelled})
+
+(defn- has-child-markers?
+  "Cheap guard (uses only load-history) so the child cascade — and the
+   list-children store method it needs — is touched ONLY for workflows that
+   actually scheduled a child."
+  [store workflow-id]
+  (boolean (some #(= :child-workflow-scheduled (:event-type %))
+                 (p/load-history store workflow-id))))
+
 (defn cancel-workflow
   "Cancel a running workflow.
    The workflow is cancelled at the next suspension point. If it is currently
    suspended (e.g. waiting on a signal), wake-workflow forces it to re-enter its
-   loop so it observes the cancellation flag rather than waiting forever."
+   loop so it observes the cancellation flag rather than waiting forever.
+
+   Cascades to children scheduled with :parent-close-policy :cascade-cancel
+   (recursively). This is done here — not only in the parent's finalizer — because
+   under the worker/ownership-scan model a cancelled workflow is excluded from
+   list-pending and so never re-runs to execute its finalizer; the cascade must
+   happen at cancel time. :abandon / :require-join children are left untouched."
   [store workflow-id]
   (log/with-mdc {:workflow-id workflow-id}
     (let [status (p/get-workflow-status store workflow-id)]
-      (if (#{:completed :failed :cancelled} status)
+      (if (terminal-status? status)
         (log/debugf "Cancelling workflow that is already in terminal state %s, skipping" status)
         (do
           (p/mark-cancelled store workflow-id)
           (p/wake-workflow store workflow-id)
-          (log/debugf "Cancelling workflow")))))
+          (log/debugf "Cancelling workflow")
+          ;; cascade to :cascade-cancel children (recursively)
+          (when (has-child-markers? store workflow-id)
+            (doseq [{:keys [child-id status policy]} (p/list-children store workflow-id)]
+              (when (and (= policy :cascade-cancel)
+                         (not (terminal-status? status)))
+                (cancel-workflow store child-id))))))))
   {:cancelled true :workflow-id workflow-id})
 
 (defn get-workflow-history

@@ -50,6 +50,26 @@
   (intemporal/join (intemporal/run-child-workflow-async #'sleepy-child-wf [x]
                                                         :child-id child-id)))
 
+;; Three-level tree with DIFFERENT close policies:
+;; parent --(:cascade-cancel)--> child --(:abandon)--> grandchild
+(intemporal/defn-workflow pcp-grandchild-wf []
+  (intemporal/wait-for-signal "gc-go")
+  :gc-done)
+
+(intemporal/defn-workflow pcp-child-wf [gc-id]
+  (intemporal/run-child-workflow-detached #'pcp-grandchild-wf []
+                                          :child-id gc-id
+                                          :parent-close-policy :abandon)
+  (intemporal/wait-for-signal "c-go")
+  :c-done)
+
+(intemporal/defn-workflow pcp-parent-wf [c-id gc-id]
+  (intemporal/run-child-workflow-detached #'pcp-child-wf [gc-id]
+                                          :child-id c-id
+                                          :parent-close-policy :cascade-cancel)
+  (intemporal/wait-for-signal "p-go")
+  :p-done)
+
 ;; ── helpers ───────────────────────────────────────────────────────────────────
 
 (defn- seed! [store wf-fn wf-id args]
@@ -147,5 +167,31 @@
                                  (is (= :completed s))
                                  (is (= 42 (intemporal/get-workflow-result store pid))
                                      "child slept then returned 21*2"))))))
+            (prom/catch (fn [e] (is false (str "unexpected error: " e))))
+            (prom/finally (fn [_ _] (done))))))))
+
+(deftest mixed-close-policies-cascade-and-abandon
+  (testing "parent(:cascade-cancel child)(:abandon grandchild): cancelling parent diverges"
+    (async done
+      (let [pid "cljs-pcp-1" cid "cljs-pcp-1/child" gid "cljs-pcp-1/grandchild"]
+        (-> (with-worker
+              (fn [store]
+                (seed! store #'pcp-parent-wf pid [cid gid])
+                (-> (await-status store cid :running 3000)
+                    (prom/then (fn [_] (await-status store gid :running 3000)))
+                    (prom/then (fn [_]
+                                 (is (= :running (p/get-workflow-status store pid)) "parent running")
+                                 (intemporal/cancel-workflow store pid)
+                                 (await-status store pid :cancelled 5000)))
+                    (prom/then (fn [s]
+                                 (is (= :cancelled s) "parent cancelled")
+                                 (await-status store cid :cancelled 5000)))
+                    (prom/then (fn [s]
+                                 (is (= :cancelled s)
+                                     "child :cascade-cancel — cancelled with the parent")
+                                 (prom/delay 300)))
+                    (prom/then (fn [_]
+                                 (is (= :running (p/get-workflow-status store gid))
+                                     "grandchild :abandon — survives the parent's cancellation"))))))
             (prom/catch (fn [e] (is false (str "unexpected error: " e))))
             (prom/finally (fn [_ _] (done))))))))

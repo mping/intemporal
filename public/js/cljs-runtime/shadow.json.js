@@ -6,8 +6,8 @@ goog.scope(function(){
  * simplified js->clj for JSON data, :key-fn default to keyword
  */
 shadow.json.to_clj = (function shadow$json$to_clj(var_args){
-var G__28222 = arguments.length;
-switch (G__28222) {
+var G__26750 = arguments.length;
+switch (G__26750) {
 case 1:
 return shadow.json.to_clj.cljs$core$IFn$_invoke$arity$1((arguments[(0)]));
 
@@ -40,8 +40,8 @@ if(cljs.core.boolean_QMARK_(x)){
 return x;
 } else {
 if(cljs.core.array_QMARK_(x)){
-return cljs.core.into.cljs$core$IFn$_invoke$arity$3(cljs.core.PersistentVector.EMPTY,cljs.core.map.cljs$core$IFn$_invoke$arity$1((function (p1__28218_SHARP_){
-return shadow.json.to_clj.cljs$core$IFn$_invoke$arity$2(p1__28218_SHARP_,opts);
+return cljs.core.into.cljs$core$IFn$_invoke$arity$3(cljs.core.PersistentVector.EMPTY,cljs.core.map.cljs$core$IFn$_invoke$arity$1((function (p1__26725_SHARP_){
+return shadow.json.to_clj.cljs$core$IFn$_invoke$arity$2(p1__26725_SHARP_,opts);
 })),cljs.core.array_seq.cljs$core$IFn$_invoke$arity$1(x));
 } else {
 var key_fn = cljs.core.get.cljs$core$IFn$_invoke$arity$3(opts,new cljs.core.Keyword(null,"key-fn","key-fn",-636154479),cljs.core.keyword);

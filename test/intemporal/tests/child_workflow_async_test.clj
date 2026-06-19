@@ -68,6 +68,30 @@
                                        :parent-close-policy :require-join)
   :done-without-join)
 
+;; ── three-level tree with DIFFERENT close policies ──────────────────────────────
+;; parent --(:cascade-cancel)--> child --(:abandon)--> grandchild
+;; Each level waits on its own signal so the whole tree stays alive until we act.
+
+(intemporal/defn-workflow pcp-grandchild-wf []
+  (intemporal/wait-for-signal "gc-go")
+  :gc-done)
+
+(intemporal/defn-workflow pcp-child-wf [gc-id]
+  ;; grandchild is :abandon — it must survive this child being cancelled
+  (intemporal/run-child-workflow-detached #'pcp-grandchild-wf []
+                                          :child-id gc-id
+                                          :parent-close-policy :abandon)
+  (intemporal/wait-for-signal "c-go")
+  :c-done)
+
+(intemporal/defn-workflow pcp-parent-wf [c-id gc-id]
+  ;; child is :cascade-cancel — cancelling the parent must cancel it
+  (intemporal/run-child-workflow-detached #'pcp-child-wf [gc-id]
+                                          :child-id c-id
+                                          :parent-close-policy :cascade-cancel)
+  (intemporal/wait-for-signal "p-go")
+  :p-done)
+
 ;; ── helpers ───────────────────────────────────────────────────────────────────
 
 (defn- await-status [store wf-id terminal timeout-ms]
@@ -144,6 +168,29 @@
       (is (= :failed (await-status store pid :failed 5000))
           "parent failed because it closed with an un-joined :require-join child"))))
 
+(defn- check-mixed-close-policies [store]
+  ;; parent --(:cascade-cancel)--> child --(:abandon)--> grandchild
+  ;; Cancelling the parent must cascade to the child but NOT to the abandoned
+  ;; grandchild — the two policies diverge within one tree.
+  (with-worker [engine store]
+    (let [pid (str "pcp-" (random-uuid))
+          cid (str pid "/child")
+          gid (str pid "/grandchild")]
+      (seed-top-level! store #'pcp-parent-wf pid [cid gid])
+      ;; whole tree comes up (each level suspended on its own signal)
+      (is (= :running (await-status store cid :running 3000)) "child running")
+      (is (= :running (await-status store gid :running 3000)) "grandchild running")
+      (is (= :running (p/get-workflow-status store pid)) "parent running")
+      ;; cancel the parent
+      (intemporal/cancel-workflow store pid)
+      (is (= :cancelled (await-status store pid :cancelled 5000)) "parent cancelled")
+      (is (= :cancelled (await-status store cid :cancelled 5000))
+          "child :cascade-cancel — cancelled when the parent closed")
+      ;; give the worker ample time to (incorrectly) cancel the grandchild
+      (Thread/sleep 400)
+      (is (= :running (p/get-workflow-status store gid))
+          "grandchild :abandon — survives its parent being cancelled"))))
+
 (defn- check-crash-recovery [store]
   (reset! act-calls 0)
   (let [pid (str "parent-" (random-uuid))
@@ -212,6 +259,13 @@
   (testing "jdbc" (let [s (jdbc)] (try (check-require-join s) (finally (.close s))))))
 (deftest ^:integration require-join-fdb
   (testing "fdb" (check-require-join (fdb))))
+
+(deftest mixed-close-policies-cascade-and-abandon
+  (testing "in-memory" (check-mixed-close-policies (in-memory))))
+(deftest ^:integration mixed-close-policies-jdbc
+  (testing "jdbc" (let [s (jdbc)] (try (check-mixed-close-policies s) (finally (.close s))))))
+(deftest ^:integration mixed-close-policies-fdb
+  (testing "fdb" (check-mixed-close-policies (fdb))))
 
 (deftest crash-recovery-replays-child-result
   (testing "in-memory" (check-crash-recovery (in-memory))))

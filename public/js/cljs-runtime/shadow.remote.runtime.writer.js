@@ -59,7 +59,7 @@ var writer = (new shadow.remote.runtime.writer.LimitWriter(sb,limit));
 try{cljs.core.pr_writer(obj,writer,cljs.core.pr_opts());
 
 return ["0,",cljs.core.str.cljs$core$IFn$_invoke$arity$1(sb.toString())].join('');
-}catch (e30792){var e = e30792;
+}catch (e29139){var e = e29139;
 if((!(cljs.core.keyword_identical_QMARK_(new cljs.core.Keyword("shadow.remote.runtime.writer","limit-reached","shadow.remote.runtime.writer/limit-reached",1304350996),new cljs.core.Keyword(null,"tag","tag",-1290361223).cljs$core$IFn$_invoke$arity$1(cljs.core.ex_data(e)))))){
 throw e;
 } else {
