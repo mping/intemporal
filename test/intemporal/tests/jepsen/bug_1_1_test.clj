@@ -20,12 +20,11 @@
             [intemporal.store :as mem]
             [intemporal.store.jdbc :as jdbc-store]
             [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]
-            [intemporal.internal.workflow-registry :as wreg]))
+            [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (defn sig-act [x] (* x 2))
 
-(defn sig-wf [x]
+(intemporal/defn-workflow sig-wf [x]
   (let [a (intemporal/stub #'sig-act)
         r (a x)]
     (intemporal/wait-for-signal "go")
@@ -43,7 +42,6 @@
   "store-a runs the workflow (suspends on signal); store-b (a separate instance
   over the same backing) delivers the signal; a worker resumes it."
   [store-a store-b]
-  (wreg/clear-registry!)
   (let [wid (str "bug11-" (random-uuid))]
     (let [e1 (intemporal/make-workflow-engine :store store-a :threads 2)
           f1 (future (intemporal/start-workflow e1 sig-wf [6] :workflow-id wid))]

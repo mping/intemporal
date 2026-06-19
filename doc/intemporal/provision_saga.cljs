@@ -3,6 +3,7 @@
             [intemporal.core :as intemporal]
             [hiccups.runtime :as hiccupsrt])
   (:require-macros [hiccups.core :as hiccups :refer [html]]
+                   [intemporal.core :refer [defn-workflow]]
                    [intemporal.internal.context :refer [bthen]]))
 
 ;;;;
@@ -50,7 +51,7 @@
 
 (def wf-id "provision-saga-wflow")
 
-(defn run-provision-saga []
+(defn-workflow run-provision-saga []
   (let [s         (intemporal/saga)
         provision (intemporal/stub #'provision-instance!)
         attach    (intemporal/stub #'attach-volume!)
@@ -103,7 +104,7 @@
 ;;;;
 ;; Running the workflow
 
-(defn run! []
+(defn run-demo! []
   (let [scen   (-> js/document (.getElementById "scenario") .-value)
         fa     (case scen
                  "provision" :provision
@@ -128,7 +129,7 @@
 
 (defn init []
   (.addEventListener (.getElementById js/document "run-btn") "click"
-                     (fn [_] (run!))))
+                     (fn [_] (run-demo!))))
 
 
 (comment

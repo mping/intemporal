@@ -7,7 +7,8 @@
             [intemporal.store :as store]
             [intemporal.internal.workflow-registry :as wreg]
             [promesa.core :as prom]
-            [cljs.test :as t :refer [deftest is testing async]]))
+            [cljs.test :as t :refer [deftest is testing async]])
+  (:require-macros [intemporal.core :as intemporal]))
 
 ;; ── activities / workflows ──────────────────────────────────────────────────────
 
@@ -17,33 +18,39 @@
   (swap! act-calls inc)
   (* x 10))
 
-(defn signal-child-wf [x]
+(intemporal/defn-workflow signal-child-wf [x]
   (let [s (intemporal/wait-for-signal "go")]
     (+ x s)))
 
-(defn parent-join-wf [x child-id]
+(intemporal/defn-workflow parent-join-wf [x child-id]
   (let [a   (intemporal/stub #'ca-act)
         h   (intemporal/run-child-workflow-async #'signal-child-wf [x] :child-id child-id)
         own (a x)]
     {:own own :child (intemporal/join h)}))
 
-(defn parent-cascade-wf [child-id]
+(intemporal/defn-workflow parent-cascade-wf [child-id]
   (intemporal/run-child-workflow-detached #'signal-child-wf [0]
                                           :child-id child-id
                                           :parent-close-policy :cascade-cancel)
   :parent-done)
 
-(defn parent-abandon-wf [child-id]
+(intemporal/defn-workflow parent-abandon-wf [child-id]
   (intemporal/run-child-workflow-detached #'signal-child-wf [0]
                                           :child-id child-id
                                           :parent-close-policy :abandon)
   :parent-done)
 
-;; ── helpers ───────────────────────────────────────────────────────────────────
+;; A worker-driven child that SLEEPS (suspends on a timer) then completes — the
+;; mechanism the child-workflows demo relies on.
+(intemporal/defn-workflow sleepy-child-wf [x]
+  (intemporal/sleep 150)
+  (* x 2))
 
-(defn- register-wfs! []
-  (run! wreg/register-workflow!
-        [#'signal-child-wf #'parent-join-wf #'parent-cascade-wf #'parent-abandon-wf]))
+(intemporal/defn-workflow sleepy-parent-wf [x child-id]
+  (intemporal/join (intemporal/run-child-workflow-async #'sleepy-child-wf [x]
+                                                        :child-id child-id)))
+
+;; ── helpers ───────────────────────────────────────────────────────────────────
 
 (defn- seed! [store wf-fn wf-id args]
   (p/save-event store wf-id {:event-type       :workflow-started
@@ -78,7 +85,6 @@
 
 (deftest async-child-runs-in-parallel-and-can-suspend
   (testing "independent child suspends on a signal; parent waits then joins it"
-    (register-wfs!)
     (reset! act-calls 0)
     (async done
       (let [pid "cljs-parent-1" cid "cljs-parent-1/child"]
@@ -100,7 +106,6 @@
 
 (deftest cascade-cancel-closes-running-children
   (testing ":cascade-cancel cancels a still-running child when the parent completes"
-    (register-wfs!)
     (async done
       (let [pid "cljs-cascade-1" cid "cljs-cascade-1/child"]
         (-> (with-worker
@@ -116,7 +121,6 @@
 
 (deftest abandon-leaves-running-children
   (testing ":abandon leaves the child running after the parent completes"
-    (register-wfs!)
     (async done
       (let [pid "cljs-abandon-1" cid "cljs-abandon-1/child"]
         (-> (with-worker
@@ -128,5 +132,20 @@
                     (prom/then (fn [_]
                                  (is (= :running (p/get-workflow-status store cid))
                                      "abandoned child keeps running"))))))
+            (prom/catch (fn [e] (is false (str "unexpected error: " e))))
+            (prom/finally (fn [_ _] (done))))))))
+
+(deftest worker-driven-child-can-sleep
+  (testing "an independent child can sleep (suspend on a timer) and still complete"
+    (async done
+      (let [pid "cljs-sleepy-1" cid "cljs-sleepy-1/child"]
+        (-> (with-worker
+              (fn [store]
+                (seed! store #'sleepy-parent-wf pid [21 cid])
+                (-> (await-status store pid :completed 5000)
+                    (prom/then (fn [s]
+                                 (is (= :completed s))
+                                 (is (= 42 (intemporal/get-workflow-result store pid))
+                                     "child slept then returned 21*2"))))))
             (prom/catch (fn [e] (is false (str "unexpected error: " e))))
             (prom/finally (fn [_ _] (done))))))))

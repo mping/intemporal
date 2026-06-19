@@ -11,6 +11,7 @@
            intemporal.tests.utils/finally promesa.core/finally
 
            intemporal.core/with-workflow-engine clojure.core/let
+           intemporal.core/defn-workflow clojure.core/defn
 
            promesa.core/let clojure.core/let
            promesa.core/loop clojure.core/loop

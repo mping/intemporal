@@ -22,12 +22,11 @@
             [intemporal.store :as mem]
             [intemporal.store.jdbc :as jdbc-store]
             [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]
-            [intemporal.internal.workflow-registry :as wreg]))
+            [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (defn rec-act [x] (* x 10))
 
-(defn recover-wf [x]
+(intemporal/defn-workflow recover-wf [x]
   (let [a (intemporal/stub #'rec-act)
         r (a x)]
     (intemporal/wait-for-signal "go")
@@ -45,7 +44,6 @@
   "Start on engine-a (suspends on signal), crash it, then a worker on engine-b
   resumes after a signal. Returns the terminal status + result."
   [store]
-  (wreg/clear-registry!)
   (let [wid (str "bug13-" (random-uuid))]
     (let [e1 (intemporal/make-workflow-engine :store store :threads 2)
           f1 (future (intemporal/start-workflow e1 recover-wf [4] :workflow-id wid))]

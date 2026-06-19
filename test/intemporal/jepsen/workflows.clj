@@ -61,7 +61,7 @@
 ;; someone sends the signal from another process, the workflow should resume.
 ;; With the current implementation it will NOT: the callback is in a dead atom.
 
-(defn signal-wait-workflow
+(intemporal/defn-workflow signal-wait-workflow
   "Records :before, suspends on signal 'go', records :after."
   [workflow-id nonce]
   (let [act (intemporal/stub #'jepsen-activity)]
@@ -75,7 +75,7 @@
 ;; Runs a chain of activities.  If the worker crashes mid-chain and never
 ;; explicitly calls resume-workflow, the remaining activities never run.
 
-(defn activity-chain-workflow
+(intemporal/defn-workflow activity-chain-workflow
   "Runs `steps` activities in sequence."
   [workflow-id nonce steps]
   (let [act (intemporal/stub #'jepsen-activity)]
@@ -90,7 +90,7 @@
 ;; the workflow never observes the cancellation because it never re-enters
 ;; the execution loop.
 
-(defn cancel-sleep-workflow
+(intemporal/defn-workflow cancel-sleep-workflow
   "Records :started, then blocks on signal 'wake'."
   [workflow-id nonce]
   (let [act (intemporal/stub #'jepsen-activity)]
@@ -105,7 +105,7 @@
 ;; at nearly the same time, trying to hit the window between the consume-check
 ;; and the register-callback call in process-signal.
 
-(defn rapid-signal-workflow
+(intemporal/defn-workflow rapid-signal-workflow
   "Suspends immediately on signal 'immediate', records :completed after."
   [workflow-id nonce]
   (let [act (intemporal/stub #'jepsen-activity)]

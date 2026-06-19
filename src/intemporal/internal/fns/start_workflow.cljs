@@ -50,8 +50,8 @@
                        :max-iterations max-iterations
                        :wake-fn        run-step})
                     (bthen (fn [result]
-                                 (when-not (waiting-status? result)
-                                   (prom/resolve! d result))))
+                             (when-not (waiting-status? result)
+                               (prom/resolve! d result))))
                     (prom/catch
                       (fn [e]
                         (prom/reject! d e)))))]

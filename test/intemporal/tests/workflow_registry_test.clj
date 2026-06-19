@@ -5,10 +5,21 @@
   both the workflow function and its original arguments from the :workflow-started
   event via the process-global registry, and resume to completion without
   re-running already-completed activities."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [intemporal.core :as intemporal]
             [intemporal.store :as store]
             [intemporal.internal.workflow-registry :as wreg]))
+
+;; This namespace is the only one that calls clear-registry! — it directly tests
+;; the raw registry API. Now that `defn-workflow` registers workflows at load
+;; time across the suite, snapshot and restore the global registry around each
+;; test so these destructive clears don't wipe other namespaces' workflows
+;; (kaocha randomizes test order).
+(use-fixtures :each
+  (fn [f]
+    (let [snapshot @wreg/registry]
+      (try (f)
+           (finally (reset! wreg/registry snapshot))))))
 
 (def exec-count (atom 0))
 

@@ -16,7 +16,11 @@
   (atom {}))
 
 (defn workflow-name
-  "Stable string name for a workflow function (a var or a top-level fn)."
+  "Stable string name for a workflow function. Returns the SAME canonical
+   \"ns/name\" whether given a var (#'my-wf) or the function value, so the name a
+   workflow is registered under always matches the one recorded in its
+   :workflow-started event and looked up on resume — regardless of which form the
+   caller passed."
   [f]
   #?(:clj
      (if (var? f)
@@ -24,16 +28,24 @@
        (clojure.lang.Compiler/demunge        ; ns$fn_name -> "ns/fn-name"
         (.getName (class f))))
      :cljs
-     (if-let [raw (and (fn? f) (.-name f))]
-       (if (str/blank? raw)
-         (str f)
-         (let [parts (str/split raw #"\$")]
-           (if (> (count parts) 1)
-             (str (str/join "." (map #(str/replace % "_" "-") (butlast parts)))
-                  "/"
-                  (str/replace (last parts) "_" "-"))
-             (str/replace raw "_" "-"))))
-       (str f))))
+     (cond
+       ;; A CLJS var: derive "ns/name" from its metadata. (str of a var does not
+       ;; reliably give this, so the old fall-through produced an inconsistent
+       ;; name vs the fn-value path below.)
+       (var? f)
+       (let [m (meta f)] (str (:ns m) "/" (:name m)))
+
+       ;; A fn value: demangle its JS name (ns$fn_name -> ns/fn-name).
+       (and (fn? f) (.-name f) (not (str/blank? (.-name f))))
+       (let [raw   (.-name f)
+             parts (str/split raw #"\$")]
+         (if (> (count parts) 1)
+           (str (str/join "." (map #(str/replace % "_" "-") (butlast parts)))
+                "/"
+                (str/replace (last parts) "_" "-"))
+           (str/replace raw "_" "-")))
+
+       :else (str f))))
 
 (defn register-workflow!
   "Register a workflow function under its derived name (or an explicit name).

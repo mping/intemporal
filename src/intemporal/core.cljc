@@ -739,6 +739,14 @@
   [proto & opts]
   `(im/stub-protocol ~proto ~@opts))
 
+(defmacro defn-workflow
+  "Like `defn`, but also registers the function in the workflow registry under its
+   qualified name at load time, so it can be resumed by id (by the recovery worker
+   or a restarted/other process) without a manual `register-workflow!` call.
+   Accepts the same forms as `defn`; works in Clojure and ClojureScript."
+  [name & fdecl]
+  `(im/defn-workflow ~name ~@fdecl))
+
 ;; ============================================================================
 ;; Saga / Compensations
 ;; ============================================================================

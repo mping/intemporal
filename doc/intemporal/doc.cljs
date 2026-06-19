@@ -3,7 +3,7 @@
             [promesa.core :as p]
             [hiccups.runtime :as hiccupsrt])
   (:require-macros [hiccups.core :as hiccups :refer [html]]
-                   [intemporal.core :refer [stub-protocol]]
+                   [intemporal.core :refer [stub-protocol defn-workflow]]
                    [intemporal.internal.context :refer [blet bthen]]))
 ;;;;
 ;; main code
@@ -17,7 +17,7 @@
   MyActivities
   (foo [this a] (println "record was called:" ) [a :child]))
 
-(defn my-workflow [i]
+(defn-workflow my-workflow [i]
   (let [sf (intemporal/stub activity-fn)
         pr (intemporal/stub-protocol MyActivities)
 

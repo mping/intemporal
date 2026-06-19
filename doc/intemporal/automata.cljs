@@ -5,6 +5,7 @@
             [intemporal.fsm :as fsm]
             [hiccups.runtime :as hiccupsrt])
   (:require-macros [hiccups.core :as hiccups :refer [html]]
+                   [intemporal.core :refer [defn-workflow]]
                    [intemporal.internal.context :refer [blet bthen bloop]]))
 
 ;;;;
@@ -60,7 +61,7 @@
         (js/Promise. (fn [resolve _]
                        (reset! pending-resolve resolve)))))))
 
-(defn run-fsm-workflow [rules init-state]
+(defn-workflow run-fsm-workflow [rules init-state]
   (let [get-next-event (intemporal/stub #'apply-transition)]
     (bloop [current init-state]
       (let [transitions (get rules current)]

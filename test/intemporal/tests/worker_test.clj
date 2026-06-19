@@ -12,12 +12,11 @@
             [intemporal.store :as store]
             [intemporal.store.jdbc :as jdbc-store]
             [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]
-            [intemporal.internal.workflow-registry :as wreg]))
+            [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (defn w-act [x] (* x 10))
 
-(defn worker-wf [x]
+(intemporal/defn-workflow worker-wf [x]
   (let [a (intemporal/stub #'w-act)
         r (a x)]
     (intemporal/wait-for-signal "go")
@@ -35,7 +34,6 @@
 ;; ── recovery: worker resumes a crashed workflow via the ownership scan ──────────
 
 (defn- check-worker-recovery [store]
-  (wreg/clear-registry!)
   (let [wid (str "worker-" (random-uuid))]
     ;; Phase 1: start, suspend on signal, then crash (no signal sent).
     (let [e1 (intemporal/make-workflow-engine :store store :threads 2)

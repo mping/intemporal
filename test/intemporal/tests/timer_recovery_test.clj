@@ -14,12 +14,11 @@
             [intemporal.store :as store]
             [intemporal.store.jdbc :as jdbc-store]
             [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]
-            [intemporal.internal.workflow-registry :as wreg]))
+            [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (defn t-act [x] (* x 3))
 
-(defn sleeper-wf [x ms]
+(intemporal/defn-workflow sleeper-wf [x ms]
   (let [a (intemporal/stub #'t-act)
         r (a x)]
     (intemporal/sleep ms)
@@ -43,7 +42,6 @@
 ;; ── 1. fire-at determinism across a crash-resume ────────────────────────────────
 
 (defn- check-determinism [store]
-  (wreg/clear-registry!)
   (let [wid (str "det-" (random-uuid))]
     ;; Start with a long sleep so it suspends on the timer, then crash.
     (let [e1 (intemporal/make-workflow-engine :store store :threads 2)
@@ -85,7 +83,6 @@
 ;; ── 2. timer recovery: worker drives a crashed sleeper to completion ────────────
 
 (defn- check-timer-recovery [store]
-  (wreg/clear-registry!)
   (let [wid (str "trec-" (random-uuid))]
     ;; Short sleep (300ms) so the timer becomes due quickly after the crash.
     (let [e1 (intemporal/make-workflow-engine :store store :threads 2)

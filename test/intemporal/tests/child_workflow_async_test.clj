@@ -28,13 +28,13 @@
   (swap! act-calls inc)
   (* x 10))
 
-(defn signal-child-wf
+(intemporal/defn-workflow signal-child-wf
   "A child that suspends on a signal, then returns x + payload."
   [x]
   (let [s (intemporal/wait-for-signal "go")]
     (+ x s)))
 
-(defn parent-join-wf
+(intemporal/defn-workflow parent-join-wf
   "Schedules an independent child, runs its own activity in the meantime, then joins."
   [x child-id]
   (let [a   (intemporal/stub #'ca-act)
@@ -44,7 +44,7 @@
 
 ;; Policy is a literal at the call site (not passed through args, which JDBC/FDB
 ;; would JSON-round-trip from keyword to string), so one parent fn per policy.
-(defn parent-cascade-wf
+(intemporal/defn-workflow parent-cascade-wf
   "Schedules a detached :cascade-cancel child that waits forever, then completes."
   [child-id]
   (intemporal/run-child-workflow-detached #'signal-child-wf [0]
@@ -52,7 +52,7 @@
                                           :parent-close-policy :cascade-cancel)
   :parent-done)
 
-(defn parent-abandon-wf
+(intemporal/defn-workflow parent-abandon-wf
   "Schedules a detached :abandon child that waits forever, then completes."
   [child-id]
   (intemporal/run-child-workflow-detached #'signal-child-wf [0]
@@ -60,7 +60,7 @@
                                           :parent-close-policy :abandon)
   :parent-done)
 
-(defn parent-requirejoin-wf
+(intemporal/defn-workflow parent-requirejoin-wf
   "Schedules a :require-join child but completes without joining — should fail."
   [child-id]
   (intemporal/run-child-workflow-async #'signal-child-wf [0]
@@ -78,15 +78,6 @@
           (= terminal s) s
           (> (System/currentTimeMillis) deadline) s
           :else (do (Thread/sleep 25) (recur)))))))
-
-(defn- register-wfs!
-  "Register every workflow fn this namespace resumes by id. Idempotent (stable
-   names) — we register rather than clear so concurrent tests with still-polling
-   workers can't wipe a name another test is mid-resume on."
-  []
-  (run! wreg/register-workflow!
-        [#'signal-child-wf #'parent-join-wf #'parent-cascade-wf #'parent-abandon-wf
-         #'parent-requirejoin-wf]))
 
 (defn- seed-top-level!
   "Make `wf-fn` runnable by the worker scan: persist its :workflow-started event
@@ -108,7 +99,6 @@
 ;; ── store-agnostic checks ─────────────────────────────────────────────────────
 
 (defn- check-parallel-suspending-child [store]
-  (register-wfs!)
   (reset! act-calls 0)
   (with-worker [engine store]
     (let [pid (str "parent-" (random-uuid))
@@ -127,7 +117,6 @@
           "parent's activity ran exactly once despite multiple resumes (replay)"))))
 
 (defn- check-cascade-cancel [store]
-  (register-wfs!)
   (with-worker [engine store]
     (let [pid (str "parent-" (random-uuid))
           cid (str pid "/child")]
@@ -138,7 +127,6 @@
           "the orphaned child was cascade-cancelled"))))
 
 (defn- check-abandon [store]
-  (register-wfs!)
   (with-worker [engine store]
     (let [pid (str "parent-" (random-uuid))
           cid (str pid "/child")]
@@ -149,7 +137,6 @@
           "abandoned child keeps running independently"))))
 
 (defn- check-require-join [store]
-  (register-wfs!)
   (with-worker [engine store]
     (let [pid (str "parent-" (random-uuid))
           cid (str pid "/child")]
@@ -158,7 +145,6 @@
           "parent failed because it closed with an un-joined :require-join child"))))
 
 (defn- check-crash-recovery [store]
-  (register-wfs!)
   (reset! act-calls 0)
   (let [pid (str "parent-" (random-uuid))
         cid (str pid "/child")]

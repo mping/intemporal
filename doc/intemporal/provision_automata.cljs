@@ -6,6 +6,7 @@
             [intemporal.fsm :as fsm]
             [hiccups.runtime :as hiccupsrt])
   (:require-macros [hiccups.core :as hiccups :refer [html]]
+                   [intemporal.core :refer [defn-workflow]]
                    [intemporal.internal.context :refer [blet bthen bloop]]))
 
 ;;;;
@@ -133,7 +134,7 @@
 ;; into ctx so downstream activities receive ids from upstream ones.
 ;; No try/catch here — error handling lives inside each activity function.
 
-(defn run-fsm-workflow [rules init-state]
+(defn-workflow run-fsm-workflow [rules init-state]
   (let [get-next-event (intemporal/stub #'apply-transition)
         provision-vm   (intemporal/stub #'provision-vm!)
         attach-vol     (intemporal/stub #'attach-volume!)

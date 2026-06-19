@@ -1,7 +1,8 @@
 (ns intemporal.internal.macros
   (:require [cljs.analyzer.api :as api]
             [intemporal.internal.context :as ctx]
-            [intemporal.internal.activity :as act])
+            [intemporal.internal.activity :as act]
+            [intemporal.internal.workflow-registry :as wreg])
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros])))
 
@@ -17,6 +18,25 @@
 
 ;;;;
 ;; userland
+
+(defmacro defn-workflow
+  "Like `defn`, but also registers the function in the workflow registry under its
+   qualified name at load time, so it can be resumed by id (by the recovery worker
+   or a restarted/other process) without a manual `register-workflow!` call.
+
+   Accepts the same forms as `defn` (docstring, attr-map, multi-arity). Works in
+   both Clojure and ClojureScript. Registration delegates to `register-workflow!`,
+   so the name matches what `start-workflow` records and `resolve-workflow` looks
+   up; re-registration (e.g. by a later `start-workflow`) is idempotent.
+
+   Use it for workflow entry-points. Activities don't need it — they auto-register
+   when stubbed."
+  [name & fdecl]
+  `(do
+     (~'defn ~name ~@fdecl)
+     (wreg/register-workflow! ~(macros/case :clj  `(var ~name)
+                                            :cljs name))
+     (var ~name)))
 
 (defmacro stub-protocol
   "Stub a protocol definition. Opts are currently unused.
