@@ -324,7 +324,7 @@
 ;; ============================================================================
 
 (defn run-child-workflow
-  "Run another workflow as a child workflow.
+  "Synchronously run another workflow as a child workflow.
    The child workflow has its own history but is tracked by the parent."
   [child-workflow-fn args & {:keys [child-id]}]
   (ctx/check-cancelled!)
@@ -357,7 +357,7 @@
                                        :workflow-fn       child-workflow-fn
                                        :args              args}))))))
 
-(def ^:private parent-close-policies #{:cascade-cancel :abandon :require-join})
+(def ^:private parent-close-policies #{:cascade-cancel :abandon :terminate})
 
 (defn- schedule-independent-child!
   "Create a child as an independent, claimable workflow (Tier 2): seed its
@@ -405,21 +405,19 @@
 
    Options:
    - :child-id              custom child workflow id (default: <parent-id>/child-<seq>)
-   - :parent-close-policy   one of :cascade-cancel (default), :abandon, :require-join
-                            — what happens to this child if the parent closes first.
+   - :parent-close-policy   what happens to this child WHEN THE PARENT CLOSES
+                            (success, failure, or cancellation). Mirrors Temporal's
+                            ParentClosePolicy; only ever affects the child, never the
+                            parent's own outcome. Default :terminate.
 
-*   `cascade-cancel` (Default for `run-child-workflow-async`)
-    *   Behavior: Child is cancelled when the parent closes.
-    *   Typical Use Case: The child workflow is tightly coupled and part of the parent's unit of work.
-*   `abandon` (Default for `run-child-workflow-detached`)
-    *   Behavior: Child keeps running when the parent closes.
-    *   Typical Use Case: Fire-and-forget background work.
-*   `require-join`
-    *   Behavior: Parent fails if the child is unfinished when the parent tries to close.
-    *   Typical Use Case: Unfinished child = a bug to surface (ensures the child must complete before the parent can successfully close).
-"
+   Policies (Temporal-aligned):
+   - :terminate      (default) — forcefully stop the child immediately, no cleanup;
+                                 the child ends in the :terminated state.
+   - :cascade-cancel           — request cancellation of the child; a driven child
+                                 observes it and may compensate, ending :cancelled.
+   - :abandon                  — leave the child running independently (fire-and-forget)."
   [child-workflow-fn args & {:keys [child-id parent-close-policy]
-                             :or   {parent-close-policy :cascade-cancel}}]
+                             :or   {parent-close-policy :terminate}}]
   (ctx/check-cancelled!)
   (assert (parent-close-policies parent-close-policy)
           (str "Invalid :parent-close-policy " parent-close-policy))
@@ -433,12 +431,14 @@
 
 (defn run-child-workflow-detached
   "Fire-and-forget variant of `run-child-workflow-async`: schedule an independent
-   child and return its workflow id without any joinable handle. Pair with
-   :parent-close-policy :abandon for true background work that outlives the parent.
+   child and return its workflow id without any joinable handle. For work that
+   should outlive the parent, pass :parent-close-policy :abandon (the default here,
+   like async, is :terminate — Temporal's default — which stops the child when the
+   parent closes).
 
-   Options: same as `run-child-workflow-async` (default policy here is :abandon)."
+   Options: same as `run-child-workflow-async`."
   [child-workflow-fn args & {:keys [child-id parent-close-policy]
-                             :or   {parent-close-policy :abandon}}]
+                             :or   {parent-close-policy :terminate}}]
   (ctx/check-cancelled!)
   (assert (parent-close-policies parent-close-policy)
           (str "Invalid :parent-close-policy " parent-close-policy))
@@ -713,15 +713,7 @@
       (log/debugf "Adding signal %s" signal-name))
     {:signal-id id}))
 
-(def ^:private terminal-status? #{:completed :failed :cancelled})
-
-(defn- has-child-markers?
-  "Cheap guard (uses only load-history) so the child cascade — and the
-   list-children store method it needs — is touched ONLY for workflows that
-   actually scheduled a child."
-  [store workflow-id]
-  (boolean (some #(= :child-workflow-scheduled (:event-type %))
-                 (p/load-history store workflow-id))))
+(def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
 
 (defn cancel-workflow
   "Cancel a running workflow.
@@ -729,11 +721,10 @@
    suspended (e.g. waiting on a signal), wake-workflow forces it to re-enter its
    loop so it observes the cancellation flag rather than waiting forever.
 
-   Cascades to children scheduled with :parent-close-policy :cascade-cancel
-   (recursively). This is done here — not only in the parent's finalizer — because
-   under the worker/ownership-scan model a cancelled workflow is excluded from
-   list-pending and so never re-runs to execute its finalizer; the cascade must
-   happen at cancel time. :abandon / :require-join children are left untouched."
+   Applies each child's :parent-close-policy via `enforce-close-policies!` — done
+   here, not only in the parent's finalizer, because under the worker/ownership-scan
+   model a cancelled workflow is excluded from list-pending and so never re-runs to
+   execute its finalizer; the policy must be applied at cancel time."
   [store workflow-id]
   (log/with-mdc {:workflow-id workflow-id}
     (let [status (p/get-workflow-status store workflow-id)]
@@ -743,12 +734,7 @@
           (p/mark-cancelled store workflow-id)
           (p/wake-workflow store workflow-id)
           (log/debugf "Cancelling workflow")
-          ;; cascade to :cascade-cancel children (recursively)
-          (when (has-child-markers? store workflow-id)
-            (doseq [{:keys [child-id status policy]} (p/list-children store workflow-id)]
-              (when (and (= policy :cascade-cancel)
-                         (not (terminal-status? status)))
-                (cancel-workflow store child-id))))))))
+          (exec/enforce-close-policies! store workflow-id)))))
   {:cancelled true :workflow-id workflow-id})
 
 (defn get-workflow-history

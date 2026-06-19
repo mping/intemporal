@@ -60,37 +60,43 @@
                                           :parent-close-policy :abandon)
   :parent-done)
 
-(intemporal/defn-workflow parent-requirejoin-wf
-  "Schedules a :require-join child but completes without joining — should fail."
+(intemporal/defn-workflow parent-terminate-wf
+  "Schedules a :terminate child (suspended forever) then completes — the child is
+   forcefully terminated when the parent closes."
   [child-id]
-  (intemporal/run-child-workflow-async #'signal-child-wf [0]
-                                       :child-id child-id
-                                       :parent-close-policy :require-join)
-  :done-without-join)
+  (intemporal/run-child-workflow-detached #'signal-child-wf [0]
+                                          :child-id child-id
+                                          :parent-close-policy :terminate)
+  :parent-done)
 
-;; ── three-level tree with DIFFERENT close policies ──────────────────────────────
-;; parent --(:cascade-cancel)--> child --(:abandon)--> grandchild
-;; Each level waits on its own signal so the whole tree stays alive until we act.
+;; ── one tree exercising ALL THREE policies + recursion ──────────────────────────
+;; Cancel the parent and each child diverges by its policy:
+;;   cancel-child (:cascade-cancel) -> :cancelled  (+ its :cascade-cancel grandchild)
+;;   term-child   (:terminate)      -> :terminated
+;;   keep-child   (:abandon)        -> :running
+;; Every level waits on a signal so the whole tree stays alive until we act.
 
-(intemporal/defn-workflow pcp-grandchild-wf []
-  (intemporal/wait-for-signal "gc-go")
-  :gc-done)
+(intemporal/defn-workflow pcp-leaf-wf []
+  (intemporal/wait-for-signal "go")
+  :leaf-done)
 
-(intemporal/defn-workflow pcp-child-wf [gc-id]
-  ;; grandchild is :abandon — it must survive this child being cancelled
-  (intemporal/run-child-workflow-detached #'pcp-grandchild-wf []
+(intemporal/defn-workflow pcp-cancel-child-wf [gc-id]
+  ;; a :cascade-cancel grandchild — proves recursion through a cancelled child
+  (intemporal/run-child-workflow-detached #'pcp-leaf-wf []
                                           :child-id gc-id
-                                          :parent-close-policy :abandon)
-  (intemporal/wait-for-signal "c-go")
-  :c-done)
-
-(intemporal/defn-workflow pcp-parent-wf [c-id gc-id]
-  ;; child is :cascade-cancel — cancelling the parent must cancel it
-  (intemporal/run-child-workflow-detached #'pcp-child-wf [gc-id]
-                                          :child-id c-id
                                           :parent-close-policy :cascade-cancel)
-  (intemporal/wait-for-signal "p-go")
-  :p-done)
+  (intemporal/wait-for-signal "go")
+  :cancel-child-done)
+
+(intemporal/defn-workflow pcp-parent-wf [cancel-id term-id keep-id gc-id]
+  (intemporal/run-child-workflow-detached #'pcp-cancel-child-wf [gc-id]
+                                          :child-id cancel-id :parent-close-policy :cascade-cancel)
+  (intemporal/run-child-workflow-detached #'pcp-leaf-wf []
+                                          :child-id term-id :parent-close-policy :terminate)
+  (intemporal/run-child-workflow-detached #'pcp-leaf-wf []
+                                          :child-id keep-id :parent-close-policy :abandon)
+  (intemporal/wait-for-signal "go")
+  :parent-done)
 
 ;; ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -160,36 +166,47 @@
       (is (= :running (p/get-workflow-status store cid))
           "abandoned child keeps running independently"))))
 
-(defn- check-require-join [store]
+(defn- check-terminate [store]
   (with-worker [engine store]
     (let [pid (str "parent-" (random-uuid))
           cid (str pid "/child")]
-      (seed-top-level! store #'parent-requirejoin-wf pid [cid])
-      (is (= :failed (await-status store pid :failed 5000))
-          "parent failed because it closed with an un-joined :require-join child"))))
+      (seed-top-level! store #'parent-terminate-wf pid [cid])
+      (is (= :completed (await-status store pid :completed 5000))
+          "parent completes without joining the child")
+      (is (= :terminated (await-status store cid :terminated 5000))
+          "the orphaned child was forcefully terminated (:terminated, not :cancelled)"))))
 
 (defn- check-mixed-close-policies [store]
-  ;; parent --(:cascade-cancel)--> child --(:abandon)--> grandchild
-  ;; Cancelling the parent must cascade to the child but NOT to the abandoned
-  ;; grandchild — the two policies diverge within one tree.
+  ;; One tree, all three policies + recursion. Cancel the parent; each child
+  ;; diverges by its policy, and the cascade-cancelled child's own grandchild is
+  ;; cancelled too (recursion).
   (with-worker [engine store]
-    (let [pid (str "pcp-" (random-uuid))
-          cid (str pid "/child")
-          gid (str pid "/grandchild")]
-      (seed-top-level! store #'pcp-parent-wf pid [cid gid])
-      ;; whole tree comes up (each level suspended on its own signal)
-      (is (= :running (await-status store cid :running 3000)) "child running")
-      (is (= :running (await-status store gid :running 3000)) "grandchild running")
+    (let [pid       (str "pcp-" (random-uuid))
+          cancel-id (str pid "/cancel")
+          term-id   (str pid "/term")
+          keep-id   (str pid "/keep")
+          gc-id     (str pid "/grandchild")]
+      (seed-top-level! store #'pcp-parent-wf pid [cancel-id term-id keep-id gc-id])
+      ;; whole tree comes up
+      (is (= :running (await-status store cancel-id :running 3000)) "cancel-child running")
+      (is (= :running (await-status store term-id :running 3000)) "term-child running")
+      (is (= :running (await-status store keep-id :running 3000)) "keep-child running")
+      (is (= :running (await-status store gc-id :running 3000)) "grandchild running")
       (is (= :running (p/get-workflow-status store pid)) "parent running")
-      ;; cancel the parent
+      ;; close the parent
       (intemporal/cancel-workflow store pid)
       (is (= :cancelled (await-status store pid :cancelled 5000)) "parent cancelled")
-      (is (= :cancelled (await-status store cid :cancelled 5000))
-          "child :cascade-cancel — cancelled when the parent closed")
-      ;; give the worker ample time to (incorrectly) cancel the grandchild
+      ;; each policy diverges
+      (is (= :cancelled (await-status store cancel-id :cancelled 5000))
+          ":cascade-cancel child ends :cancelled")
+      (is (= :terminated (await-status store term-id :terminated 5000))
+          ":terminate child ends :terminated")
+      (is (= :cancelled (await-status store gc-id :cancelled 5000))
+          "recursion: the cascade-cancel child's grandchild is cancelled too")
+      ;; abandon survives — give the worker ample time to (incorrectly) close it
       (Thread/sleep 400)
-      (is (= :running (p/get-workflow-status store gid))
-          "grandchild :abandon — survives its parent being cancelled"))))
+      (is (= :running (p/get-workflow-status store keep-id))
+          ":abandon child keeps running"))))
 
 (defn- check-crash-recovery [store]
   (reset! act-calls 0)
@@ -253,14 +270,14 @@
 (deftest ^:integration abandon-fdb
   (testing "fdb" (check-abandon (fdb))))
 
-(deftest require-join-fails-parent-with-unjoined-child
-  (testing "in-memory" (check-require-join (in-memory))))
-(deftest ^:integration require-join-jdbc
-  (testing "jdbc" (let [s (jdbc)] (try (check-require-join s) (finally (.close s))))))
-(deftest ^:integration require-join-fdb
-  (testing "fdb" (check-require-join (fdb))))
+(deftest terminate-forcefully-closes-running-children
+  (testing "in-memory" (check-terminate (in-memory))))
+(deftest ^:integration terminate-jdbc
+  (testing "jdbc" (let [s (jdbc)] (try (check-terminate s) (finally (.close s))))))
+(deftest ^:integration terminate-fdb
+  (testing "fdb" (check-terminate (fdb))))
 
-(deftest mixed-close-policies-cascade-and-abandon
+(deftest mixed-close-policies-all-three
   (testing "in-memory" (check-mixed-close-policies (in-memory))))
 (deftest ^:integration mixed-close-policies-jdbc
   (testing "jdbc" (let [s (jdbc)] (try (check-mixed-close-policies s) (finally (.close s))))))

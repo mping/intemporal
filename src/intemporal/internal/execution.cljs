@@ -376,7 +376,7 @@
 
 (declare finalize-failed)
 
-(def ^:private terminal-status? #{:completed :failed :cancelled})
+(def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
 
 (defn- parent-link [store workflow-id]
   (let [started (->> (p/load-history store workflow-id)
@@ -415,20 +415,28 @@
   (boolean (some #(= :child-workflow-scheduled (:event-type %))
                  (p/load-history store workflow-id))))
 
-(defn- apply-close-policy! [store workflow-id]
+(defn enforce-close-policies!
+  "Apply each child's :parent-close-policy when `workflow-id` closes (acts on
+   CHILDREN only): :cascade-cancel sets the cancel flag + wakes (graceful, ends
+   :cancelled); :terminate writes a terminal :workflow-terminated event (forceful,
+   ends :terminated); :abandon leaves the child running. Recurses into each closed
+   child's children (a closed workflow won't re-run its finalizer under worker
+   drive). Idempotent. Store ops are synchronous on InMemoryStore in CLJS."
+  [store workflow-id]
   (when (has-children? store workflow-id)
     (doseq [{:keys [child-id status policy]} (p/list-children store workflow-id)]
       (when-not (terminal-status? status)
-        (when (= policy :cascade-cancel)
-          (p/mark-cancelled store child-id)
-          (p/wake-workflow store child-id))))))
-
-(defn- unjoined-require-join-child? [store workflow-id]
-  (and (has-children? store workflow-id)
-       (boolean
-         (some (fn [{:keys [status policy]}]
-                 (and (= policy :require-join) (not (terminal-status? status))))
-               (p/list-children store workflow-id)))))
+        (case policy
+          :cascade-cancel (do (p/mark-cancelled store child-id)
+                              (p/wake-workflow store child-id)
+                              (enforce-close-policies! store child-id))
+          :terminate      (do (p/save-event store child-id
+                                            {:event-type  :workflow-terminated
+                                             :workflow-id child-id
+                                             :timestamp   (utils/current-time-ms)})
+                              (p/wake-workflow store child-id)
+                              (enforce-close-policies! store child-id))
+          nil)))))
 
 (defn finalize-completed
   "Save completion events and return result. Returns a promise."
@@ -440,22 +448,15 @@
                    (when (seq pending-events)
                      (p/save-events store workflow-id pending-events))
                    nil))]
-    ;; Tier 2: a parent must not complete with a live :require-join child.
-    (if (unjoined-require-join-child? store workflow-id)
-      (finalize-failed store workflow-id []
-                       (ex-info "Workflow completed with un-joined :require-join child workflows"
-                                {:workflow-id workflow-id})
-                       observer)
-      (do
-        (p/save-event store workflow-id {:event-type :workflow-completed
-                                         :result     result
-                                         :timestamp  (utils/current-time-ms)})
-        (-notify p/on-workflow-completed observer workflow-id result)
-        (apply-close-policy! store workflow-id)
-        (notify-parent-terminal store workflow-id true result)
-        {:status :completed
-         :workflow-id workflow-id
-         :result result}))))
+    (p/save-event store workflow-id {:event-type :workflow-completed
+                                     :result     result
+                                     :timestamp  (utils/current-time-ms)})
+    (-notify p/on-workflow-completed observer workflow-id result)
+    (enforce-close-policies! store workflow-id)
+    (notify-parent-terminal store workflow-id true result)
+    {:status :completed
+     :workflow-id workflow-id
+     :result result}))
 
 (defn finalize-cancelled
   "Save a dedicated cancellation event and return the cancelled result.
@@ -472,7 +473,7 @@
                                      :timestamp  (utils/current-time-ms)})
     (-notify p/on-workflow-cancelled observer workflow-id)
     ;; Tier 2: cascade to children and surface cancellation to the parent.
-    (apply-close-policy! store workflow-id)
+    (enforce-close-policies! store workflow-id)
     (notify-parent-terminal store workflow-id false error-map)
     {:status :cancelled
      :workflow-id workflow-id
@@ -488,7 +489,7 @@
                                      :timestamp  (utils/current-time-ms)})
     (-notify p/on-workflow-failed observer workflow-id error-map)
     ;; Tier 2: enforce close policy on children, then propagate failure to parent.
-    (apply-close-policy! store workflow-id)
+    (enforce-close-policies! store workflow-id)
     (notify-parent-terminal store workflow-id false error-map)
     {:status :failed
      :workflow-id workflow-id

@@ -68,9 +68,9 @@
                                   (intemporal/run-child-workflow failing-child [id])
                                   {:success true}
                                   (catch Exception e
-                                    {:error (ex-message e)})))
+                                    {:error (ex-message e)})))]
             ;; Parent should catch and handle child error
-            ]
+
         (with-result [result (intemporal/start-workflow engine
                                                         parent-with-error [42])]
           (is (match? {:status :completed

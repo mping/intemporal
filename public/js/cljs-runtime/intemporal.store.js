@@ -1,5 +1,5 @@
 goog.provide('intemporal.store');
-intemporal.store.terminal_status_QMARK_ = new cljs.core.PersistentHashSet(null, new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"completed","completed",-486056503),null,new cljs.core.Keyword(null,"cancelled","cancelled",488726224),null,new cljs.core.Keyword(null,"failed","failed",-1397425762),null], null), null);
+intemporal.store.terminal_status_QMARK_ = new cljs.core.PersistentHashSet(null, new cljs.core.PersistentArrayMap(null, 4, [new cljs.core.Keyword(null,"completed","completed",-486056503),null,new cljs.core.Keyword(null,"cancelled","cancelled",488726224),null,new cljs.core.Keyword(null,"terminated","terminated",-1954638860),null,new cljs.core.Keyword(null,"failed","failed",-1397425762),null], null), null);
 
 /**
 * @constructor
@@ -34,18 +34,18 @@ var this__5323__auto____$1 = this;
 return this__5323__auto____$1.cljs$core$ILookup$_lookup$arity$3(null,k__5324__auto__,null);
 }));
 
-(intemporal.store.InMemoryStore.prototype.cljs$core$ILookup$_lookup$arity$3 = (function (this__5325__auto__,k66154,else__5326__auto__){
+(intemporal.store.InMemoryStore.prototype.cljs$core$ILookup$_lookup$arity$3 = (function (this__5325__auto__,k64177,else__5326__auto__){
 var self__ = this;
 var this__5325__auto____$1 = this;
-var G__66170 = k66154;
-var G__66170__$1 = (((G__66170 instanceof cljs.core.Keyword))?G__66170.fqn:null);
-switch (G__66170__$1) {
+var G__64190 = k64177;
+var G__64190__$1 = (((G__64190 instanceof cljs.core.Keyword))?G__64190.fqn:null);
+switch (G__64190__$1) {
 case "state":
 return self__.state;
 
 break;
 default:
-return cljs.core.get.cljs$core$IFn$_invoke$arity$3(self__.__extmap,k66154,else__5326__auto__);
+return cljs.core.get.cljs$core$IFn$_invoke$arity$3(self__.__extmap,k64177,else__5326__auto__);
 
 }
 }));
@@ -53,10 +53,10 @@ return cljs.core.get.cljs$core$IFn$_invoke$arity$3(self__.__extmap,k66154,else__
 (intemporal.store.InMemoryStore.prototype.cljs$core$IKVReduce$_kv_reduce$arity$3 = (function (this__5343__auto__,f__5344__auto__,init__5345__auto__){
 var self__ = this;
 var this__5343__auto____$1 = this;
-return cljs.core.reduce.cljs$core$IFn$_invoke$arity$3((function (ret__5346__auto__,p__66173){
-var vec__66174 = p__66173;
-var k__5347__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66174,(0),null);
-var v__5348__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66174,(1),null);
+return cljs.core.reduce.cljs$core$IFn$_invoke$arity$3((function (ret__5346__auto__,p__64197){
+var vec__64198 = p__64197;
+var k__5347__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64198,(0),null);
+var v__5348__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64198,(1),null);
 return (f__5344__auto__.cljs$core$IFn$_invoke$arity$3 ? f__5344__auto__.cljs$core$IFn$_invoke$arity$3(ret__5346__auto__,k__5347__auto__,v__5348__auto__) : f__5344__auto__.call(null,ret__5346__auto__,k__5347__auto__,v__5348__auto__));
 }),init__5345__auto__,this__5343__auto____$1);
 }));
@@ -71,13 +71,13 @@ if(cljs.core.truth_(temp__5825__auto__)){
 var callback = temp__5825__auto__;
 return setTimeout((function (){
 try{return (callback.cljs$core$IFn$_invoke$arity$0 ? callback.cljs$core$IFn$_invoke$arity$0() : callback.call(null));
-}catch (e66181){if((e66181 instanceof Error)){
-var e = e66181;
-var args__36266__auto__ = new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [e,"Wake callback threw for workflow %s",workflow_id], null);
-var vec__66182 = (((cljs.core.first(args__36266__auto__) instanceof Error))?new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [cljs.core.first(args__36266__auto__),cljs.core.second(args__36266__auto__),cljs.core.drop.cljs$core$IFn$_invoke$arity$2((2),args__36266__auto__)], null):new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [null,cljs.core.first(args__36266__auto__),cljs.core.rest(args__36266__auto__)], null));
-var err__36267__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66182,(0),null);
-var fmt__36268__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66182,(1),null);
-var fmt_args__36269__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66182,(2),null);
+}catch (e64205){if((e64205 instanceof Error)){
+var e = e64205;
+var args__41622__auto__ = new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [e,"Wake callback threw for workflow %s",workflow_id], null);
+var vec__64212 = (((cljs.core.first(args__41622__auto__) instanceof Error))?new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [cljs.core.first(args__41622__auto__),cljs.core.second(args__41622__auto__),cljs.core.drop.cljs$core$IFn$_invoke$arity$2((2),args__41622__auto__)], null):new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [null,cljs.core.first(args__41622__auto__),cljs.core.rest(args__41622__auto__)], null));
+var err__41623__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64212,(0),null);
+var fmt__41624__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64212,(1),null);
+var fmt_args__41625__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64212,(2),null);
 (function (){
 var __run_fn_form = null;
 var __kind = new cljs.core.Keyword(null,"log","log",-1595516004);
@@ -98,21 +98,21 @@ var __otel_context = null;
 var __uid = null;
 var __root1 = __root0;
 var __run_result = null;
-var signal__34552__auto__ = (new cljs.core.Delay((function (){
+var signal__38076__auto__ = (new cljs.core.Delay((function (){
 
-var signal__34543__auto__ = (new taoensso.telemere.impl.Signal((1),__inst,__uid,__ns,null,null,__kind,__id,__level,taoensso.telemere._STAR_ctx_STAR_,taoensso.telemere.impl._STAR_trace_parent_STAR_,__root1,null,null,intemporal.internal.logging.fmat(fmt__36268__auto__,fmt_args__36269__auto__),err__36267__auto__,null,null,null,null,null,null,null));
+var signal__38067__auto__ = (new taoensso.telemere.impl.Signal((1),__inst,__uid,__ns,null,null,__kind,__id,__level,taoensso.telemere._STAR_ctx_STAR_,taoensso.telemere.impl._STAR_trace_parent_STAR_,__root1,null,null,intemporal.internal.logging.fmat(fmt__41624__auto__,fmt_args__41625__auto__),err__41623__auto__,null,null,null,null,null,null,null));
 var temp__5823__auto__ = taoensso.telemere._STAR_xfn_STAR_;
 if(cljs.core.truth_(temp__5823__auto__)){
-var xfn__34544__auto__ = temp__5823__auto__;
-return (xfn__34544__auto__.cljs$core$IFn$_invoke$arity$1 ? xfn__34544__auto__.cljs$core$IFn$_invoke$arity$1(signal__34543__auto__) : xfn__34544__auto__.call(null,signal__34543__auto__));
+var xfn__38068__auto__ = temp__5823__auto__;
+return (xfn__38068__auto__.cljs$core$IFn$_invoke$arity$1 ? xfn__38068__auto__.cljs$core$IFn$_invoke$arity$1(signal__38067__auto__) : xfn__38068__auto__.call(null,signal__38067__auto__));
 } else {
-return signal__34543__auto__;
+return signal__38067__auto__;
 }
 }),null));
-taoensso.telemere.impl.dispatch_signal_BANG_((new taoensso.telemere.impl.WrappedSignal(__kind,__ns,__id,__level,signal__34552__auto__)));
+taoensso.telemere.impl.dispatch_signal_BANG_((new taoensso.telemere.impl.WrappedSignal(__kind,__ns,__id,__level,signal__38076__auto__)));
 
 if(cljs.core.truth_(__run_result)){
-return (__run_result.cljs$core$IFn$_invoke$arity$1 ? __run_result.cljs$core$IFn$_invoke$arity$1(signal__34552__auto__) : __run_result.call(null,signal__34552__auto__));
+return (__run_result.cljs$core$IFn$_invoke$arity$1 ? __run_result.cljs$core$IFn$_invoke$arity$1(signal__38076__auto__) : __run_result.call(null,signal__38076__auto__));
 } else {
 return true;
 }
@@ -123,7 +123,7 @@ return null;
 
 return null;
 } else {
-throw e66181;
+throw e64205;
 
 }
 }}),(0));
@@ -172,21 +172,21 @@ return cljs.core.deref(result);
 var self__ = this;
 var this$__$1 = this;
 var history__$1 = this$__$1.intemporal$protocol$IStore$load_history$arity$2(null,workflow_id);
-return cljs.core.first(cljs.core.filter.cljs$core$IFn$_invoke$arity$2((function (p1__66148_SHARP_){
-return ((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"event-type","event-type",319722813).cljs$core$IFn$_invoke$arity$1(p1__66148_SHARP_),event_type)) && (cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"seq","seq",-1817803783).cljs$core$IFn$_invoke$arity$1(p1__66148_SHARP_),seq_num)));
+return cljs.core.first(cljs.core.filter.cljs$core$IFn$_invoke$arity$2((function (p1__64167_SHARP_){
+return ((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"event-type","event-type",319722813).cljs$core$IFn$_invoke$arity$1(p1__64167_SHARP_),event_type)) && (cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"seq","seq",-1817803783).cljs$core$IFn$_invoke$arity$1(p1__64167_SHARP_),seq_num)));
 }),history__$1));
 }));
 
 (intemporal.store.InMemoryStore.prototype.intemporal$protocol$IStore$list_children$arity$2 = (function (this$,parent_id){
 var self__ = this;
 var this$__$1 = this;
-return cljs.core.mapv.cljs$core$IFn$_invoke$arity$2((function (p__66203){
-var vec__66204 = p__66203;
-var child_id = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66204,(0),null);
-var map__66207 = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66204,(1),null);
-var map__66207__$1 = cljs.core.__destructure_map(map__66207);
-var parent_seq = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__66207__$1,new cljs.core.Keyword(null,"parent-seq","parent-seq",36322310));
-var policy = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__66207__$1,new cljs.core.Keyword(null,"policy","policy",902736495));
+return cljs.core.mapv.cljs$core$IFn$_invoke$arity$2((function (p__64234){
+var vec__64235 = p__64234;
+var child_id = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64235,(0),null);
+var map__64238 = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64235,(1),null);
+var map__64238__$1 = cljs.core.__destructure_map(map__64238);
+var parent_seq = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__64238__$1,new cljs.core.Keyword(null,"parent-seq","parent-seq",36322310));
+var policy = cljs.core.get.cljs$core$IFn$_invoke$arity$2(map__64238__$1,new cljs.core.Keyword(null,"policy","policy",902736495));
 return new cljs.core.PersistentArrayMap(null, 4, [new cljs.core.Keyword(null,"child-id","child-id",1325542429),child_id,new cljs.core.Keyword(null,"parent-seq","parent-seq",36322310),parent_seq,new cljs.core.Keyword(null,"policy","policy",902736495),policy,new cljs.core.Keyword(null,"status","status",-1997798413),this$__$1.intemporal$protocol$IStore$get_workflow_status$arity$2(null,child_id)], null);
 }),cljs.core.get_in.cljs$core$IFn$_invoke$arity$2(cljs.core.deref(self__.state),new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),parent_id,new cljs.core.Keyword(null,"children","children",-940561982)], null)));
 }));
@@ -221,12 +221,12 @@ return cljs.core.get_in.cljs$core$IFn$_invoke$arity$3(cljs.core.deref(self__.sta
 var self__ = this;
 var ___$1 = this;
 cljs.core.swap_BANG_.cljs$core$IFn$_invoke$arity$2(self__.state,(function (s){
-return cljs.core.reduce.cljs$core$IFn$_invoke$arity$3((function (s__$1,p__66223){
-var vec__66227 = p__66223;
-var wid = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66227,(0),null);
-var wf = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66227,(1),null);
-if(((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(owner_id,new cljs.core.Keyword(null,"owner","owner",-392611939).cljs$core$IFn$_invoke$arity$1(wf))) && (cljs.core.not((function (){var G__66234 = new cljs.core.Keyword(null,"status","status",-1997798413).cljs$core$IFn$_invoke$arity$1(wf);
-return (intemporal.store.terminal_status_QMARK_.cljs$core$IFn$_invoke$arity$1 ? intemporal.store.terminal_status_QMARK_.cljs$core$IFn$_invoke$arity$1(G__66234) : intemporal.store.terminal_status_QMARK_.call(null,G__66234));
+return cljs.core.reduce.cljs$core$IFn$_invoke$arity$3((function (s__$1,p__64246){
+var vec__64247 = p__64246;
+var wid = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64247,(0),null);
+var wf = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64247,(1),null);
+if(((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(owner_id,new cljs.core.Keyword(null,"owner","owner",-392611939).cljs$core$IFn$_invoke$arity$1(wf))) && (cljs.core.not((function (){var G__64251 = new cljs.core.Keyword(null,"status","status",-1997798413).cljs$core$IFn$_invoke$arity$1(wf);
+return (intemporal.store.terminal_status_QMARK_.cljs$core$IFn$_invoke$arity$1 ? intemporal.store.terminal_status_QMARK_.cljs$core$IFn$_invoke$arity$1(G__64251) : intemporal.store.terminal_status_QMARK_.call(null,G__64251));
 })())))){
 return cljs.core.update_in.cljs$core$IFn$_invoke$arity$4(s__$1,new cljs.core.PersistentVector(null, 2, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),wid], null),cljs.core.dissoc,new cljs.core.Keyword(null,"owner","owner",-392611939));
 } else {
@@ -242,24 +242,24 @@ return null;
 var self__ = this;
 var ___$1 = this;
 var now = intemporal.utils.current_time_ms();
-return cljs.core.vec(cljs.core.take.cljs$core$IFn$_invoke$arity$2(limit,cljs.core.map.cljs$core$IFn$_invoke$arity$2(cljs.core.first,cljs.core.sort_by.cljs$core$IFn$_invoke$arity$2((function (p__66244){
-var vec__66245 = p__66244;
-var ___$2 = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66245,(0),null);
-var wf = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66245,(1),null);
+return cljs.core.vec(cljs.core.take.cljs$core$IFn$_invoke$arity$2(limit,cljs.core.map.cljs$core$IFn$_invoke$arity$2(cljs.core.first,cljs.core.sort_by.cljs$core$IFn$_invoke$arity$2((function (p__64254){
+var vec__64255 = p__64254;
+var ___$2 = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64255,(0),null);
+var wf = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64255,(1),null);
 var or__5025__auto__ = new cljs.core.Keyword(null,"wake-at","wake-at",-834638823).cljs$core$IFn$_invoke$arity$1(wf);
 if(cljs.core.truth_(or__5025__auto__)){
 return or__5025__auto__;
 } else {
 return (0);
 }
-}),cljs.core.filter.cljs$core$IFn$_invoke$arity$2((function (p__66253){
-var vec__66254 = p__66253;
-var ___$2 = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66254,(0),null);
-var wf = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66254,(1),null);
+}),cljs.core.filter.cljs$core$IFn$_invoke$arity$2((function (p__64259){
+var vec__64260 = p__64259;
+var ___$2 = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64260,(0),null);
+var wf = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64260,(1),null);
 var and__5023__auto__ = cljs.core.seq(new cljs.core.Keyword(null,"history","history",-247395220).cljs$core$IFn$_invoke$arity$1(wf));
 if(and__5023__auto__){
-var and__5023__auto____$1 = cljs.core.not((function (){var G__66257 = new cljs.core.Keyword(null,"status","status",-1997798413).cljs$core$IFn$_invoke$arity$1(wf);
-return (intemporal.store.terminal_status_QMARK_.cljs$core$IFn$_invoke$arity$1 ? intemporal.store.terminal_status_QMARK_.cljs$core$IFn$_invoke$arity$1(G__66257) : intemporal.store.terminal_status_QMARK_.call(null,G__66257));
+var and__5023__auto____$1 = cljs.core.not((function (){var G__64264 = new cljs.core.Keyword(null,"status","status",-1997798413).cljs$core$IFn$_invoke$arity$1(wf);
+return (intemporal.store.terminal_status_QMARK_.cljs$core$IFn$_invoke$arity$1 ? intemporal.store.terminal_status_QMARK_.cljs$core$IFn$_invoke$arity$1(G__64264) : intemporal.store.terminal_status_QMARK_.call(null,G__64264));
 })());
 if(and__5023__auto____$1){
 var and__5023__auto____$2 = cljs.core.not(new cljs.core.Keyword(null,"cancelled","cancelled",488726224).cljs$core$IFn$_invoke$arity$1(wf));
@@ -291,10 +291,10 @@ var ___$1 = this;
 if(cljs.core.seq(events)){
 cljs.core.swap_BANG_.cljs$core$IFn$_invoke$arity$2(self__.state,(function (s){
 var s__$1 = cljs.core.update_in.cljs$core$IFn$_invoke$arity$4(s,new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),workflow_id,new cljs.core.Keyword(null,"history","history",-247395220)], null),cljs.core.fnil.cljs$core$IFn$_invoke$arity$2(cljs.core.into,cljs.core.PersistentVector.EMPTY),events);
-var term = cljs.core.some((function (p1__66147_SHARP_){
-var G__66262 = new cljs.core.Keyword(null,"event-type","event-type",319722813).cljs$core$IFn$_invoke$arity$1(p1__66147_SHARP_);
-var G__66262__$1 = (((G__66262 instanceof cljs.core.Keyword))?G__66262.fqn:null);
-switch (G__66262__$1) {
+var term = cljs.core.some((function (p1__64166_SHARP_){
+var G__64277 = new cljs.core.Keyword(null,"event-type","event-type",319722813).cljs$core$IFn$_invoke$arity$1(p1__64166_SHARP_);
+var G__64277__$1 = (((G__64277 instanceof cljs.core.Keyword))?G__64277.fqn:null);
+switch (G__64277__$1) {
 case "workflow-completed":
 return new cljs.core.Keyword(null,"completed","completed",-486056503);
 
@@ -305,6 +305,10 @@ return new cljs.core.Keyword(null,"failed","failed",-1397425762);
 break;
 case "workflow-cancelled":
 return new cljs.core.Keyword(null,"cancelled","cancelled",488726224);
+
+break;
+case "workflow-terminated":
+return new cljs.core.Keyword(null,"terminated","terminated",-1954638860);
 
 break;
 default:
@@ -343,20 +347,20 @@ var self__ = this;
 var ___$1 = this;
 cljs.core.swap_BANG_.cljs$core$IFn$_invoke$arity$variadic(self__.state,cljs.core.update_in,new cljs.core.PersistentVector(null, 4, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),workflow_id,new cljs.core.Keyword(null,"signals","signals",1732137021),signal_name], null),cljs.core.fnil.cljs$core$IFn$_invoke$arity$2(cljs.core.conj,cljs.core.PersistentVector.EMPTY),cljs.core.prim_seq.cljs$core$IFn$_invoke$arity$2([signal_data], 0));
 
-var vec__66266_66500 = cljs.core.swap_vals_BANG_.cljs$core$IFn$_invoke$arity$variadic(self__.state,cljs.core.update_in,new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),workflow_id,new cljs.core.Keyword(null,"signal-callbacks","signal-callbacks",-89555556)], null),cljs.core.dissoc,cljs.core.prim_seq.cljs$core$IFn$_invoke$arity$2([signal_name], 0));
-var old_state_66501 = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66266_66500,(0),null);
-var temp__5825__auto___66503 = cljs.core.get_in.cljs$core$IFn$_invoke$arity$2(old_state_66501,new cljs.core.PersistentVector(null, 4, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),workflow_id,new cljs.core.Keyword(null,"signal-callbacks","signal-callbacks",-89555556),signal_name], null));
-if(cljs.core.truth_(temp__5825__auto___66503)){
-var callback_66505 = temp__5825__auto___66503;
+var vec__64282_64415 = cljs.core.swap_vals_BANG_.cljs$core$IFn$_invoke$arity$variadic(self__.state,cljs.core.update_in,new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),workflow_id,new cljs.core.Keyword(null,"signal-callbacks","signal-callbacks",-89555556)], null),cljs.core.dissoc,cljs.core.prim_seq.cljs$core$IFn$_invoke$arity$2([signal_name], 0));
+var old_state_64416 = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64282_64415,(0),null);
+var temp__5825__auto___64417 = cljs.core.get_in.cljs$core$IFn$_invoke$arity$2(old_state_64416,new cljs.core.PersistentVector(null, 4, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),workflow_id,new cljs.core.Keyword(null,"signal-callbacks","signal-callbacks",-89555556),signal_name], null));
+if(cljs.core.truth_(temp__5825__auto___64417)){
+var callback_64418 = temp__5825__auto___64417;
 setTimeout((function (){
-try{return (callback_66505.cljs$core$IFn$_invoke$arity$0 ? callback_66505.cljs$core$IFn$_invoke$arity$0() : callback_66505.call(null));
-}catch (e66272){if((e66272 instanceof Error)){
-var e = e66272;
-var args__36266__auto__ = new cljs.core.PersistentVector(null, 4, 5, cljs.core.PersistentVector.EMPTY_NODE, [e,"Signal callback threw for workflow %s signal %s",workflow_id,signal_name], null);
-var vec__66277 = (((cljs.core.first(args__36266__auto__) instanceof Error))?new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [cljs.core.first(args__36266__auto__),cljs.core.second(args__36266__auto__),cljs.core.drop.cljs$core$IFn$_invoke$arity$2((2),args__36266__auto__)], null):new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [null,cljs.core.first(args__36266__auto__),cljs.core.rest(args__36266__auto__)], null));
-var err__36267__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66277,(0),null);
-var fmt__36268__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66277,(1),null);
-var fmt_args__36269__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__66277,(2),null);
+try{return (callback_64418.cljs$core$IFn$_invoke$arity$0 ? callback_64418.cljs$core$IFn$_invoke$arity$0() : callback_64418.call(null));
+}catch (e64286){if((e64286 instanceof Error)){
+var e = e64286;
+var args__41622__auto__ = new cljs.core.PersistentVector(null, 4, 5, cljs.core.PersistentVector.EMPTY_NODE, [e,"Signal callback threw for workflow %s signal %s",workflow_id,signal_name], null);
+var vec__64288 = (((cljs.core.first(args__41622__auto__) instanceof Error))?new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [cljs.core.first(args__41622__auto__),cljs.core.second(args__41622__auto__),cljs.core.drop.cljs$core$IFn$_invoke$arity$2((2),args__41622__auto__)], null):new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [null,cljs.core.first(args__41622__auto__),cljs.core.rest(args__41622__auto__)], null));
+var err__41623__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64288,(0),null);
+var fmt__41624__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64288,(1),null);
+var fmt_args__41625__auto__ = cljs.core.nth.cljs$core$IFn$_invoke$arity$3(vec__64288,(2),null);
 (function (){
 var __run_fn_form = null;
 var __kind = new cljs.core.Keyword(null,"log","log",-1595516004);
@@ -377,21 +381,21 @@ var __otel_context = null;
 var __uid = null;
 var __root1 = __root0;
 var __run_result = null;
-var signal__34552__auto__ = (new cljs.core.Delay((function (){
+var signal__38076__auto__ = (new cljs.core.Delay((function (){
 
-var signal__34543__auto__ = (new taoensso.telemere.impl.Signal((1),__inst,__uid,__ns,null,null,__kind,__id,__level,taoensso.telemere._STAR_ctx_STAR_,taoensso.telemere.impl._STAR_trace_parent_STAR_,__root1,null,null,intemporal.internal.logging.fmat(fmt__36268__auto__,fmt_args__36269__auto__),err__36267__auto__,null,null,null,null,null,null,null));
+var signal__38067__auto__ = (new taoensso.telemere.impl.Signal((1),__inst,__uid,__ns,null,null,__kind,__id,__level,taoensso.telemere._STAR_ctx_STAR_,taoensso.telemere.impl._STAR_trace_parent_STAR_,__root1,null,null,intemporal.internal.logging.fmat(fmt__41624__auto__,fmt_args__41625__auto__),err__41623__auto__,null,null,null,null,null,null,null));
 var temp__5823__auto__ = taoensso.telemere._STAR_xfn_STAR_;
 if(cljs.core.truth_(temp__5823__auto__)){
-var xfn__34544__auto__ = temp__5823__auto__;
-return (xfn__34544__auto__.cljs$core$IFn$_invoke$arity$1 ? xfn__34544__auto__.cljs$core$IFn$_invoke$arity$1(signal__34543__auto__) : xfn__34544__auto__.call(null,signal__34543__auto__));
+var xfn__38068__auto__ = temp__5823__auto__;
+return (xfn__38068__auto__.cljs$core$IFn$_invoke$arity$1 ? xfn__38068__auto__.cljs$core$IFn$_invoke$arity$1(signal__38067__auto__) : xfn__38068__auto__.call(null,signal__38067__auto__));
 } else {
-return signal__34543__auto__;
+return signal__38067__auto__;
 }
 }),null));
-taoensso.telemere.impl.dispatch_signal_BANG_((new taoensso.telemere.impl.WrappedSignal(__kind,__ns,__id,__level,signal__34552__auto__)));
+taoensso.telemere.impl.dispatch_signal_BANG_((new taoensso.telemere.impl.WrappedSignal(__kind,__ns,__id,__level,signal__38076__auto__)));
 
 if(cljs.core.truth_(__run_result)){
-return (__run_result.cljs$core$IFn$_invoke$arity$1 ? __run_result.cljs$core$IFn$_invoke$arity$1(signal__34552__auto__) : __run_result.call(null,signal__34552__auto__));
+return (__run_result.cljs$core$IFn$_invoke$arity$1 ? __run_result.cljs$core$IFn$_invoke$arity$1(signal__38076__auto__) : __run_result.call(null,signal__38076__auto__));
 } else {
 return true;
 }
@@ -402,7 +406,7 @@ return null;
 
 return null;
 } else {
-throw e66272;
+throw e64286;
 
 }
 }}),(0));
@@ -440,9 +444,8 @@ return cljs.core.swap_BANG_.cljs$core$IFn$_invoke$arity$4(self__.state,cljs.core
 var self__ = this;
 var ___$1 = this;
 var wf = cljs.core.get_in.cljs$core$IFn$_invoke$arity$2(cljs.core.deref(self__.state),new cljs.core.PersistentVector(null, 2, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),workflow_id], null));
-if(cljs.core.truth_((function (){var G__66317 = new cljs.core.Keyword(null,"status","status",-1997798413).cljs$core$IFn$_invoke$arity$1(wf);
-var fexpr__66316 = new cljs.core.PersistentHashSet(null, new cljs.core.PersistentArrayMap(null, 3, [new cljs.core.Keyword(null,"completed","completed",-486056503),null,new cljs.core.Keyword(null,"cancelled","cancelled",488726224),null,new cljs.core.Keyword(null,"failed","failed",-1397425762),null], null), null);
-return (fexpr__66316.cljs$core$IFn$_invoke$arity$1 ? fexpr__66316.cljs$core$IFn$_invoke$arity$1(G__66317) : fexpr__66316.call(null,G__66317));
+if(cljs.core.truth_((function (){var G__64320 = new cljs.core.Keyword(null,"status","status",-1997798413).cljs$core$IFn$_invoke$arity$1(wf);
+return (intemporal.store.terminal_status_QMARK_.cljs$core$IFn$_invoke$arity$1 ? intemporal.store.terminal_status_QMARK_.cljs$core$IFn$_invoke$arity$1(G__64320) : intemporal.store.terminal_status_QMARK_.call(null,G__64320));
 })())){
 return new cljs.core.Keyword(null,"status","status",-1997798413).cljs$core$IFn$_invoke$arity$1(wf);
 } else {
@@ -453,9 +456,9 @@ if(cljs.core.empty_QMARK_(new cljs.core.Keyword(null,"history","history",-247395
 return new cljs.core.Keyword(null,"not-found","not-found",-629079980);
 } else {
 var last_event = cljs.core.last(new cljs.core.Keyword(null,"history","history",-247395220).cljs$core$IFn$_invoke$arity$1(wf));
-var G__66319 = new cljs.core.Keyword(null,"event-type","event-type",319722813).cljs$core$IFn$_invoke$arity$1(last_event);
-var G__66319__$1 = (((G__66319 instanceof cljs.core.Keyword))?G__66319.fqn:null);
-switch (G__66319__$1) {
+var G__64322 = new cljs.core.Keyword(null,"event-type","event-type",319722813).cljs$core$IFn$_invoke$arity$1(last_event);
+var G__64322__$1 = (((G__64322 instanceof cljs.core.Keyword))?G__64322.fqn:null);
+switch (G__64322__$1) {
 case "workflow-completed":
 return new cljs.core.Keyword(null,"completed","completed",-486056503);
 
@@ -466,6 +469,10 @@ return new cljs.core.Keyword(null,"failed","failed",-1397425762);
 break;
 case "workflow-cancelled":
 return new cljs.core.Keyword(null,"cancelled","cancelled",488726224);
+
+break;
+case "workflow-terminated":
+return new cljs.core.Keyword(null,"terminated","terminated",-1954638860);
 
 break;
 default:
@@ -483,9 +490,9 @@ var self__ = this;
 var ___$1 = this;
 cljs.core.swap_BANG_.cljs$core$IFn$_invoke$arity$2(self__.state,(function (s){
 var s__$1 = cljs.core.update_in.cljs$core$IFn$_invoke$arity$4(s,new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),workflow_id,new cljs.core.Keyword(null,"history","history",-247395220)], null),cljs.core.fnil.cljs$core$IFn$_invoke$arity$2(cljs.core.conj,cljs.core.PersistentVector.EMPTY),event);
-var G__66331 = new cljs.core.Keyword(null,"event-type","event-type",319722813).cljs$core$IFn$_invoke$arity$1(event);
-var G__66331__$1 = (((G__66331 instanceof cljs.core.Keyword))?G__66331.fqn:null);
-switch (G__66331__$1) {
+var G__64327 = new cljs.core.Keyword(null,"event-type","event-type",319722813).cljs$core$IFn$_invoke$arity$1(event);
+var G__64327__$1 = (((G__64327 instanceof cljs.core.Keyword))?G__64327.fqn:null);
+switch (G__64327__$1) {
 case "workflow-completed":
 return cljs.core.assoc_in(s__$1,new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),workflow_id,new cljs.core.Keyword(null,"status","status",-1997798413)], null),new cljs.core.Keyword(null,"completed","completed",-486056503));
 
@@ -496,6 +503,10 @@ return cljs.core.assoc_in(s__$1,new cljs.core.PersistentVector(null, 3, 5, cljs.
 break;
 case "workflow-cancelled":
 return cljs.core.assoc_in(s__$1,new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),workflow_id,new cljs.core.Keyword(null,"status","status",-1997798413)], null),new cljs.core.Keyword(null,"cancelled","cancelled",488726224));
+
+break;
+case "workflow-terminated":
+return cljs.core.assoc_in(s__$1,new cljs.core.PersistentVector(null, 3, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"workflows","workflows",1533711151),workflow_id,new cljs.core.Keyword(null,"status","status",-1997798413)], null),new cljs.core.Keyword(null,"terminated","terminated",-1954638860));
 
 break;
 default:
@@ -516,10 +527,10 @@ return cljs.core.pr_sequential_writer(writer__5339__auto__,cljs.core.pr_writer,"
 return cljs.core.pr_sequential_writer(writer__5339__auto__,pr_pair__5341__auto__,"#intemporal.store.InMemoryStore{",", ","}",opts__5340__auto__,cljs.core.concat.cljs$core$IFn$_invoke$arity$2(new cljs.core.PersistentVector(null, 1, 5, cljs.core.PersistentVector.EMPTY_NODE, [(new cljs.core.PersistentVector(null,2,(5),cljs.core.PersistentVector.EMPTY_NODE,[new cljs.core.Keyword(null,"state","state",-1988618099),self__.state],null))], null),self__.__extmap));
 }));
 
-(intemporal.store.InMemoryStore.prototype.cljs$core$IIterable$_iterator$arity$1 = (function (G__66153){
+(intemporal.store.InMemoryStore.prototype.cljs$core$IIterable$_iterator$arity$1 = (function (G__64176){
 var self__ = this;
-var G__66153__$1 = this;
-return (new cljs.core.RecordIter((0),G__66153__$1,1,new cljs.core.PersistentVector(null, 1, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"state","state",-1988618099)], null),(cljs.core.truth_(self__.__extmap)?cljs.core._iterator(self__.__extmap):cljs.core.nil_iter())));
+var G__64176__$1 = this;
+return (new cljs.core.RecordIter((0),G__64176__$1,1,new cljs.core.PersistentVector(null, 1, 5, cljs.core.PersistentVector.EMPTY_NODE, [new cljs.core.Keyword(null,"state","state",-1988618099)], null),(cljs.core.truth_(self__.__extmap)?cljs.core._iterator(self__.__extmap):cljs.core.nil_iter())));
 }));
 
 (intemporal.store.InMemoryStore.prototype.cljs$core$IMeta$_meta$arity$1 = (function (this__5321__auto__){
@@ -556,10 +567,10 @@ return h__5134__auto____$1;
 }
 }));
 
-(intemporal.store.InMemoryStore.prototype.cljs$core$IEquiv$_equiv$arity$2 = (function (this66155,other66156){
+(intemporal.store.InMemoryStore.prototype.cljs$core$IEquiv$_equiv$arity$2 = (function (this64178,other64179){
 var self__ = this;
-var this66155__$1 = this;
-return (((!((other66156 == null)))) && ((((this66155__$1.constructor === other66156.constructor)) && (((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this66155__$1.state,other66156.state)) && (cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this66155__$1.__extmap,other66156.__extmap)))))));
+var this64178__$1 = this;
+return (((!((other64179 == null)))) && ((((this64178__$1.constructor === other64179.constructor)) && (((cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this64178__$1.state,other64179.state)) && (cljs.core._EQ_.cljs$core$IFn$_invoke$arity$2(this64178__$1.__extmap,other64179.__extmap)))))));
 }));
 
 (intemporal.store.InMemoryStore.prototype.cljs$core$IMap$_dissoc$arity$2 = (function (this__5333__auto__,k__5334__auto__){
@@ -572,31 +583,31 @@ return (new intemporal.store.InMemoryStore(self__.state,self__.__meta,cljs.core.
 }
 }));
 
-(intemporal.store.InMemoryStore.prototype.cljs$core$IAssociative$_contains_key_QMARK_$arity$2 = (function (this__5330__auto__,k66154){
+(intemporal.store.InMemoryStore.prototype.cljs$core$IAssociative$_contains_key_QMARK_$arity$2 = (function (this__5330__auto__,k64177){
 var self__ = this;
 var this__5330__auto____$1 = this;
-var G__66376 = k66154;
-var G__66376__$1 = (((G__66376 instanceof cljs.core.Keyword))?G__66376.fqn:null);
-switch (G__66376__$1) {
+var G__64338 = k64177;
+var G__64338__$1 = (((G__64338 instanceof cljs.core.Keyword))?G__64338.fqn:null);
+switch (G__64338__$1) {
 case "state":
 return true;
 
 break;
 default:
-return cljs.core.contains_QMARK_(self__.__extmap,k66154);
+return cljs.core.contains_QMARK_(self__.__extmap,k64177);
 
 }
 }));
 
-(intemporal.store.InMemoryStore.prototype.cljs$core$IAssociative$_assoc$arity$3 = (function (this__5331__auto__,k__5332__auto__,G__66153){
+(intemporal.store.InMemoryStore.prototype.cljs$core$IAssociative$_assoc$arity$3 = (function (this__5331__auto__,k__5332__auto__,G__64176){
 var self__ = this;
 var this__5331__auto____$1 = this;
-var pred__66382 = cljs.core.keyword_identical_QMARK_;
-var expr__66383 = k__5332__auto__;
-if(cljs.core.truth_((pred__66382.cljs$core$IFn$_invoke$arity$2 ? pred__66382.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"state","state",-1988618099),expr__66383) : pred__66382.call(null,new cljs.core.Keyword(null,"state","state",-1988618099),expr__66383)))){
-return (new intemporal.store.InMemoryStore(G__66153,self__.__meta,self__.__extmap,null));
+var pred__64339 = cljs.core.keyword_identical_QMARK_;
+var expr__64340 = k__5332__auto__;
+if(cljs.core.truth_((pred__64339.cljs$core$IFn$_invoke$arity$2 ? pred__64339.cljs$core$IFn$_invoke$arity$2(new cljs.core.Keyword(null,"state","state",-1988618099),expr__64340) : pred__64339.call(null,new cljs.core.Keyword(null,"state","state",-1988618099),expr__64340)))){
+return (new intemporal.store.InMemoryStore(G__64176,self__.__meta,self__.__extmap,null));
 } else {
-return (new intemporal.store.InMemoryStore(self__.state,self__.__meta,cljs.core.assoc.cljs$core$IFn$_invoke$arity$3(self__.__extmap,k__5332__auto__,G__66153),null));
+return (new intemporal.store.InMemoryStore(self__.state,self__.__meta,cljs.core.assoc.cljs$core$IFn$_invoke$arity$3(self__.__extmap,k__5332__auto__,G__64176),null));
 }
 }));
 
@@ -606,10 +617,10 @@ var this__5336__auto____$1 = this;
 return cljs.core.seq(cljs.core.concat.cljs$core$IFn$_invoke$arity$2(new cljs.core.PersistentVector(null, 1, 5, cljs.core.PersistentVector.EMPTY_NODE, [(new cljs.core.MapEntry(new cljs.core.Keyword(null,"state","state",-1988618099),self__.state,null))], null),self__.__extmap));
 }));
 
-(intemporal.store.InMemoryStore.prototype.cljs$core$IWithMeta$_with_meta$arity$2 = (function (this__5322__auto__,G__66153){
+(intemporal.store.InMemoryStore.prototype.cljs$core$IWithMeta$_with_meta$arity$2 = (function (this__5322__auto__,G__64176){
 var self__ = this;
 var this__5322__auto____$1 = this;
-return (new intemporal.store.InMemoryStore(self__.state,G__66153,self__.__extmap,self__.__hash));
+return (new intemporal.store.InMemoryStore(self__.state,G__64176,self__.__extmap,self__.__hash));
 }));
 
 (intemporal.store.InMemoryStore.prototype.cljs$core$ICollection$_conj$arity$2 = (function (this__5328__auto__,entry__5329__auto__){
@@ -646,15 +657,15 @@ return (new intemporal.store.InMemoryStore(state,null,null,null));
 /**
  * Factory function for intemporal.store/InMemoryStore, taking a map of keywords to field values.
  */
-intemporal.store.map__GT_InMemoryStore = (function intemporal$store$map__GT_InMemoryStore(G__66160){
-var extmap__5365__auto__ = (function (){var G__66415 = cljs.core.dissoc.cljs$core$IFn$_invoke$arity$2(G__66160,new cljs.core.Keyword(null,"state","state",-1988618099));
-if(cljs.core.record_QMARK_(G__66160)){
-return cljs.core.into.cljs$core$IFn$_invoke$arity$2(cljs.core.PersistentArrayMap.EMPTY,G__66415);
+intemporal.store.map__GT_InMemoryStore = (function intemporal$store$map__GT_InMemoryStore(G__64182){
+var extmap__5365__auto__ = (function (){var G__64353 = cljs.core.dissoc.cljs$core$IFn$_invoke$arity$2(G__64182,new cljs.core.Keyword(null,"state","state",-1988618099));
+if(cljs.core.record_QMARK_(G__64182)){
+return cljs.core.into.cljs$core$IFn$_invoke$arity$2(cljs.core.PersistentArrayMap.EMPTY,G__64353);
 } else {
-return G__66415;
+return G__64353;
 }
 })();
-return (new intemporal.store.InMemoryStore(new cljs.core.Keyword(null,"state","state",-1988618099).cljs$core$IFn$_invoke$arity$1(G__66160),null,cljs.core.not_empty(extmap__5365__auto__),null));
+return (new intemporal.store.InMemoryStore(new cljs.core.Keyword(null,"state","state",-1988618099).cljs$core$IFn$_invoke$arity$1(G__64182),null,cljs.core.not_empty(extmap__5365__auto__),null));
 });
 
 

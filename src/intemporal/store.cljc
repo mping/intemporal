@@ -3,7 +3,7 @@
             [intemporal.utils :as utils]
             [intemporal.internal.logging :as log]))
 
-(def ^:private terminal-status? #{:completed :failed :cancelled})
+(def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
 
 ;; ============================================================================
 ;; In-Memory Store Implementation
@@ -19,9 +19,10 @@
            (fn [s]
              (let [s (update-in s [:workflows workflow-id :history] (fnil conj []) event)]
                (case (:event-type event)
-                 :workflow-completed (assoc-in s [:workflows workflow-id :status] :completed)
-                 :workflow-failed    (assoc-in s [:workflows workflow-id :status] :failed)
-                 :workflow-cancelled (assoc-in s [:workflows workflow-id :status] :cancelled)
+                 :workflow-completed  (assoc-in s [:workflows workflow-id :status] :completed)
+                 :workflow-failed     (assoc-in s [:workflows workflow-id :status] :failed)
+                 :workflow-cancelled  (assoc-in s [:workflows workflow-id :status] :cancelled)
+                 :workflow-terminated (assoc-in s [:workflows workflow-id :status] :terminated)
                  s))))
     event)
 
@@ -32,9 +33,10 @@
                (let [s    (update-in s [:workflows workflow-id :history] (fnil into []) events)
                      ;; Phase B2: cache terminal status for O(1) reads.
                      term (some #(case (:event-type %)
-                                   :workflow-completed :completed
-                                   :workflow-failed    :failed
-                                   :workflow-cancelled :cancelled
+                                   :workflow-completed  :completed
+                                   :workflow-failed     :failed
+                                   :workflow-cancelled  :cancelled
+                                   :workflow-terminated :terminated
                                    nil)
                                 events)]
                  (if term
@@ -116,7 +118,7 @@
       (cond
         ;; Check terminal status first: a late mark-cancelled must not override
         ;; a workflow that already completed or failed.
-        (#{:completed :failed :cancelled} (:status wf)) (:status wf)   ; Phase B2 O(1) fast path
+        (terminal-status? (:status wf)) (:status wf)   ; Phase B2 O(1) fast path
         (:cancelled wf) :cancelled
         (empty? (:history wf)) :not-found
         :else (let [last-event (last (:history wf))]
@@ -124,6 +126,7 @@
                   :workflow-completed :completed
                   :workflow-failed :failed
                   :workflow-cancelled :cancelled
+                  :workflow-terminated :terminated
                   :running)))))
 
   ;; --- Phase C: ownership-based recovery ---

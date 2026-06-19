@@ -45,7 +45,7 @@
      non-terminal workflow row. `parent-seq` is the parent's sequence number for
      the :child-workflow-scheduled marker (used to write the parent's completion
      event back). `policy` is the parent-close-policy keyword (:cascade-cancel,
-     :abandon, :require-join). Idempotent: re-linking an existing child is a no-op.")
+     :abandon, :terminate). Idempotent: re-linking an existing child is a no-op.")
   (list-children [store parent-id]
     "Return a seq of {:child-id .. :parent-seq .. :policy .. :status ..} maps for
      every child linked to `parent-id`. Empty if the workflow has no children."))

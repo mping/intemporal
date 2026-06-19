@@ -32,6 +32,9 @@
 (def workflow-completed :workflow-completed)
 (def workflow-failed    :workflow-failed)
 (def workflow-cancelled :workflow-cancelled)
+;; Forceful termination (parent-close-policy :terminate) — distinct from
+;; :workflow-cancelled (which is graceful: the workflow observes it and can compensate).
+(def workflow-terminated :workflow-terminated)
 
 ;; Internal utility events
 (def run-once-completed :run-once-completed)

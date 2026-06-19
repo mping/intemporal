@@ -7,8 +7,10 @@
    (suspend) without blocking the parent, and itself spawns a `warm-node`
    grandchild — orchestration nests arbitrarily.
 
-   Every child is scheduled with a :parent-close-policy of :cascade-cancel, so
-   cancelling the parent (the Cancel button) cancels its still-running children.
+   Each child is scheduled with a :parent-close-policy (Temporal's ParentClosePolicy
+   — :cascade-cancel / :abandon / :terminate, default :terminate), which decides its
+   fate when the parent CLOSES (success, failure, or cancellation). Here children use
+   :cascade-cancel, so cancelling the parent (the Cancel button) cancels them too.
 
    Independent children are driven by the recovery worker (here, the CLJS
    promise/setTimeout worker), so the page seeds the parent and starts a worker
@@ -64,7 +66,7 @@
   (let [handles     (mapv (fn [region]
                             ;; if this workflow fails ,
                             (intemporal/run-child-workflow-async #'deploy-region [region]
-                                                                :parent-close-policy :abandon))
+                                                                :parent-close-policy :cascade-cancel))
                           regions)
         deployments (intemporal/join-all handles)]
     {:service      service
@@ -173,7 +175,8 @@
 
 (defn cancel-demo! []
   (when-let [store (:store @app-state)]
-    (intemporal/cancel-workflow store wf-id)))
+    (intemporal/cancel-workflow store wf-id)
+    (render-trees! store wf-id)))
 
 ;;;;
 ;; Bootstrap
