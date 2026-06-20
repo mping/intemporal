@@ -41,9 +41,7 @@
 (defn in-memory [] (store/->InMemoryStore (atom {})))
 
 (defn jdbc []
-  (jdbc-store/make-jdbc-store
-    (or (System/getenv "DATABASE_URL")
-        "jdbc:postgresql://localhost:5432/root?user=root&password=root")))
+  (jdbc-store/make-jdbc-store (jdbc-store/resolve-jdbc-url)))
 
 (defn fdb []
   (let [fdb-api (cfdb/select-api-version 710)

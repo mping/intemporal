@@ -80,8 +80,7 @@
 
 (deftest ^:integration cancellation-reaches-sleeping-workflow-jdbc
   (testing "cancel-workflow terminates a signal-sleeping workflow (JdbcStore)"
-    (let [url   (or (System/getenv "DATABASE_URL")
-                    "jdbc:postgresql://localhost:5432/root?user=root&password=root")
+    (let [url   (jdbc-store/resolve-jdbc-url)
           store (jdbc-store/make-jdbc-store url)]
       (try
         (assert-cancelled (run-scenario store))

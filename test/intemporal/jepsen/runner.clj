@@ -30,6 +30,7 @@
             [intemporal.jepsen.client  :as client]
             [intemporal.jepsen.nemesis :as nemesis]
             [intemporal.jepsen.checker :as checker]
+            [intemporal.store.jdbc :as jdbc-store]
             [clojure.pprint :as pp]
             [taoensso.telemere :as log])
   (:import [java.util.concurrent Executors TimeUnit]))
@@ -38,8 +39,7 @@
 ;; Defaults
 
 (def ^:private default-db-url
-  (or (System/getenv "POSTGRES_JDBC_URI")
-      "jdbc:postgresql://localhost:5432/root?user=root&password=root"))
+  (jdbc-store/resolve-jdbc-url))
 
 (defn- jdbc-spec [db-url]
   {:dbtype "postgresql" :connection-uri db-url :jdbcUrl db-url})
@@ -158,7 +158,7 @@
   "Top-level entry.  Options (all optional):
     :workers           number of forked worker JVMs (default 4)
     :duration          active phase length in seconds (default 120)
-    :db-url            JDBC url (default from POSTGRES_JDBC_URI or localhost)
+    :db-url            JDBC url (default from DATABASE_URL or localhost)
     :no-kill           disable nemesis (baseline mode)
     :submit-rps        submit rate per thread (3 threads, default 5 → 15 RPS)
     :nemesis-min-ms    minimum gap between nemesis ticks (default 3000)

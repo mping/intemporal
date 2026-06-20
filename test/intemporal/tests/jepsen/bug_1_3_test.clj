@@ -68,8 +68,7 @@
 
 (deftest ^:integration engine-restart-recovers-jdbc
   (testing "JdbcStore: worker recovers after crash"
-    (let [url   (or (System/getenv "DATABASE_URL")
-                    "jdbc:postgresql://localhost:5432/root?user=root&password=root")
+    (let [url   (jdbc-store/resolve-jdbc-url)
           store (jdbc-store/make-jdbc-store url)]
       (try (assert-recovered (run-scenario store)) (finally (.close store))))))
 

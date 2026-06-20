@@ -59,8 +59,7 @@
 
 (deftest ^:integration worker-recovery-jdbc
   (testing "JdbcStore: worker resumes via the ownership scan"
-    (let [url   (or (System/getenv "DATABASE_URL")
-                    "jdbc:postgresql://localhost:5432/root?user=root&password=root")
+    (let [url   (jdbc-store/resolve-jdbc-url)
           store (jdbc-store/make-jdbc-store url)]
       (try (check-worker-recovery store) (finally (.close store))))))
 
@@ -92,8 +91,7 @@
 
 (deftest ^:integration claim-exclusivity-jdbc
   (testing "JdbcStore claim-owner exclusivity"
-    (let [url   (or (System/getenv "DATABASE_URL")
-                    "jdbc:postgresql://localhost:5432/root?user=root&password=root")
+    (let [url   (jdbc-store/resolve-jdbc-url)
           store (jdbc-store/make-jdbc-store url)]
       (try (check-claim-exclusivity store) (finally (.close store))))))
 

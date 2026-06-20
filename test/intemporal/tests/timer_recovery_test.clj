@@ -67,8 +67,7 @@
 
 (deftest ^:integration fire-at-deterministic-jdbc
   (testing "JdbcStore"
-    (let [url   (or (System/getenv "DATABASE_URL")
-                    "jdbc:postgresql://localhost:5432/root?user=root&password=root")
+    (let [url   (jdbc-store/resolve-jdbc-url)
           store (jdbc-store/make-jdbc-store url)]
       (try (check-determinism store) (finally (.close store))))))
 
@@ -107,8 +106,7 @@
 
 (deftest ^:integration timer-recovery-jdbc
   (testing "JdbcStore"
-    (let [url   (or (System/getenv "DATABASE_URL")
-                    "jdbc:postgresql://localhost:5432/root?user=root&password=root")
+    (let [url   (jdbc-store/resolve-jdbc-url)
           store (jdbc-store/make-jdbc-store url)]
       (try (check-timer-recovery store) (finally (.close store))))))
 
@@ -144,8 +142,7 @@
 
 (deftest ^:integration wake-at-filter-jdbc
   (testing "JdbcStore"
-    (let [url   (or (System/getenv "DATABASE_URL")
-                    "jdbc:postgresql://localhost:5432/root?user=root&password=root")
+    (let [url   (jdbc-store/resolve-jdbc-url)
           store (jdbc-store/make-jdbc-store url)]
       (try (check-wake-at-filter store) (finally (.close store))))))
 

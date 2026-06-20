@@ -175,7 +175,7 @@ clojure -X:dev:jdbc:jepsen intemporal.jepsen.runner/run \
   :min-alive 1 :grace-s 120
 ```
 
-The JDBC URL defaults to `POSTGRES_JDBC_URI` env var or `localhost:5432/root`.
+The JDBC URL defaults to `DATABASE_URL` env var or `localhost:5432/root`.
 
 ---
 

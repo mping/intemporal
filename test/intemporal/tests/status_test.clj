@@ -45,8 +45,7 @@
 
 (deftest ^:integration status-jdbc
   (testing "status lifecycle on JdbcStore"
-    (let [url   (or (System/getenv "DATABASE_URL")
-                    "jdbc:postgresql://localhost:5432/root?user=root&password=root")
+    (let [url   (jdbc-store/resolve-jdbc-url)
           store (jdbc-store/make-jdbc-store url)]
       (try (check-status store) (finally (.close store))))))
 

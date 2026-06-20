@@ -68,8 +68,7 @@
 
 (deftest ^:integration signal-across-instances-jdbc
   (testing "two JdbcStore instances over the same Postgres"
-    (let [url     (or (System/getenv "DATABASE_URL")
-                      "jdbc:postgresql://localhost:5432/root?user=root&password=root")
+    (let [url     (jdbc-store/resolve-jdbc-url)
           store-a (jdbc-store/make-jdbc-store url)
           store-b (jdbc-store/make-jdbc-store url)]
       (try (assert-woke (run-scenario store-a store-b))

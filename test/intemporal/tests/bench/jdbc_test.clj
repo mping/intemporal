@@ -4,9 +4,7 @@
             [intemporal.tests.bench.test-suite :as suite]
             [next.jdbc :as jdbc]))
 
-;; Default to a local postgres if not specified
-(def db-spec (or (System/getenv "DATABASE_URL")
-                 "jdbc:postgresql://localhost:5432/intemporal_test?user=root&password=root"))
+(def db-spec (jdbc-store/resolve-jdbc-url "jdbc:postgresql://localhost:5432/intemporal_test?user=root&password=root"))
 
 (def admin-spec "jdbc:postgresql://localhost:5432/postgres?user=root&password=root")
 

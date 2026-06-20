@@ -94,8 +94,7 @@
 
 (deftest ^:integration signal-delivered-in-register-consume-window-jdbc
   (testing "RacingStore on JdbcStore: in-window signal wakes the workflow"
-    (let [url   (or (System/getenv "DATABASE_URL")
-                    "jdbc:postgresql://localhost:5432/root?user=root&password=root")
+    (let [url   (jdbc-store/resolve-jdbc-url)
           inner (jdbc-store/make-jdbc-store url)]
       (try
         (assert-woke (run-scenario inner))

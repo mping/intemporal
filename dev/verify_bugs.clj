@@ -7,7 +7,7 @@
     clojure -X:dev:jdbc:fdb verify-bugs/run
 
   Environment / files required:
-    Postgres    — POSTGRES_JDBC_URI  or  jdbc:postgresql://localhost:5432/root?user=root&password=root
+    Postgres    — DATABASE_URL  or  jdbc:postgresql://localhost:5432/root?user=root&password=root
     FoundationDB — docker/fdb.cluster  (written by the docker-compose foundation service)"
   (:require [intemporal.core     :as intemporal]
             [intemporal.protocol :as p]
@@ -20,8 +20,7 @@
 ;; ── helpers ──────────────────────────────────────────────────────────────────
 
 (def ^:private pg-url
-  (or (System/getenv "POSTGRES_JDBC_URI")
-      "jdbc:postgresql://localhost:5432/root?user=root&password=root"))
+  (jdbc-store/resolve-jdbc-url))
 
 (defn- open-fdb []
   (let [fdb (cfdb/select-api-version 710)]
