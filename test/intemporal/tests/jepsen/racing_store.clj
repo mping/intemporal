@@ -56,4 +56,6 @@
         (deliver gate-nil {:wf-id wf-id :sig-name sig-name})
         ;; Block until the test has injected the signal into the window.
         (deref gate-sent 5000 :timeout-in-racing-store))
-      result)))
+      result))
+  (link-child! [store parent-id parent-seq child-id policy])
+  (list-children [store parent-id]))

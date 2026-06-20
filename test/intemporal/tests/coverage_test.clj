@@ -7,8 +7,7 @@
             [intemporal.protocol :as p]
             [intemporal.tests.utils :refer [wait-until with-result]]
             [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-            [matcher-combinators.matchers :as m]))
+            [matcher-combinators.test :refer [match?]]))
 
 ;; ============================================================================
 ;; Signal FIFO ordering
