@@ -41,26 +41,27 @@
 
 (defn- check [store]
   (u/with-worker store
-    (fn []
+    (fn [engine]
       (let [pid (str "order-" (random-uuid))
             cid (str pid "/fulfill")]
-        (u/seed-top-level! store #'place-order pid ["ord-2" 200 cid])
+        (intemporal/submit-workflow engine #'place-order ["ord-2" 200 cid] :workflow-id pid)
         (is (= :running (u/await-status store cid :running 3000))
             "fulfilment child is in-flight (suspended awaiting packing)")
         (is (= :running (p/get-workflow-status store pid)) "parent order still open")
         ;; close the parent -> the close policy fires
         (intemporal/send-signal store pid "close-order" {})
-        (is (= :completed (u/await-status store pid :completed 5000)) "parent order completed")
+        (is (= :completed (:status (intemporal/await-workflow engine pid :timeout-ms 5000)))
+            "parent order completed")
         ;; abandon: the child survives the parent closing
         (Thread/sleep 200)
         (is (= :running (p/get-workflow-status store cid))
             ":abandon child keeps running after the parent closes")
         ;; and it runs to completion on its own once packed
         (intemporal/send-signal store cid "packed" {})
-        (is (= :completed (u/await-status store cid :completed 5000))
-            "abandoned child completes independently")
-        (is (match? {:order "ord-2" :charged {:charged 200} :shipped {:shipped "ord-2"}}
-                    (intemporal/get-workflow-result store cid)))))))
+        (let [r (intemporal/await-workflow engine cid :timeout-ms 5000)]
+          (is (= :completed (:status r)) "abandoned child completes independently")
+          (is (match? {:order "ord-2" :charged {:charged 200} :shipped {:shipped "ord-2"}}
+                      (:result r))))))))
 
 ;; ── tests ───────────────────────────────────────────────────────────────────────
 

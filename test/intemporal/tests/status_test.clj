@@ -10,19 +10,24 @@
             [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (defn dbl [x] (* x 2))
-(defn done-wf [x] (let [a (intemporal/stub #'dbl)] (a x)))
+(intemporal/defn-workflow done-wf [x] (let [a (intemporal/stub #'dbl)] (a x)))
 (defn sleep-wf [] (intemporal/wait-for-signal "go"))
 
 (defn- check-status [store]
   ;; unknown id
   (is (= :not-found (p/get-workflow-status store (str (random-uuid)))))
-  ;; completed (terminal -> cached fast path)
+  ;; completed (terminal -> cached fast path) — submitted + run by a worker
   (let [e (intemporal/make-workflow-engine :store store :threads 2)]
     (try
-      (let [{:keys [workflow-id]} (intemporal/submit-workflow e done-wf [21])]
-        (is (= {:status :completed :result 42}
-               (intemporal/await-workflow e workflow-id :timeout-ms 5000)))
-        (is (= :completed (p/get-workflow-status store workflow-id))))
+      (let [stop (intemporal/start-worker e :poll-ms 25)]
+        (try
+          (let [{:keys [workflow-id]} (intemporal/submit-workflow e #'done-wf [21])]
+            (is (= {:status :completed :result 42}
+                   (intemporal/await-workflow e workflow-id :timeout-ms 5000)))
+            (is (= :completed (p/get-workflow-status store workflow-id))))
+          ;; stop the worker before the start-workflow section below, so it does
+          ;; not race the blocking-loop-driven sleep-wf on the same store.
+          (finally (stop))))
       ;; A cancelled workflow is first-class: finalize-cancelled writes a
       ;; :workflow-cancelled terminal event, so the derived status is :cancelled
       ;; both during the mark-cancelled window and after finalization.

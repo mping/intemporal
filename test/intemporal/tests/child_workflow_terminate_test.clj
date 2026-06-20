@@ -41,20 +41,20 @@
 
 (defn- check [store]
   (u/with-worker store
-    (fn []
+    (fn [engine]
       (let [pid (str "order-" (random-uuid))
             cid (str pid "/fulfill")]
-        (u/seed-top-level! store #'place-order pid ["ord-3" 300 cid])
+        (intemporal/submit-workflow engine #'place-order ["ord-3" 300 cid] :workflow-id pid)
         (is (= :running (u/await-status store cid :running 3000))
             "fulfilment child is in-flight (suspended awaiting packing)")
         (is (= :running (p/get-workflow-status store pid)) "parent order still open")
         ;; close the parent -> the close policy fires
         (intemporal/send-signal store pid "close-order" {})
-        (is (= :completed (u/await-status store pid :completed 5000)) "parent order completed")
-        (is (match? {:order "ord-3" :validated {:valid true}}
-                    (intemporal/get-workflow-result store pid)))
+        (let [r (intemporal/await-workflow engine pid :timeout-ms 5000)]
+          (is (= :completed (:status r)) "parent order completed")
+          (is (match? {:order "ord-3" :validated {:valid true}} (:result r))))
         ;; terminate: the in-flight child is forcefully stopped (no cleanup)
-        (is (= :terminated (u/await-status store cid :terminated 5000))
+        (is (= :terminated (:status (intemporal/await-workflow engine cid :timeout-ms 5000)))
             ":terminate child ends :terminated (forceful, not :cancelled)")))))
 
 ;; ── tests ───────────────────────────────────────────────────────────────────────

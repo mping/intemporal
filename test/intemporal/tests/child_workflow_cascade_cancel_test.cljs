@@ -41,20 +41,19 @@
       (let [store (u/in-memory)
             pid   "order-cc-1" cid "order-cc-1/fulfill"]
         (-> (u/with-worker store
-              (fn []
-                (u/seed-top-level! store #'place-order pid ["ord-1" 100 cid])
+              (fn [engine]
+                (intemporal/submit-workflow engine #'place-order ["ord-1" 100 cid] :workflow-id pid)
                 (-> (u/await-status store cid :running 3000)
                     (prom/then (fn [s]
                                  (is (= :running s) "fulfilment child is in-flight")
                                  (intemporal/send-signal store pid "close-order" {})
-                                 (u/await-status store pid :completed 5000)))
-                    (prom/then (fn [s]
-                                 (is (= :completed s) "parent order completed")
-                                 (is (match? {:order "ord-1" :validated {:valid true}}
-                                             (intemporal/get-workflow-result store pid)))
-                                 (u/await-status store cid :cancelled 5000)))
-                    (prom/then (fn [s]
-                                 (is (= :cancelled s)
+                                 (intemporal/await-workflow engine pid :timeout-ms 5000)))
+                    (prom/then (fn [r]
+                                 (is (= :completed (:status r)) "parent order completed")
+                                 (is (match? {:order "ord-1" :validated {:valid true}} (:result r)))
+                                 (intemporal/await-workflow engine cid :timeout-ms 5000)))
+                    (prom/then (fn [r]
+                                 (is (= :cancelled (:status r))
                                      ":cascade-cancel child is cancelled with the parent"))))))
             (prom/catch (fn [e] (is false (str "unexpected error: " e))))
             (prom/finally (fn [_ _] (done))))))))

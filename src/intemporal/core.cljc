@@ -476,49 +476,66 @@
   (apply sw/start-workflow engine workflow-fn args opts))
 
 
-#?(:clj
-   (defn submit-workflow
-     "Start a workflow asynchronously and return {:workflow-id id} immediately,
-      without blocking the caller until completion (improvements.md §B4). The
-      workflow runs on a background thread; use await-workflow to wait for the
-      result, or resume-workflow/get-workflow-status to observe it later.
+(def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
 
-      Accepts the same options as start-workflow (:workflow-id, :observer, …)."
-     [engine workflow-fn args & opts]
-     (let [m     (apply hash-map opts)
-           wid   (or (:workflow-id m) (str (random-uuid)))
-           opts' (mapcat identity (assoc m :workflow-id wid))]
-       (future
-         (try
-           (apply sw/start-workflow engine workflow-fn args opts')
-           (catch Throwable t
-             (log/warnf t "submit-workflow background run failed"))))
-       {:workflow-id wid})))
+(defn submit-workflow
+  "Submit a workflow for execution BY A WORKER (start-worker) and return
+   {:workflow-id id} immediately — does NOT run it on the caller. Registers the
+   workflow fn and persists its :workflow-started event so the ownership scan picks
+   it up; observe via get-workflow-status / await-workflow / get-workflow-result.
 
-#?(:clj
-   (defn await-workflow
-     "Block until the workflow reaches a terminal state (:completed, :failed,
-      :cancelled) and return {:status … :result …}. Polls get-workflow-status;
-      a workflow id that is briefly :not-found (still starting) is tolerated.
-      Returns {:status :timeout} if the deadline elapses first."
-     [{:keys [store]} workflow-id & {:keys [poll-ms timeout-ms]
-                                     :or   {poll-ms 50 timeout-ms 30000}}]
+   Unlike start-workflow (which drives the workflow in a blocking loop on the
+   caller), this is the correct entry point when a worker is running: running both
+   start-workflow and a worker on the same id would double-drive it.
+
+   Options: :workflow-id (default: random uuid)."
+  [{:keys [store]} workflow-fn args & {:keys [workflow-id]}]
+  (let [wid (or workflow-id (str (random-uuid)))]
+    (p/save-event store wid {:event-type       :workflow-started
+                             :workflow-id      wid
+                             :workflow-fn-name (wreg/register-workflow! workflow-fn)
+                             :args             (vec args)
+                             :timestamp        (utils/current-time-ms)})
+    {:workflow-id wid}))
+
+(defn- terminal-result
+  "Status + result map for a (presumed terminal) workflow. :result is nil unless
+   the workflow completed."
+  [store workflow-id]
+  {:status (p/get-workflow-status store workflow-id)
+   :result (->> (p/load-history store workflow-id)
+                (filter #(= :workflow-completed (:event-type %)))
+                first
+                :result)})
+
+(defn await-workflow
+  "Wait until the workflow reaches a terminal state (:completed, :failed,
+   :cancelled, :terminated) and return {:status … :result …} (:result is nil for
+   non-completed terminals), or {:status :timeout} if the deadline elapses first.
+   A briefly :not-found id (still starting) is tolerated.
+
+   On the JVM this BLOCKS and returns the map; on ClojureScript it returns a
+   promesa promise of the map. A worker (or other driver) must be progressing the
+   workflow. Options: :poll-ms (default 50), :timeout-ms (default 30000)."
+  [{:keys [store]} workflow-id & {:keys [poll-ms timeout-ms]
+                                  :or   {poll-ms 50 timeout-ms 30000}}]
+  #?(:clj
      (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
        (loop []
          (let [st (p/get-workflow-status store workflow-id)]
            (cond
-             (#{:completed :failed :cancelled} st)
-             {:status st
-              :result (->> (p/load-history store workflow-id)
-                           (filter #(= :workflow-completed (:event-type %)))
-                           first
-                           :result)}
-
-             (> (System/currentTimeMillis) deadline)
-             {:status :timeout :workflow-id workflow-id}
-
-             :else
-             (do (Thread/sleep (long poll-ms)) (recur))))))))
+             (terminal-status? st)                   (terminal-result store workflow-id)
+             (> (System/currentTimeMillis) deadline) {:status :timeout :workflow-id workflow-id}
+             :else (do (Thread/sleep (long poll-ms)) (recur))))))
+     :cljs
+     (let [deadline (+ (js/Date.now) timeout-ms)]
+       (letfn [(step []
+                 (let [st (p/get-workflow-status store workflow-id)]
+                   (cond
+                     (terminal-status? st)      (prom/resolved (terminal-result store workflow-id))
+                     (> (js/Date.now) deadline) (prom/resolved {:status :timeout :workflow-id workflow-id})
+                     :else (prom/then (prom/delay poll-ms) (fn [_] (step))))))]
+         (step)))))
 
 (defn resume-workflow
   "Resume a waiting workflow (e.g., after signal delivery or timer).
@@ -712,8 +729,6 @@
       (p/add-signal store workflow-id signal-name {:id id :payload payload})
       (log/debugf "Adding signal %s" signal-name))
     {:signal-id id}))
-
-(def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
 
 (defn cancel-workflow
   "Cancel a running workflow.

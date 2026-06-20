@@ -66,19 +66,20 @@
 (defn- check-parallel-suspending-child [store]
   (reset! act-calls 0)
   (u/with-worker store
-    (fn []
+    (fn [engine]
       (let [pid (str "parent-" (random-uuid))
             cid (str pid "/child")]
-        (u/seed-top-level! store #'parent-join-wf pid [5 cid])
+        (intemporal/submit-workflow engine #'parent-join-wf [5 cid] :workflow-id pid)
         (is (= :running (u/await-status store cid :running 3000))
             "child exists as an independent, running workflow")
         (is (= :running (p/get-workflow-status store pid))
             "parent has not completed — it is waiting on the child")
         (intemporal/send-signal store cid "go" 7)
-        (is (= :completed (u/await-status store pid :completed 5000)))
+        (let [r (intemporal/await-workflow engine pid :timeout-ms 5000)]
+          (is (= :completed (:status r)))
+          (is (= {:own 50 :child 12} (:result r))
+              "own activity = 5*10, child = 5+7"))
         (is (= :completed (p/get-workflow-status store cid)))
-        (is (= {:own 50 :child 12} (intemporal/get-workflow-result store pid))
-            "own activity = 5*10, child = 5+7")
         (is (= 1 @act-calls)
             "parent's activity ran exactly once despite multiple resumes (replay)")))))
 
@@ -87,25 +88,27 @@
   ;; diverges by its policy, and the cascade-cancelled child's own grandchild is
   ;; cancelled too (recursion).
   (u/with-worker store
-    (fn []
+    (fn [engine]
       (let [pid       (str "pcp-" (random-uuid))
             cancel-id (str pid "/cancel")
             term-id   (str pid "/term")
             keep-id   (str pid "/keep")
             gc-id     (str pid "/grandchild")]
-        (u/seed-top-level! store #'pcp-parent-wf pid [cancel-id term-id keep-id gc-id])
+        (intemporal/submit-workflow engine #'pcp-parent-wf [cancel-id term-id keep-id gc-id]
+                                    :workflow-id pid)
         (is (= :running (u/await-status store cancel-id :running 3000)) "cancel-child running")
         (is (= :running (u/await-status store term-id :running 3000)) "term-child running")
         (is (= :running (u/await-status store keep-id :running 3000)) "keep-child running")
         (is (= :running (u/await-status store gc-id :running 3000)) "grandchild running")
         (is (= :running (p/get-workflow-status store pid)) "parent running")
         (intemporal/cancel-workflow store pid)
-        (is (= :cancelled (u/await-status store pid :cancelled 5000)) "parent cancelled")
-        (is (= :cancelled (u/await-status store cancel-id :cancelled 5000))
+        (is (= :cancelled (:status (intemporal/await-workflow engine pid :timeout-ms 5000)))
+            "parent cancelled")
+        (is (= :cancelled (:status (intemporal/await-workflow engine cancel-id :timeout-ms 5000)))
             ":cascade-cancel child ends :cancelled")
-        (is (= :terminated (u/await-status store term-id :terminated 5000))
+        (is (= :terminated (:status (intemporal/await-workflow engine term-id :timeout-ms 5000)))
             ":terminate child ends :terminated")
-        (is (= :cancelled (u/await-status store gc-id :cancelled 5000))
+        (is (= :cancelled (:status (intemporal/await-workflow engine gc-id :timeout-ms 5000)))
             "recursion: the cascade-cancel child's grandchild is cancelled too")
         (Thread/sleep 400)
         (is (= :running (p/get-workflow-status store keep-id))
@@ -115,11 +118,11 @@
   (reset! act-calls 0)
   (let [pid (str "parent-" (random-uuid))
         cid (str pid "/child")]
-    (u/seed-top-level! store #'parent-join-wf pid [5 cid])
-    ;; Phase 1: run until the child suspends on its signal, then "crash" the worker.
+    ;; Phase 1: submit + run until the child suspends on its signal, then "crash".
     (let [e1   (intemporal/make-workflow-engine :store store :threads 4)
           stop (intemporal/start-worker e1 :poll-ms 25 :owner-id "w1")]
       (try
+        (intemporal/submit-workflow e1 #'parent-join-wf [5 cid] :workflow-id pid)
         (is (= :running (u/await-status store cid :running 3000)))
         (is (= :running (p/get-workflow-status store pid)))
         (finally (stop) (intemporal/shutdown-engine e1))))
@@ -130,8 +133,9 @@
             stop (intemporal/start-worker e2 :poll-ms 25 :owner-id "w2")]
         (try
           (intemporal/send-signal store cid "go" 7)
-          (is (= :completed (u/await-status store pid :completed 5000)))
-          (is (= {:own 50 :child 12} (intemporal/get-workflow-result store pid)))
+          (let [r (intemporal/await-workflow e2 pid :timeout-ms 5000)]
+            (is (= :completed (:status r)))
+            (is (= {:own 50 :child 12} (:result r))))
           (is (= calls-before @act-calls)
               "parent's activity was NOT re-executed after recovery (replayed)")
           (finally (stop) (intemporal/shutdown-engine e2)))))))

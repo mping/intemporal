@@ -41,20 +41,19 @@
       (let [store (u/in-memory)
             pid   "order-tm-1" cid "order-tm-1/fulfill"]
         (-> (u/with-worker store
-              (fn []
-                (u/seed-top-level! store #'place-order pid ["ord-3" 300 cid])
+              (fn [engine]
+                (intemporal/submit-workflow engine #'place-order ["ord-3" 300 cid] :workflow-id pid)
                 (-> (u/await-status store cid :running 3000)
                     (prom/then (fn [s]
                                  (is (= :running s) "fulfilment child is in-flight")
                                  (intemporal/send-signal store pid "close-order" {})
-                                 (u/await-status store pid :completed 5000)))
-                    (prom/then (fn [s]
-                                 (is (= :completed s) "parent order completed")
-                                 (is (match? {:order "ord-3" :validated {:valid true}}
-                                             (intemporal/get-workflow-result store pid)))
-                                 (u/await-status store cid :terminated 5000)))
-                    (prom/then (fn [s]
-                                 (is (= :terminated s)
+                                 (intemporal/await-workflow engine pid :timeout-ms 5000)))
+                    (prom/then (fn [r]
+                                 (is (= :completed (:status r)) "parent order completed")
+                                 (is (match? {:order "ord-3" :validated {:valid true}} (:result r)))
+                                 (intemporal/await-workflow engine cid :timeout-ms 5000)))
+                    (prom/then (fn [r]
+                                 (is (= :terminated (:status r))
                                      ":terminate child ends :terminated (forceful, not :cancelled)"))))))
             (prom/catch (fn [e] (is false (str "unexpected error: " e))))
             (prom/finally (fn [_ _] (done))))))))

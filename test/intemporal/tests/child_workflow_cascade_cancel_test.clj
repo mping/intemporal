@@ -41,10 +41,10 @@
 
 (defn- check [store]
   (u/with-worker store
-    (fn []
+    (fn [engine]
       (let [pid (str "order-" (random-uuid))
             cid (str pid "/fulfill")]
-        (u/seed-top-level! store #'place-order pid ["ord-1" 100 cid])
+        (intemporal/submit-workflow engine #'place-order ["ord-1" 100 cid] :workflow-id pid)
         ;; child reaches its suspension point (charged, awaiting "packed") while the
         ;; parent order is still open
         (is (= :running (u/await-status store cid :running 3000))
@@ -52,11 +52,11 @@
         (is (= :running (p/get-workflow-status store pid)) "parent order still open")
         ;; close the parent -> the close policy fires
         (intemporal/send-signal store pid "close-order" {})
-        (is (= :completed (u/await-status store pid :completed 5000)) "parent order completed")
-        (is (match? {:order "ord-1" :validated {:valid true}}
-                    (intemporal/get-workflow-result store pid)))
+        (let [r (intemporal/await-workflow engine pid :timeout-ms 5000)]
+          (is (= :completed (:status r)) "parent order completed")
+          (is (match? {:order "ord-1" :validated {:valid true}} (:result r))))
         ;; cascade-cancel: the in-flight child is cancelled when the parent closed
-        (is (= :cancelled (u/await-status store cid :cancelled 5000))
+        (is (= :cancelled (:status (intemporal/await-workflow engine cid :timeout-ms 5000)))
             ":cascade-cancel child is cancelled when the parent closes")))))
 
 ;; ── tests ───────────────────────────────────────────────────────────────────────

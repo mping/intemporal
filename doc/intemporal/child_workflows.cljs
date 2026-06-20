@@ -13,12 +13,11 @@
    :cascade-cancel, so cancelling the parent (the Cancel button) cancels them too.
 
    Independent children are driven by the recovery worker (here, the CLJS
-   promise/setTimeout worker), so the page seeds the parent and starts a worker
-   rather than calling start-workflow directly."
+   promise/setTimeout worker), so the page submit-workflows the parent and starts a
+   worker rather than calling start-workflow directly."
   (:require [clojure.string :as str]
             [intemporal.core :as intemporal]
             [intemporal.protocol :as p]
-            [intemporal.internal.workflow-registry :as wreg]
             [hiccups.runtime :as hiccupsrt])
   (:require-macros [hiccups.core :as hiccups :refer [html]]
                    [intemporal.core :refer [defn-workflow]]))
@@ -158,15 +157,10 @@
                        :stop   (intemporal/start-worker engine :poll-ms 30)})
     (set-results! "Running…")
     (set-html! "events" "")
-    ;; Seed the parent's :workflow-started event so the worker picks it up and
-    ;; drives it (deploy-service is registered at load by defn-workflow). We don't
-    ;; call start-workflow because its blocking loop must not race the worker on
-    ;; the same workflow.
-    (p/save-event store wf-id {:event-type       :workflow-started
-                               :workflow-id      wf-id
-                               :workflow-fn-name (wreg/workflow-name #'deploy-service)
-                               :args             ["billing-api" regions]
-                               :timestamp        0})
+    ;; Submit the parent for the worker to drive (NOT start-workflow, whose
+    ;; blocking loop would race the worker on the same workflow).
+    (intemporal/submit-workflow engine #'deploy-service ["billing-api" regions]
+                                :workflow-id wf-id)
     (poll! store wf-id)))
 
 ;;;;

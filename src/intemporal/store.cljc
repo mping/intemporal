@@ -1,7 +1,9 @@
 (ns intemporal.store
   (:require [intemporal.protocol :as p]
             [intemporal.utils :as utils]
-            [intemporal.internal.logging :as log]))
+            [intemporal.internal.logging :as log])
+  ;; logging fns (warnf, …) are macros — load them as macros for CLJS too
+  #?(:cljs (:require-macros [intemporal.internal.logging :as log])))
 
 (def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
 

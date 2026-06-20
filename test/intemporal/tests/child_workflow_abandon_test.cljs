@@ -42,24 +42,24 @@
       (let [store (u/in-memory)
             pid   "order-ab-1" cid "order-ab-1/fulfill"]
         (-> (u/with-worker store
-              (fn []
-                (u/seed-top-level! store #'place-order pid ["ord-2" 200 cid])
+              (fn [engine]
+                (intemporal/submit-workflow engine #'place-order ["ord-2" 200 cid] :workflow-id pid)
                 (-> (u/await-status store cid :running 3000)
                     (prom/then (fn [s]
                                  (is (= :running s) "fulfilment child is in-flight")
                                  (intemporal/send-signal store pid "close-order" {})
-                                 (u/await-status store pid :completed 5000)))
-                    (prom/then (fn [s]
-                                 (is (= :completed s) "parent order completed")
+                                 (intemporal/await-workflow engine pid :timeout-ms 5000)))
+                    (prom/then (fn [r]
+                                 (is (= :completed (:status r)) "parent order completed")
                                  (prom/delay 200)))
                     (prom/then (fn [_]
                                  (is (= :running (p/get-workflow-status store cid))
                                      ":abandon child keeps running after the parent closes")
                                  (intemporal/send-signal store cid "packed" {})
-                                 (u/await-status store cid :completed 5000)))
-                    (prom/then (fn [s]
-                                 (is (= :completed s) "abandoned child completes independently")
+                                 (intemporal/await-workflow engine cid :timeout-ms 5000)))
+                    (prom/then (fn [r]
+                                 (is (= :completed (:status r)) "abandoned child completes independently")
                                  (is (match? {:order "ord-2" :charged {:charged 200} :shipped {:shipped "ord-2"}}
-                                             (intemporal/get-workflow-result store cid))))))))
+                                             (:result r))))))))
             (prom/catch (fn [e] (is false (str "unexpected error: " e))))
             (prom/finally (fn [_ _] (done))))))))
