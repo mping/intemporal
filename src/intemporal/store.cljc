@@ -74,17 +74,17 @@
     signal-data)
 
   (consume-signal [_ workflow-id signal-name]
-    (let [result (atom nil)]
-      (swap! state
-             (fn [s]
-               (let [signals (get-in s [:workflows workflow-id :signals signal-name])]
-                 (if (seq signals)
-                   (do
-                     (reset! result (first signals))
-                     (update-in s [:workflows workflow-id :signals signal-name]
-                                (comp vec rest)))
-                   s))))
-      @result))
+    ;; swap-vals! applies the (pure, retry-safe) update atomically and returns
+    ;; [old new]; read the consumed signal from `old`. Avoids the previous
+    ;; reset!-into-an-external-atom side effect inside the swap fn, which re-fires
+    ;; on every CAS retry under contention (deepseek code §5).
+    (let [path    [:workflows workflow-id :signals signal-name]
+          [old _] (swap-vals! state
+                              (fn [s]
+                                (if (seq (get-in s path))
+                                  (update-in s path (comp vec rest))
+                                  s)))]
+      (first (get-in old path))))
 
   (register-signal-callback [_ workflow-id signal-name callback]
     (swap! state assoc-in [:workflows workflow-id :signal-callbacks signal-name] callback))
