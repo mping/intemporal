@@ -212,7 +212,9 @@
   (claim-owner [_ workflow-id owner-id]
     (let [res (jdbc/execute-one! datasource
                 ["UPDATE intemporal_workflows SET owner = ?
-                  WHERE id = ? AND (owner IS NULL OR owner = ?)"
+                  WHERE id = ?
+                    AND (owner IS NULL OR owner = ?)
+                    AND status NOT IN ('completed','failed','cancelled','terminated')"
                  owner-id workflow-id owner-id])]
       (pos? (or (:next.jdbc/update-count res) 0))))
 
@@ -236,12 +238,14 @@
     nil)
 
   (set-wake-at [_ workflow-id wake-at-ms]
-    (jdbc/execute! datasource
-      ["UPDATE intemporal_workflows
-        SET wake_at = CASE WHEN ?::bigint IS NULL THEN NULL
-                           ELSE to_timestamp(?::bigint / 1000.0) END
-        WHERE id = ?"
-       wake-at-ms wake-at-ms workflow-id])
+    (if wake-at-ms
+      (jdbc/execute! datasource
+        ["UPDATE intemporal_workflows SET wake_at = to_timestamp(? / 1000.0)
+          WHERE id = ?"
+         wake-at-ms workflow-id])
+      (jdbc/execute! datasource
+        ["UPDATE intemporal_workflows SET wake_at = NULL WHERE id = ?"
+         workflow-id]))
     nil)
 
   ;; --- Tier 2: independent child workflows ---

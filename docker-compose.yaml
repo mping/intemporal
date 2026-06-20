@@ -44,3 +44,17 @@ services:
       POSTGRES_USER: root
     ports:
       - 5432:5432
+
+  mariadb:
+    image: mariadb:10.6.11
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_PASSWORD: root
+      MARIADB_USER: root
+      MARIADB_DATABASE: root
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+    ports:
+      - 3306:3306      
