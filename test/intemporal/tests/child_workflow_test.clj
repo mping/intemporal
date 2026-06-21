@@ -77,6 +77,30 @@
                        :result {:error string?}}
                       result)))))))
 
+(deftest test-async-before-child-workflow
+  (testing "Async activities scheduled before a child workflow complete successfully"
+    ;; Regression test: when async activities are pending and the workflow then
+    ;; calls run-child-workflow, the :child-workflow suspension must process the
+    ;; pending asyncs first before running the child — otherwise they are silently
+    ;; dropped, the activities never execute, and join-all blocks forever.
+    (intemporal/with-workflow-engine [engine {:threads 2}]
+      (let [async-then-child-flow
+            (fn [id]
+              (let [act   (intemporal/stub #'activity-fn)
+                    prom1 (intemporal/async #(act 1))
+                    prom2 (intemporal/async #(act 2))
+                    child (intemporal/run-child-workflow child-flow [(* id 10)])]
+                {:results (intemporal/join-all [prom1 prom2])
+                 :child   child
+                 :id      id}))]
+        (with-result [result (intemporal/start-workflow engine
+                                                        async-then-child-flow [5])]
+          (is (match? {:status :completed
+                       :result {:results [[:processed 1] [:processed 2]]
+                                :child   {:child-result [:processed 50]}
+                                :id      5}}
+                      result)))))))
+
 (deftest test-multiple-child-workflows
   (testing "Parent can run multiple child workflows sequentially"
     (intemporal/with-workflow-engine [engine {:threads 2}]

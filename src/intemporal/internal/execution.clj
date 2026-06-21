@@ -529,11 +529,18 @@
         :continue)
 
       :child-workflow
-      (process-child-workflow engine
-                              workflow-id
-                              suspension-data
-                              pending-events-list
-                              observer))))
+      (if (seq pending-asyncs-list)
+        (do
+          (process-pending-asyncs-parallel store executor workflow-id
+                                           pending-asyncs-list
+                                           pending-events-list
+                                           observer)
+          :continue)
+        (process-child-workflow engine
+                                workflow-id
+                                suspension-data
+                                pending-events-list
+                                observer)))))
 
 
 (defn run-once

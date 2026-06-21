@@ -21,6 +21,10 @@
   (println (str "slow activity END with " x))
   (* x 2))
 
+;; Child workflow
+(defn child-flow [x]
+  (let [act (intemporal/stub #'slow-activity)]
+    {:child-result (act x)}))
 
 ;; Parallel workflow
 (defn my-parallel-flow [id]
@@ -29,24 +33,25 @@
         prom1 (intemporal/async #(slow 1))
         prom2 (intemporal/async #(slow 2))
         prom3 (intemporal/async #(slow 3))
-        prom4 (intemporal/async #(+ 2 2))]
+        prom4 (intemporal/async #(+ 2 2))
+
+        child-result (intemporal/run-child-workflow child-flow [(* id 10)])]
     (println "After async calls - all scheduled")
     {:args    id
      :slow    (slow 0)
      :prom4   (intemporal/join prom4)
+     :child   child-result
      :results (intemporal/join-all [prom1 prom2 prom3 prom4])
      :id      id}))
 
 
 (deftest test-async-workflow
   (testing "Async workflow with OpenTelemetry tracing"
-    (let [otel-observer (otel-obs/make-otel-observer)]
-      (intemporal/with-workflow-engine [engine {:threads 4 :observer otel-observer}]
-        ;; Activities are automatically registered via stub call
-        (let [result (intemporal/start-workflow engine
-                                                my-parallel-flow [999])]
-          (is (match? {:status :completed
-                       :result {:args 999, :slow 0, :prom4 4, :results [2 4 6 4], :id 999}}
-                      result))
-          ;; Verify spans were created
-          (println "OpenTelemetry observer test completed - spans were emitted to OTel backend"))))))
+    (intemporal/with-workflow-engine [engine {:threads 4 :enable-telemetry true}]
+      ;; Activities are automatically registered via stub call
+      (let [result (intemporal/start-workflow engine my-parallel-flow [999])]
+        (is (match? {:status :completed
+                     :result {:args 999, :slow 0, :prom4 4, :results [2 4 6 4], :id 999}}
+                    result))
+        ;; Verify spans were created
+        (println "OpenTelemetry observer test completed - spans were emitted to OTel backend")))))
