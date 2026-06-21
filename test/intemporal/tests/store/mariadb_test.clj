@@ -5,10 +5,7 @@
             [intemporal.store.jdbc :as jdbc-store]
             [intemporal.tests.store.test-suite :as suite]))
 
-(def mariadb-url
-  "jdbc:mariadb://localhost:3306/root?user=root&password=root")
-
 (deftest mariadb-store-test
   (testing "JDBC Store backed by MariaDB"
-    (with-open [store (jdbc-store/make-jdbc-store (jdbc-store/resolve-jdbc-url mariadb-url))]
+    (with-open [store (jdbc-store/make-jdbc-store (jdbc-store/resolve-jdbc-url))]
       (suite/run-store-tests store))))

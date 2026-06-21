@@ -13,7 +13,7 @@ printf "${BLUE}running clj tests (PostgreSQL)...${NC}\n"
 CLOVERAGE_OUTPUT=target/coverage-clj bin/kaocha test --reporter documentation
 
 printf "${BLUE}running clj integration tests (MariaDB)...${NC}\n"
-DATABASE_URL="jdbc:mariadb://localhost:3306/root?user=root&password=root" \
+DATABASE_URL="${DATABASE_URL:-jdbc:mariadb://localhost:3306/root?user=root&password=root}" \
   CLOVERAGE_OUTPUT=target/coverage-clj-maria \
   bin/kaocha test --focus-meta integration --reporter documentation
 

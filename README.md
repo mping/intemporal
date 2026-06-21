@@ -241,15 +241,16 @@ In **ClojureScript** catch `:default` and rethrow engine suspensions explicitly:
 ```
 
 `make-workflow-engine` options:
-| Option | Default | Description |
-|---|---|---|
-| `:store` | `InMemoryStore` | Persistence backend (see Stores) |
-| `:threads` | 4 | Executor threads |
-| `:scheduler-threads` | 2 | Timer/scheduler threads |
-| `:default-timeout-ms` | 30000 | Default activity timeout |
-| `:enable-logging` | false | Logging observer (logs all events) |
-| `:enable-telemetry` | false | OpenTelemetry observer (JVM only) |
-| `:observer` | — | Additional `IWorkflowObserver` instance |
+
+| Option                | Default         | Description                             |
+|-----------------------|-----------------|-----------------------------------------|
+| `:store`              | `InMemoryStore` | Persistence backend (see Stores)        |
+| `:threads`            | 4               | Executor threads                        |
+| `:scheduler-threads`  | 2               | Timer/scheduler threads                 |
+| `:default-timeout-ms` | 30000           | Default activity timeout                |
+| `:enable-logging`     | false           | Logging observer (logs all events)      |
+| `:enable-telemetry`   | false           | OpenTelemetry observer (JVM only)       |
+| `:observer`           | —               | Additional `IWorkflowObserver` instance |
 
 ### Worker & recovery
 
@@ -306,18 +307,18 @@ index, and child linkage. Requires the `:fdb` deps.edn alias.
 intemporal works in both **Clojure (JVM)** and **ClojureScript**. The API is identical,
 but the runtimes differ:
 
-| Area | JVM | ClojureScript |
-|---|---|---|
-| Execution | Virtual threads, blocking calls, `Future` | Single-threaded, promise chains (`promesa`) |
-| `start-workflow` | Blocks until the workflow reaches a terminal state; returns a result map | Returns a `js/Promise` that resolves to the result map |
-| `await-workflow` | Blocks; returns `{:status … :result …}` | Returns a promesa promise |
-| Engine loop | `loop`/`recur` + `LinkedBlockingQueue` wake channel | Recursive promise chain with `setTimeout` |
-| Activity results | Direct return value | Always a promise (use `blet`/`bthen` from `intemporal.internal.context`) |
-| Suspensions | Subclass `Error` (bypass `catch Exception`) | Plain `deftype`, not `js/Error` (bypass `catch js/Error`) |
-| Saga catch | `(catch Exception e …)` | `(catch :default e …)` + rethrow `suspension?` |
-| OpenTelemetry | Supported via `:enable-telemetry` | Not available |
-| Worker | Daemon thread with exponential backoff | `js/setTimeout` tick, single-threaded |
-| Vars (`#'`) | Stable qualified name | Demangled JS name; `defn-workflow` handles registration uniformly |
+| Area             | JVM                                                                      | ClojureScript                                                            |
+|------------------|--------------------------------------------------------------------------|--------------------------------------------------------------------------|
+| Execution        | Virtual threads, blocking calls, `Future`                                | Single-threaded, promise chains (`promesa`)                              |
+| `start-workflow` | Blocks until the workflow reaches a terminal state; returns a result map | Returns a `js/Promise` that resolves to the result map                   |
+| `await-workflow` | Blocks; returns `{:status … :result …}`                                  | Returns a promesa promise                                                |
+| Engine loop      | `loop`/`recur` + `LinkedBlockingQueue` wake channel                      | Recursive promise chain with `setTimeout`                                |
+| Activity results | Direct return value                                                      | Always a promise (use `blet`/`bthen` from `intemporal.internal.context`) |
+| Suspensions      | Subclass `Error` (bypass `catch Exception`)                              | Plain `deftype`, not `js/Error` (bypass `catch js/Error`)                |
+| Saga catch       | `(catch Exception e …)`                                                  | `(catch :default e …)` + rethrow `suspension?`                           |
+| OpenTelemetry    | Supported via `:enable-telemetry`                                        | Not available                                                            |
+| Worker           | Daemon thread with exponential backoff                                   | `js/setTimeout` tick, single-threaded                                    |
+| Vars (`#'`)      | Stable qualified name                                                    | Demangled JS name; `defn-workflow` handles registration uniformly        |
 
 Internal context macros (`blet`, `bthen`, `bfinally`, `bloop`) restore the dynamic
 `*workflow-context*` binding inside promise callbacks on CLJS — needed for `stub` calls

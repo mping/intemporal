@@ -189,8 +189,13 @@
     (.setItem js/localStorage storage-key (pr-str history))))
 
 (defn load-history []
-  (when-let [s (.getItem js/localStorage storage-key)]
-    (cljs.reader/read-string s)))
+  (try
+    (when-let [s (.getItem js/localStorage storage-key)]
+      (cljs.reader/read-string s))
+    (catch :default e
+      (js/console.warn "Failed to parse saved history, clearing storage:" (.-message e))
+      (.removeItem js/localStorage storage-key)
+      nil)))
 
 (defn clear-storage! []
   (.removeItem js/localStorage storage-key)
@@ -199,18 +204,28 @@
 (defn state-from-history
   "Replay activity-completed events to derive the current FSM state.
    I/O activity results are maps {:event <kw> ...}; the :event field drives transit.
-   User-input activity results are plain keywords."
+   User-input activity results are plain keywords.
+
+   Returns the derived state keyword, or nil if the history is incompatible with
+   the current rules (e.g. from a previous version of the FSM). When nil is
+   returned, localStorage has already been cleared."
   [rules starting-state history]
-  (reduce
-    (fn [s event]
-      (if (= :activity-completed (:event-type event))
-        (let [result (:result event)
-              evt    (if (map? result) (:event result) result)]
-          (-> (fsm/transit {::fsm/rules rules ::fsm/state s} evt)
-              ::fsm/state))
-        s))
-    starting-state
-    history))
+  (try
+    (reduce
+      (fn [s event]
+        (if (= :activity-completed (:event-type event))
+          (let [result (:result event)
+                evt    (if (map? result) (:event result) result)]
+            (-> (fsm/transit {::fsm/rules rules ::fsm/state s} evt)
+                ::fsm/state))
+          s))
+      starting-state
+      history)
+    (catch :default e
+      (js/console.warn "Failed to derive state from saved history, clearing storage:"
+                       (.-message e))
+      (.removeItem js/localStorage storage-key)
+      nil)))
 
 ;;;;
 ;; Rendering helpers
@@ -315,17 +330,20 @@
     (js/mermaid.initialize (clj->js {:startOnLoad false})))
 
   (let [saved-history (load-history)
-        [current-state engine]
-        (if (seq saved-history)
-          (let [store  (store/->InMemoryStore
-                         (atom {:workflows {wf-id {:history saved-history}}}))
-                engine (intemporal/make-workflow-engine
-                         :store store :threads 4 :enable-logging true
-                         :default-timeout-ms nil)
-                state  (state-from-history provision-rules init-state saved-history)]
-            [state engine])
-          [init-state (intemporal/make-workflow-engine :threads 4 :enable-logging true
-                                                       :default-timeout-ms nil)])]
+        derived-state  (when (seq saved-history)
+                         (state-from-history provision-rules init-state saved-history))
+        ;; nil means the saved history was incompatible and has been cleared
+        current-state  (or derived-state init-state)
+        engine         (if derived-state
+                         ;; Valid saved history: create store with it so the workflow can replay
+                         (let [store (store/->InMemoryStore
+                                       (atom {:workflows {wf-id {:history saved-history}}}))]
+                           (intemporal/make-workflow-engine
+                             :store store :threads 4 :enable-logging true
+                             :default-timeout-ms nil))
+                         ;; No (compatible) saved history: fresh engine
+                         (intemporal/make-workflow-engine :threads 4 :enable-logging true
+                                                          :default-timeout-ms nil))]
 
     (reset! app-state {:engine engine :state current-state})
     (setup-controls-listener!)
@@ -335,7 +353,7 @@
     (-> (intemporal/start-workflow engine run-fsm-workflow
                                    [provision-rules init-state] :workflow-id wf-id)
         (bthen (fn [res]
-                 (swap! app-state assoc :state res)
+                 (swap! app-state assoc :state (:result res))
                  (render-all!)
                  (js/console.log "workflow finished" (clj->js res))
                  (set-results! (prn-str res))
