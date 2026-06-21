@@ -33,6 +33,7 @@
   (doseq [[proto impl] protocols]
     (a/register-protocol-activities! registry proto impl))
   (let [wf-id    (or workflow-id (str (random-uuid)))
+        workflow-fn-name (wreg/register-workflow! workflow-fn)
         observer (or observer (get engine :observer))
         ;; Wake channel. wake-fn (invoked from store signal/timer callbacks and
         ;; from cancel-workflow via wake-workflow) only enqueues a token — it
@@ -57,11 +58,11 @@
     (log/with-mdc {:workflow-id wf-id}
       (p/save-event store wf-id {:event-type :workflow-started
                                  :workflow-id wf-id
-                                 :workflow-fn-name (wreg/register-workflow! workflow-fn)
+                                 :workflow-fn-name workflow-fn-name
                                  :args (vec args)
                                  :timestamp (utils/current-time-ms)})
       (when observer
-        (p/on-workflow-started observer wf-id args))
+        (p/on-workflow-started observer wf-id workflow-fn-name args))
       (log/info "Workflow started")
       (try
         (loop [result (run-once)]

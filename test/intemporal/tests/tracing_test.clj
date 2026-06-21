@@ -11,9 +11,15 @@
    To view traces, ensure you have an OpenTelemetry collector running
    at http://localhost:4317 (or configure via OTEL_EXPORTER_OTLP_ENDPOINT)."
   (:require [intemporal.core :as intemporal]
-            [intemporal.observer.otel :as otel-obs]
+            [intemporal.store :as store]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]))
+            [matcher-combinators.test :refer [match?]]
+            [steffan-westcott.clj-otel.api.trace.span :as otspan])
+  (:import [io.opentelemetry.sdk OpenTelemetrySdk]
+           [io.opentelemetry.sdk.trace SdkTracerProvider]
+           [io.opentelemetry.sdk.trace.export SimpleSpanProcessor]
+           [io.opentelemetry.sdk.testing.exporter InMemorySpanExporter]))
 
 (defn slow-activity [x]
   (println (str "slow activity START with " x " on thread " (.getName (Thread/currentThread))))
@@ -55,3 +61,104 @@
                     result))
         ;; Verify spans were created
         (println "OpenTelemetry observer test completed - spans were emitted to OTel backend")))))
+
+;; Fast parent/child for span-shape assertions (no sleeps).
+(defn fast-activity [x] [:done x])
+(defn span-child-flow [x]
+  (let [act (intemporal/stub #'fast-activity)]
+    {:child-result (act x)}))
+(defn span-parent-flow [id]
+  (let [act          (intemporal/stub #'fast-activity)
+        child-result (intemporal/run-child-workflow span-child-flow [(* id 10)])]
+    {:parent-result (act id)
+     :child         child-result}))
+
+(defmacro with-in-memory-spans
+  "Wire clj-otel to an in-memory SDK exporter for the body, restoring the no-op
+   tracer afterwards. Binds `exporter` to the InMemorySpanExporter."
+  [[exporter] & body]
+  `(let [~exporter (InMemorySpanExporter/create)
+         provider# (-> (SdkTracerProvider/builder)
+                       (.addSpanProcessor (SimpleSpanProcessor/create ~exporter))
+                       (.build))
+         sdk#      (-> (OpenTelemetrySdk/builder)
+                       (.setTracerProvider provider#)
+                       (.build))]
+     (otspan/set-default-tracer! (otspan/get-tracer {:open-telemetry sdk#}))
+     (try
+       ~@body
+       (finally
+         (otspan/set-default-tracer! (otspan/noop-tracer))
+         (.shutdown provider#)))))
+
+(deftest test-child-workflow-span-parenting
+  (testing "A child workflow gets its own span, parented to the parent workflow span"
+    (with-in-memory-spans [exporter]
+      (intemporal/with-workflow-engine [engine {:threads 2 :enable-telemetry true}]
+        (let [result (intemporal/start-workflow engine span-parent-flow [5])]
+          (is (= :completed (:status result)))
+          (let [spans     (.getFinishedSpanItems exporter)
+                workflows (filter #(str/starts-with? (.getName %) "workflow:") spans)
+                child     (first (filter #(str/includes? (.getName %) "/child-") workflows))
+                parent    (first (remove #(str/includes? (.getName %) "/child-") workflows))]
+            ;; both the parent and the child workflow emitted a span
+            (is (some? parent) "parent workflow span exists")
+            (is (some? child) "child workflow span exists")
+            ;; the child span is parented to the parent span, in the same trace
+            (is (= (.. parent getSpanContext getSpanId)
+                   (.. child getParentSpanContext getSpanId))
+                "child's parent span id == parent workflow span id")
+            (is (= (.. parent getSpanContext getTraceId)
+                   (.. child getSpanContext getTraceId))
+                "parent and child share one trace")
+            ;; the child's activity span nests under the child workflow span
+            (let [child-act (first (filter #(and (str/starts-with? (.getName %) "activity:")
+                                                 (= (.. child getSpanContext getSpanId)
+                                                    (.. % getParentSpanContext getSpanId)))
+                                           spans))]
+              (is (some? child-act) "child's activity span is parented to the child workflow span"))))))))
+
+;; ── worker-driven (Tier 2) tracing ───────────────────────────────────────────────
+;; The worker model never calls start-workflow: the parent is submitted (its start
+;; observed in submit-workflow) and the worker drives parent + detached child via
+;; resume-workflow (which now inherits the engine's observer). Verifies both get
+;; spans and the detached child nests under the parent.
+
+(intemporal/defn-workflow worker-child-flow [x]
+  (let [act (intemporal/stub #'fast-activity)]
+    {:child-result (act x)}))
+
+(intemporal/defn-workflow worker-parent-flow [id child-id]
+  (let [act (intemporal/stub #'fast-activity)]
+    (intemporal/run-child-workflow-detached #'worker-child-flow [(* id 10)]
+                                            :child-id child-id
+                                            :parent-close-policy :abandon)
+    {:parent-result (act id)}))
+
+(deftest test-worker-child-workflow-span-parenting
+  (testing "A worker-driven parent and its detached child both get spans, child nested"
+    (with-in-memory-spans [exporter]
+      (let [st     (store/->InMemoryStore (atom {}))
+            engine (intemporal/make-workflow-engine :store st :threads 4 :enable-telemetry true)
+            stop   (intemporal/start-worker engine :poll-ms 25 :owner-id (str "w-" (random-uuid)))]
+        (try
+          (let [pid (str "order-" (random-uuid))
+                cid (str pid "/fulfill")]
+            (intemporal/submit-workflow engine #'worker-parent-flow [5 cid] :workflow-id pid)
+            (is (= :completed (:status (intemporal/await-workflow engine pid :timeout-ms 5000)))
+                "parent completed")
+            (is (= :completed (:status (intemporal/await-workflow engine cid :timeout-ms 5000)))
+                "detached child completed")
+            (let [spans     (.getFinishedSpanItems exporter)
+                  workflows (filter #(str/starts-with? (.getName %) "workflow:") spans)
+                  parent    (first (filter #(= (str "workflow:" pid) (.getName %)) workflows))
+                  child     (first (filter #(= (str "workflow:" cid) (.getName %)) workflows))]
+              (is (some? parent) "parent workflow span exists (observed at submit-workflow)")
+              (is (some? child) "detached child workflow span exists")
+              (is (= (.. parent getSpanContext getSpanId)
+                     (.. child getParentSpanContext getSpanId))
+                  "child's parent span id == parent workflow span id")
+              (is (= (.. parent getSpanContext getTraceId)
+                     (.. child getSpanContext getTraceId))
+                  "parent and child share one trace")))
+          (finally (stop) (intemporal/shutdown-engine engine)))))))

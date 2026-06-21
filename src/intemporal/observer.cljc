@@ -8,8 +8,9 @@
 
 (defrecord LoggingObserver [log-atom]
   p/IWorkflowObserver
-  (on-workflow-started [_ workflow-id args]
+  (on-workflow-started [_ workflow-id workflow-name args]
     (swap! log-atom conj {:event :workflow-started
+                          :workflow-name workflow-name
                           :workflow-id workflow-id
                           :args args
                           :timestamp (utils/current-time-ms)}))
@@ -23,6 +24,15 @@
   (on-workflow-resumed [_ workflow-id]
     (swap! log-atom conj {:event :workflow-resumed
                           :workflow-id workflow-id
+                          :timestamp (utils/current-time-ms)}))
+
+  (on-child-workflow-scheduled [_ workflow-id seq-num child-workflow-id child-workflow-name args]
+    (swap! log-atom conj {:event :child-workflow-scheduled
+                          :workflow-id workflow-id
+                          :seq seq-num
+                          :child-workflow-id child-workflow-id
+                          :child-workflow-name child-workflow-name
+                          :args args
                           :timestamp (utils/current-time-ms)}))
 
   (on-activity-scheduled [_ workflow-id seq-num activity-name args]
@@ -140,9 +150,10 @@
   "Create an observer that does nothing"
   []
   (reify p/IWorkflowObserver
-    (on-workflow-started [_ _ _])
+    (on-workflow-started [_ _ _ _])
     (on-workflow-suspended [_ _ _])
     (on-workflow-resumed [_ _])
+    (on-child-workflow-scheduled [_ _ _ _ _ _])
     (on-activity-scheduled [_ _ _ _ _])
     (on-activity-started [_ _ _ _])
     (on-activity-completed [_ _ _ _ _ _])
@@ -168,12 +179,14 @@
     (if (empty? obs)
       (noop-observer)
       (reify p/IWorkflowObserver
-        (on-workflow-started [_ workflow-id args]
-          (doseq [o obs] (p/on-workflow-started o workflow-id args)))
+        (on-workflow-started [_ workflow-id workflow-name args]
+          (doseq [o obs] (p/on-workflow-started o workflow-id workflow-name args)))
         (on-workflow-suspended [_ workflow-id suspension-type]
           (doseq [o obs] (p/on-workflow-suspended o workflow-id suspension-type)))
         (on-workflow-resumed [_ workflow-id]
           (doseq [o obs] (p/on-workflow-resumed o workflow-id)))
+        (on-child-workflow-scheduled [_ workflow-id seq-num child-workflow-id child-workflow-name args]
+          (doseq [o obs] (p/on-child-workflow-scheduled o workflow-id seq-num child-workflow-id child-workflow-name args)))
         (on-activity-scheduled [_ workflow-id seq-num activity-name args]
           (doseq [o obs] (p/on-activity-scheduled o workflow-id seq-num activity-name args)))
         (on-activity-started [_ workflow-id seq-num activity-name]

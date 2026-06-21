@@ -81,7 +81,7 @@
 
    `error` parameters are serialized maps (see `throwable->map`), not live exceptions.
    `result` parameters are the raw Clojure values returned by the activity or workflow."
-  (on-workflow-started [observer workflow-id args]
+  (on-workflow-started [observer workflow-id workflow-name args]
     "Called once when a workflow is first started (not on resume/replay).")
   (on-workflow-suspended [observer workflow-id suspension-type]
     "Called when the workflow suspends. suspension-type is one of:
@@ -89,6 +89,11 @@
      :join-any-pending, :child-workflow.")
   (on-workflow-resumed [observer workflow-id]
     "Called when a suspended workflow re-enters its execution loop.")
+  (on-child-workflow-scheduled [observer workflow-id seq-num child-workflow-id child-workflow-name args]
+    "Called when a workflow schedules a child workflow (sync or async), before the
+     child starts. Lets observers correlate the child (identified by child-workflow-id,
+     running the workflow named child-workflow-name) with its parent — e.g. parent the
+     child's trace span to the parent's.")
   (on-activity-scheduled [observer workflow-id seq-num activity-name args]
     "Called when an activity stub schedules an activity (before it runs).")
   (on-activity-started [observer workflow-id seq-num activity-name]

@@ -68,6 +68,9 @@ bin/kaocha :test-cljs
 
 # Focus a single namespace (use hyphens, not underscores)
 bin/kaocha :test --focus intemporal.tests.signal-test
+
+# View test output/logs
+bin/kaocha :test --no-capture-output
 ```
 
 ## Jepsen / Chaos Tests

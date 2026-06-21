@@ -30,33 +30,34 @@
    - :max-iterations - Maximum replay iterations (default: 1000)"
   [{:keys [store] :as engine} workflow-fn args
    & {:keys [workflow-id observer max-iterations protocols]
-      :or {max-iterations 1000}}]
-  (let [engine   (cond-> engine
-                   protocols (assoc :protocols protocols))
-         wf-id    (or workflow-id (str (random-uuid)))
-         observer (or observer (get engine :observer))]
-     (p/save-event store wf-id {:event-type :workflow-started
-                                :workflow-id wf-id
-                                :workflow-fn-name (wreg/register-workflow! workflow-fn)
-                                :args        (vec args)
-                                :timestamp   (utils/current-time-ms)})
-     (when observer
-       (p/on-workflow-started observer wf-id args))
-     (log/info "Workflow started")
-     (let [d (prom/deferred)]
-      (letfn [(run-step []
-                (-> (exec/run-workflow-internal engine wf-id workflow-fn args
-                      {:observer       observer
-                       :max-iterations max-iterations
-                       :wake-fn        run-step})
-                    (bthen (fn [result]
-                             (when-not (waiting-status? result)
-                               (prom/resolve! d result))))
-                    (prom/catch
-                      (fn [e]
-                        (prom/reject! d e)))))]
-        (run-step)
-        d))))
+      :or   {max-iterations 1000}}]
+  (let [engine           (cond-> engine
+                                         protocols (assoc :protocols protocols))
+        wf-id            (or workflow-id (str (random-uuid)))
+        workflow-fn-name (wreg/register-workflow! workflow-fn)
+        observer         (or observer (get engine :observer))]
+    (p/save-event store wf-id {:event-type       :workflow-started
+                               :workflow-id      wf-id
+                               :workflow-fn-name workflow-fn-name
+                               :args             (vec args)
+                               :timestamp        (utils/current-time-ms)})
+    (when observer
+      (p/on-workflow-started observer wf-id workflow-fn-name args))
+    (log/info "Workflow started")
+    (let [d (prom/deferred)]
+     (letfn [(run-step []
+               (-> (exec/run-workflow-internal engine wf-id workflow-fn args
+                                               {:observer       observer
+                                                                          :max-iterations max-iterations
+                                                                          :wake-fn        run-step})
+                   (bthen (fn [result]
+                            (when-not (waiting-status? result)
+                              (prom/resolve! d result))))
+                   (prom/catch
+                     (fn [e]
+                       (prom/reject! d e)))))]
+       (run-step)
+       d))))
 
 
 (defn start-workflow-async
@@ -83,8 +84,9 @@
    & {:keys [workflow-id observer max-iterations on-complete protocols]
       :or   {max-iterations 1000}}]
   (let [engine   (cond-> engine
-                   protocols (assoc :protocols protocols))
+                         protocols (assoc :protocols protocols))
         wf-id    (or workflow-id (str (random-uuid)))
+        workflow-fn-name (wreg/register-workflow! workflow-fn)
         observer (or observer (get engine :observer))
         wake-fn  (fn wake-fn-impl []
                    (log/with-mdc {:workflow-id wf-id}
@@ -101,25 +103,25 @@
                            (fn [e]
                              (when on-complete
                                (on-complete {:status :failed :error e})))))))]
-     (log/with-mdc {:workflow-id wf-id}
-       (p/save-event store wf-id {:event-type  :workflow-started
-                                  :workflow-id wf-id
-                                  :workflow-fn-name (wreg/register-workflow! workflow-fn)
-                                  :args        (vec args)
-                                  :timestamp   (utils/current-time-ms)})
-       (when observer (p/on-workflow-started observer wf-id args))
-       (log/info "Workflow started (async)")
-      (-> (exec/run-workflow-internal engine wf-id workflow-fn args
-                                      {:observer       observer
-                                       :max-iterations max-iterations
-                                       :wake-fn        wake-fn})
-          (bthen (fn [result]
-                   (when (and on-complete (not (waiting-status? result)))
-                     (on-complete result))
-                   result))
-          (prom/catch js/Error
-            (fn [e]
-              (log/warnf e "Caught exception during async workflow start")
-              (let [err-result {:status :failed :error e}]
-                (when on-complete (on-complete err-result))
-                (prom/rejected e))))))))
+    (log/with-mdc {:workflow-id wf-id}
+      (p/save-event store wf-id {:event-type       :workflow-started
+                                 :workflow-id      wf-id
+                                 :workflow-fn-name workflow-fn-name
+                                 :args             (vec args)
+                                 :timestamp        (utils/current-time-ms)})
+      (when observer (p/on-workflow-started observer wf-id workflow-fn-name args))
+      (log/info "Workflow started (async)")
+     (-> (exec/run-workflow-internal engine wf-id workflow-fn args
+                                     {:observer       observer
+                                      :max-iterations max-iterations
+                                      :wake-fn        wake-fn})
+         (bthen (fn [result]
+                  (when (and on-complete (not (waiting-status? result)))
+                    (on-complete result))
+                  result))
+         (prom/catch js/Error
+           (fn [e]
+             (log/warnf e "Caught exception during async workflow start")
+             (let [err-result {:status :failed :error e}]
+               (when on-complete (on-complete err-result))
+               (prom/rejected e))))))))

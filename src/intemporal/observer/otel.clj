@@ -7,89 +7,103 @@
 
 (defrecord OpenTelemetryObserver [spans-atom]
   p/IWorkflowObserver
-  (on-workflow-started [_ workflow-id args]
-    (let [span-ctx (otspan/new-span! {:name (str "workflow:" workflow-id)
-                                       :attributes {:intemporal/workflow-id workflow-id
-                                                    :intemporal/args (pr-str args)}})]
+  (on-workflow-started [_ workflow-id workflow-name args]
+    (let [span-ctx (otspan/new-span! {:name       (str "workflow:" workflow-name)
+                                      :attributes {:intemporal/workflow-id workflow-id
+                                                   :intemporal/args        (pr-str args)}})]
       (swap! spans-atom assoc-in [:workflows workflow-id] span-ctx)))
 
   (on-workflow-suspended [_ workflow-id suspension-type]
     (when-let [span-ctx (get-in @spans-atom [:workflows workflow-id])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "workflow.suspended"
-                                      :attributes {:intemporal/suspension-type (name suspension-type)}}})))
+                              :event   {:name       "workflow.suspended"
+                                        :attributes {:intemporal/suspension-type (name suspension-type)}}})))
 
   (on-workflow-resumed [_ workflow-id]
     (when-let [span-ctx (get-in @spans-atom [:workflows workflow-id])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "workflow.resumed"
-                                      :attributes {:intemporal/resumed true}}})))
+                              :event   {:name       "workflow.resumed"
+                                        :attributes {:intemporal/resumed true}}})))
+
+  (on-child-workflow-scheduled [_ workflow-id _seq-num child-workflow-id child-workflow-name args]
+    ;; A child workflow runs via run-workflow-internal/resume-workflow and never
+    ;; fires on-workflow-started, so we create its workflow span HERE — parented
+    ;; to the parent's span — and register it under :workflows like any other
+    ;; workflow. The child's own lifecycle events (activity spans, resumed,
+    ;; completed/failed/cancelled) then resolve and end it normally.
+    (when-let [parent-ctx (get-in @spans-atom [:workflows workflow-id])]
+      (let [span-ctx (otspan/new-span! {:name       (str "workflow:" child-workflow-name)
+                                        :parent     parent-ctx
+                                        :attributes {:intemporal/workflow-id        child-workflow-id
+                                                     :intemporal/parent-workflow-id workflow-id
+                                                     :intemporal/args               (pr-str args)}})]
+        (swap! spans-atom assoc-in [:workflows child-workflow-id] span-ctx))))
 
   (on-activity-scheduled [_ workflow-id seq-num activity-name args]
     (when-let [parent-ctx (get-in @spans-atom [:workflows workflow-id])]
-      (let [span-ctx (otspan/new-span! {:name (str "activity:" activity-name)
-                                         :parent parent-ctx
-                                         :attributes {:intemporal/workflow-id workflow-id
-                                                      :intemporal/seq seq-num
-                                                      :intemporal/activity-name activity-name
-                                                      :intemporal/args (pr-str args)}})]
+      (let [span-ctx (otspan/new-span! {:name       (str "activity:" activity-name)
+                                        :parent     parent-ctx
+                                        :attributes {:intemporal/workflow-id   workflow-id
+                                                     :intemporal/seq           seq-num
+                                                     :intemporal/activity-name activity-name
+                                                     :intemporal/args          (pr-str args)}})]
         (swap! spans-atom assoc-in [:activities workflow-id seq-num] span-ctx))))
 
   (on-activity-started [_ workflow-id seq-num activity-name]
     (when-let [span-ctx (get-in @spans-atom [:activities workflow-id seq-num])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "activity.started"
-                                      :attributes {:intemporal/started true}}})))
+                              :event   {:name       "activity.started"
+                                        :attributes {:intemporal/started true}}})))
 
   (on-activity-completed [_ workflow-id seq-num activity-name result duration-ms]
     (when-let [span-ctx (get-in @spans-atom [:activities workflow-id seq-num])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "activity.completed"
-                                      :attributes {:intemporal/result (pr-str result)
-                                                   :intemporal/duration-ms duration-ms}}})
+                              :event   {:name       "activity.completed"
+                                        :attributes {:intemporal/result      (pr-str result)
+                                                     :intemporal/duration-ms duration-ms}}})
       (otspan/end-span! {:context span-ctx})
       (swap! spans-atom update-in [:activities workflow-id] dissoc seq-num)))
 
   (on-activity-failed [_ workflow-id seq-num activity-name error duration-ms]
     (when-let [span-ctx (get-in @spans-atom [:activities workflow-id seq-num])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "activity.failed"
-                                      :attributes {:intemporal/error (pr-str error)
-                                                   :intemporal/duration-ms duration-ms}}})
+                              :event   {:name       "activity.failed"
+                                        :attributes {:intemporal/error       (pr-str error)
+                                                     :intemporal/duration-ms duration-ms}}})
       (otspan/end-span! {:context span-ctx})
       (swap! spans-atom update-in [:activities workflow-id] dissoc seq-num)))
 
   (on-async-started [_ workflow-id seq-num]
     (when-let [parent-ctx (get-in @spans-atom [:workflows workflow-id])]
-      (let [span-ctx (otspan/new-span! {:name (str "async:" seq-num)
-                                         :parent parent-ctx
-                                         :attributes {:intemporal/workflow-id workflow-id
-                                                      :intemporal/seq seq-num}})]
+      (let [span-ctx (otspan/new-span! {:name       (str "async:" seq-num)
+                                        :parent     parent-ctx
+                                        :attributes {:intemporal/workflow-id workflow-id
+                                                     :intemporal/seq         seq-num}})]
         (swap! spans-atom assoc-in [:async workflow-id seq-num] span-ctx))))
 
   (on-async-completed [_ workflow-id seq-num result]
     (when-let [span-ctx (get-in @spans-atom [:async workflow-id seq-num])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "async.completed"
-                                      :attributes {:intemporal/result (pr-str result)}}})
+                              :event   {:name       "async.completed"
+                                        :attributes {:intemporal/result (pr-str result)}}})
       (otspan/end-span! {:context span-ctx})
       (swap! spans-atom update-in [:async workflow-id] dissoc seq-num)))
 
   (on-async-failed [_ workflow-id seq-num error]
     (when-let [span-ctx (get-in @spans-atom [:async workflow-id seq-num])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "async.failed"
-                                      :attributes {:intemporal/error (pr-str error)}}})
+                              :event   {:name       "async.failed"
+                                        :attributes {:intemporal/error (pr-str error)}}})
       (otspan/end-span! {:context span-ctx})
       (swap! spans-atom update-in [:async workflow-id] dissoc seq-num)))
 
   (on-timer-scheduled [_ workflow-id seq-num fire-at]
     (when-let [parent-ctx (get-in @spans-atom [:workflows workflow-id])]
-      (let [span-ctx (otspan/new-span! {:name (str "timer:" seq-num)
-                                         :parent parent-ctx
-                                         :attributes {:intemporal/workflow-id workflow-id
-                                                      :intemporal/seq seq-num
-                                                      :intemporal/fire-at fire-at}})]
+      (let [span-ctx (otspan/new-span! {:name       (str "timer:" seq-num)
+                                        :parent     parent-ctx
+                                        :attributes {:intemporal/workflow-id workflow-id
+                                                     :intemporal/seq         seq-num
+                                                     :intemporal/fire-at     fire-at}})]
         (swap! spans-atom assoc-in [:timers workflow-id seq-num] span-ctx))))
 
   (on-timer-fired [_ workflow-id seq-num]
@@ -100,31 +114,31 @@
   (on-signal-received [_ workflow-id signal-name payload]
     (when-let [span-ctx (get-in @spans-atom [:workflows workflow-id])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "signal.received"
-                                      :attributes {:intemporal/signal-name signal-name
-                                                   :intemporal/signal-payload (pr-str payload)}}})))
+                              :event   {:name       "signal.received"
+                                        :attributes {:intemporal/signal-name    signal-name
+                                                     :intemporal/signal-payload (pr-str payload)}}})))
 
   (on-workflow-completed [_ workflow-id result]
     (when-let [span-ctx (get-in @spans-atom [:workflows workflow-id])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "workflow.completed"
-                                      :attributes {:intemporal/result (pr-str result)}}})
+                              :event   {:name       "workflow.completed"
+                                        :attributes {:intemporal/result (pr-str result)}}})
       (otspan/end-span! {:context span-ctx})
       (swap! spans-atom update :workflows dissoc workflow-id)))
 
   (on-workflow-failed [_ workflow-id error]
     (when-let [span-ctx (get-in @spans-atom [:workflows workflow-id])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "workflow.failed"
-                                      :attributes {:intemporal/error (pr-str error)}}})
+                              :event   {:name       "workflow.failed"
+                                        :attributes {:intemporal/error (pr-str error)}}})
       (otspan/end-span! {:context span-ctx})
       (swap! spans-atom update :workflows dissoc workflow-id)))
 
   (on-workflow-cancelled [_ workflow-id]
     (when-let [span-ctx (get-in @spans-atom [:workflows workflow-id])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "workflow.cancelled"
-                                      :attributes {:intemporal/cancelled true}}})
+                              :event   {:name       "workflow.cancelled"
+                                        :attributes {:intemporal/cancelled true}}})
       (otspan/end-span! {:context span-ctx})
       (swap! spans-atom update :workflows dissoc workflow-id)))
 
@@ -133,23 +147,23 @@
   (on-compensation-started [_ workflow-id]
     (when-let [span-ctx (get-in @spans-atom [:workflows workflow-id])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "compensation.started"}})))
+                              :event   {:name "compensation.started"}})))
 
   (on-compensation-failed [_ workflow-id error]
     (when-let [span-ctx (get-in @spans-atom [:workflows workflow-id])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "compensation.failed"
-                                      :attributes {:intemporal/error (pr-str error)}}})))
+                              :event   {:name       "compensation.failed"
+                                        :attributes {:intemporal/error (pr-str error)}}})))
 
   (on-compensation-completed [_ workflow-id]
     (when-let [span-ctx (get-in @spans-atom [:workflows workflow-id])]
       (otspan/add-span-data! {:context span-ctx
-                              :event {:name "compensation.completed"}}))))
+                              :event   {:name "compensation.completed"}}))))
 
 (defn make-otel-observer
   "Create an OpenTelemetry observer that emits traces for workflows and activities"
   []
-  (->OpenTelemetryObserver (atom {:workflows {}
+  (->OpenTelemetryObserver (atom {:workflows  {}
                                   :activities {}
-                                  :async {}
-                                  :timers {}})))
+                                  :async      {}
+                                  :timers     {}})))

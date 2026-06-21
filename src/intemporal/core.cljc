@@ -351,6 +351,7 @@
                              :args              (vec args)
                              :timestamp         (utils/current-time-ms)}]
         (ctx/add-pending-event! scheduled-event)
+        (ctx/notify-observer p/on-child-workflow-scheduled workflow-id seq-num child-wf-id (wreg/workflow-name child-workflow-fn) (vec args))
         (throw (error/make-suspension :child-workflow
                                       {:seq               seq-num
                                        :child-workflow-id child-wf-id
@@ -390,7 +391,8 @@
                                  :child-workflow-id child-wf-id
                                  :workflow-fn-name  fn-name
                                  :args              (vec args)
-                                 :timestamp         (utils/current-time-ms)})))
+                                 :timestamp         (utils/current-time-ms)})
+        (ctx/notify-observer p/on-child-workflow-scheduled parent-id seq-num child-wf-id fn-name (vec args))))
     child-wf-id))
 
 (defn run-child-workflow-async
@@ -489,13 +491,18 @@
    start-workflow and a worker on the same id would double-drive it.
 
    Options: :workflow-id (default: random uuid)."
-  [{:keys [store]} workflow-fn args & {:keys [workflow-id]}]
-  (let [wid (or workflow-id (str (random-uuid)))]
+  [{:keys [store] :as engine} workflow-fn args & {:keys [workflow-id]}]
+  (let [wid (or workflow-id (str (random-uuid)))
+        workflow-name (wreg/register-workflow! workflow-fn)]
     (p/save-event store wid {:event-type       :workflow-started
                              :workflow-id      wid
-                             :workflow-fn-name (wreg/register-workflow! workflow-fn)
+                             :workflow-fn-name workflow-name
                              :args             (vec args)
                              :timestamp        (utils/current-time-ms)})
+    ;; submit IS the start of a worker-driven workflow (the worker only ever
+    ;; resumes), so observe the start here — once — to create its root span.
+    (when-let [observer (get engine :observer)]
+      (p/on-workflow-started observer wid workflow-name (vec args)))
     {:workflow-id wid}))
 
 (defn- terminal-result
@@ -565,17 +572,43 @@
      ;; resolve-workflow throws a descriptive ex-info if the fn is not registered
      ;; in this process (e.g. a fresh process that forgot to register its vars).
      (let [wf-name (:workflow-fn-name started)
-           wf-fn   (wreg/resolve-workflow wf-name)]
-       (resume-workflow engine workflow-id wf-fn (vec (:args started))))))
+           wf-fn   (try
+                     (wreg/resolve-workflow wf-name)
+                     (catch #?(:clj Throwable :cljs :default) e
+                       (when-not (wreg/not-registered? e)
+                         (throw e))))]
+       (if wf-fn
+         (resume-workflow engine workflow-id wf-fn (vec (:args started)))
+         ;; Unresolvable workflow fn in THIS process: it can never make progress
+         ;; here, so terminate it immediately rather than letting the recovery
+         ;; worker re-pick it on every poll and throw forever. Writing a terminal
+         ;; :workflow-terminated event excludes it from list-pending. (Common in
+         ;; tests that share a persistent store: the scan surfaces leftover
+         ;; workflows from other namespaces whose vars aren't registered here.)
+         (do
+           (log/warnf "Terminating workflow %s: no workflow function registered for name %s"
+                      workflow-id (pr-str wf-name))
+           (p/save-event store workflow-id
+                         {:event-type  :workflow-terminated
+                          :workflow-id workflow-id
+                          :error       {:type    "clojure.lang.ExceptionInfo"
+                                        :message (str "No workflow function registered for name: " wf-name)
+                                        :data    {:workflow-name wf-name}}
+                          :timestamp   (utils/current-time-ms)})
+           {:status :terminated :workflow-id workflow-id})))))
   ([{:keys [store executor scheduler registry] :as engine} workflow-id workflow-fn args
     & {:keys [observer max-iterations]
        :or {max-iterations 1000}}]
-   (when observer
-     (p/on-workflow-resumed observer workflow-id))
-   (log/info "Workflow resumed")
-   (exec/run-workflow-internal engine workflow-id workflow-fn args
-                          {:observer observer
-                           :max-iterations max-iterations})))
+   ;; Worker-driven workflows resume via the 1-arity, which passes no :observer;
+   ;; fall back to the engine's so worker drives still emit telemetry (the root
+   ;; span is created by submit-workflow / on-child-workflow-scheduled).
+   (let [observer (or observer (get engine :observer))]
+     (when observer
+       (p/on-workflow-resumed observer workflow-id))
+     (log/info "Workflow resumed")
+     (exec/run-workflow-internal engine workflow-id workflow-fn args
+                                 {:observer observer
+                                  :max-iterations max-iterations}))))
 
 #?(:clj
    (defn start-worker
@@ -879,8 +912,8 @@
            threads             default-executor-threads
            scheduler-threads   default-scheduler-threads
            default-timeout-ms  default-activity-timeout-ms
-           enable-logging false
-           enable-telemetry false}}]
+           enable-logging true
+           enable-telemetry true}}]
   (let [registry (a/make-registry)
         log-atom (when enable-logging (atom []))
         logging-observer (when enable-logging (obs/make-logging-observer log-atom))

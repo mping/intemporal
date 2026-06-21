@@ -60,13 +60,24 @@
   "Return the registered workflow fn for `name`. Throws a descriptive ex-info if
    the name is not registered in this process, rather than returning nil and
    surfacing an obscure NPE deeper in execution. A fresh process must register its
-   workflow vars at startup for cross-process resume to work."
+   workflow vars at startup for cross-process resume to work.
+
+   The thrown ex-info carries {:error/type ::not-registered}; callers (e.g. the
+   recovery worker via `not-registered?`) use that to terminate an unresolvable
+   workflow instead of retrying it forever."
   [name]
   (or (get @registry name)
       (throw (ex-info (str "No workflow function registered for name: " name
                            ". Register the workflow var at startup so it can be resumed by id.")
-                      {:workflow-name name
+                      {:error/type    ::not-registered
+                       :workflow-name name
                        :registered    (vec (keys @registry))}))))
+
+(defn not-registered?
+  "True if `e` is the exception `resolve-workflow` throws when a workflow name is
+   not registered in this process."
+  [e]
+  (= ::not-registered (:error/type (ex-data e))))
 
 (defn clear-registry!
   "Test helper: empties the global registry."

@@ -59,7 +59,6 @@ test:
   #DO github.com/earthly/lib+INSTALL_DIND
   COPY docker ./docker
   COPY docker-compose.yaml ./
-  ENV DATABASE_URL=jdbc:mariadb://mariadb:3306/root?user=root&password=root
   WITH DOCKER --compose docker-compose.yaml
     RUN bin/run-coverage
   END

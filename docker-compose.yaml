@@ -49,8 +49,6 @@ services:
     image: mariadb:10.6.11
     environment:
       MARIADB_ROOT_PASSWORD: root
-      MARIADB_PASSWORD: root
-      MARIADB_USER: root
       MARIADB_DATABASE: root
     healthcheck:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]

@@ -1,6 +1,7 @@
 (ns intemporal.tests.child-workflow-test
   (:require [intemporal.core :as intemporal]
             [intemporal.tests.utils :refer [with-result]]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [matcher-combinators.test :refer [match?]]))
 
@@ -100,6 +101,23 @@
                                 :child   {:child-result [:processed 50]}
                                 :id      5}}
                       result)))))))
+
+(deftest test-child-workflow-scheduled-observed
+  (testing "Scheduling a child workflow emits :child-workflow-scheduled with the child's id"
+    (intemporal/with-workflow-engine [engine {:threads 2 :enable-logging true}]
+      (with-result [result (intemporal/start-workflow engine parent-flow [5])]
+        (is (= :completed (:status result)))
+        (let [parent-id (:workflow-id result)
+              events    @(:log engine)
+              scheduled (filter #(= :child-workflow-scheduled (:event %)) events)]
+          ;; one scheduling event, parented to the parent workflow, naming the child
+          (is (match? [{:event               :child-workflow-scheduled
+                        :workflow-id         parent-id
+                        :child-workflow-id   string?
+                        :child-workflow-name string?
+                        :args                [50]}]
+                      scheduled))
+          (is (str/starts-with? (:child-workflow-id (first scheduled)) parent-id)))))))
 
 (deftest test-multiple-child-workflows
   (testing "Parent can run multiple child workflows sequentially"
