@@ -9,14 +9,22 @@ rm -rf coverage
 mkdir -p coverage
 
 
-printf "${BLUE}running clj tests...${NC}\n"
+printf "${BLUE}running clj tests (PostgreSQL)...${NC}\n"
 CLOVERAGE_OUTPUT=target/coverage-clj bin/kaocha test --reporter documentation
+
+printf "${BLUE}running clj integration tests (MariaDB)...${NC}\n"
+DATABASE_URL="jdbc:mariadb://localhost:3306/root?user=root&password=root" \
+  CLOVERAGE_OUTPUT=target/coverage-clj-maria \
+  bin/kaocha test --focus-meta integration --reporter documentation
 
 printf "${BLUE}running cljs tests...${NC}\n"
 CLOVERAGE_OUTPUT=target/coverage-cljs bin/kaocha test-cljs --reporter documentation
 
 printf "${BLUE}combining coverage reports...${NC}\n"
-lcov --add-tracefile target/coverage-clj/lcov.info  --add-tracefile target/coverage-cljs/lcov.info -o coverage/lcov.info
+lcov --add-tracefile target/coverage-clj/lcov.info \
+     --add-tracefile target/coverage-clj-maria/lcov.info \
+     --add-tracefile target/coverage-cljs/lcov.info \
+     -o coverage/lcov.info
 genhtml --ignore-errors empty --ignore-errors unmapped coverage/lcov.info -o coverage
 
 printf "${BLUE}done! opening report${NC}\n"
