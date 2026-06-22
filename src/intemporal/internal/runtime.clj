@@ -2,7 +2,8 @@
   (:require [intemporal.internal.error :as error]
             [intemporal.internal.activity :as activity]
             [intemporal.internal.logging :as log]
-            [intemporal.protocol :as p])
+            [intemporal.protocol :as p]
+            [intemporal.tracing :as tracing])
   (:import (java.util.concurrent ArrayBlockingQueue ExecutorService Executors Future ScheduledExecutorService ScheduledFuture ThreadPoolExecutor ThreadPoolExecutor$CallerRunsPolicy TimeUnit TimeoutException)))
 
 
@@ -21,11 +22,14 @@
       ;; risk a duplicate :timer-fired. If one is already armed, keep it.
       (if (contains? @pending-timers timer-key)
         timer-key
-        (let [delay-ms (max 0 (- fire-at (System/currentTimeMillis)))
+        (let [delay-ms   (max 0 (- fire-at (System/currentTimeMillis)))
+              ;; Capture the workflow-thread context so the timer callback (which
+              ;; fires on a scheduler-pool thread) runs under the workflow trace.
+              parent-ctx (tracing/capture)
               future   (.schedule pool
                                   ^Runnable (fn []
                                               (swap! pending-timers dissoc timer-key)
-                                              (callback))
+                                              (tracing/traced-call parent-ctx "timer-fired" nil callback))
                                   delay-ms
                                   TimeUnit/MILLISECONDS)]
           (swap! pending-timers assoc timer-key future)
@@ -73,7 +77,12 @@
           timeout (or timeout-ms default-timeout-ms)]
       (if (nil? act)
         (throw (ex-info "Activity not found" {:activity-name activity-name}))
-        (let [future (.submit pool ^Callable (fn [] (apply (:fn act) args)))]
+        (let [parent-ctx (tracing/capture)
+              future (.submit pool ^Callable
+                              (fn []
+                                (tracing/traced-call parent-ctx (str "activity " activity-name)
+                                                     {:intemporal.activity/name activity-name}
+                                                     (fn [] (apply (:fn act) args)))))]
           (try
             (if timeout
               (.get ^Future future timeout TimeUnit/MILLISECONDS)
@@ -90,7 +99,10 @@
   (execute-activities-parallel [_ activities]
     (if (empty? activities)
       []
-      (let [futures (mapv (fn [{:keys [activity-name args timeout-ms retry-policy]}]
+      ;; Capture the workflow-thread context once so every parallel activity span
+      ;; (each on its own pool thread) parents under the workflow trace.
+      (let [parent-ctx (tracing/capture)
+            futures (mapv (fn [{:keys [activity-name args timeout-ms retry-policy]}]
                             (let [act     (get @registry-atom activity-name)
                                   timeout (or timeout-ms default-timeout-ms)]
                               (if (nil? act)
@@ -98,6 +110,9 @@
                                                 {:activity-name activity-name}))
                                 {:future        (.submit pool ^Callable
                                                          (fn []
+                                                          (tracing/traced-call parent-ctx (str "activity " activity-name)
+                                                                               {:intemporal.activity/name activity-name}
+                                                           (fn []
                                                            (let [start (System/currentTimeMillis)]
                                                              (if (nil? retry-policy)
                                                                ;; No retry - execute once
@@ -126,7 +141,7 @@
                                                                    ;; 3. Check the outcome outside the try/catch
                                                                    (if (= (:status outcome) :retry)
                                                                      (recur (inc attempt)) ;; This is now in a valid tail position
-                                                                     (:data outcome))))))))
+                                                                     (:data outcome)))))))))) ;; close if/let-outcome/loop/if-policy/let-start/thunk-fn/traced-call/callable-fn/.submit
                                  :timeout       timeout
                                  :activity-name activity-name})))
                           activities)]

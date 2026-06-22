@@ -3,8 +3,10 @@
             [intemporal.internal.context :as ctx]
             [intemporal.internal.error :as error]
             [intemporal.internal.logging :as log]
+            [intemporal.tracing :as tracing]
             [intemporal.utils :as utils]
-            [intemporal.protocol :as p])
+            [intemporal.protocol :as p]
+            [steffan-westcott.clj-otel.context :as octx])
   (:import (java.util.concurrent RejectedExecutionException)))
 
 ;; ============================================================================
@@ -377,14 +379,19 @@
     (doseq [{:keys [child-id status policy]} (p/list-children store workflow-id)]
       (when-not (terminal-status? status)
         (case policy
+          ;; The child's status flips to :cancelled/:terminated here (flag/event)
+          ;; and it may never be driven through its own finalizer, so end its
+          ;; live span now (idempotent if a driven finalizer also ends it).
           :cascade-cancel (do (p/mark-cancelled store child-id)
                               (p/wake-workflow store child-id)
+                              (tracing/finish-workflow-span! child-id {:message "cancelled (parent closed)"})
                               (enforce-close-policies! store child-id))
           :terminate      (do (p/save-event store child-id
                                             {:event-type  :workflow-terminated
                                              :workflow-id child-id
                                              :timestamp   (utils/current-time-ms)})
                               (p/wake-workflow store child-id)
+                              (tracing/finish-workflow-span! child-id {:message "terminated (parent closed)"})
                               (enforce-close-policies! store child-id))
           ;; :abandon (or anything unknown) — leave the child running
           nil)))))
@@ -409,6 +416,7 @@
   ;; workflow is itself a child) record the result in the parent and wake it.
   (enforce-close-policies! store workflow-id)
   (notify-parent-terminal store workflow-id true result)
+  (tracing/finish-workflow-span! workflow-id nil)
   {:status :completed
    :workflow-id workflow-id
    :result result})
@@ -431,6 +439,7 @@
     ;; as a child failure (Temporal treats child cancellation as a parent failure).
     (enforce-close-policies! store workflow-id)
     (notify-parent-terminal store workflow-id false error-map)
+    (tracing/finish-workflow-span! workflow-id error-map)
     {:status :cancelled
      :workflow-id workflow-id
      :error error-map}))
@@ -447,6 +456,7 @@
     ;; Tier 2: enforce close policy on children, then propagate failure to parent.
     (enforce-close-policies! store workflow-id)
     (notify-parent-terminal store workflow-id false error-map)
+    (tracing/finish-workflow-span! workflow-id error-map)
     {:status :failed
      :workflow-id workflow-id
      :error error-map}))
@@ -664,15 +674,23 @@
 
 (defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
                                suspension-data pending-events observer]
-  (let [{:keys [seq child-workflow-id workflow-fn args]} suspension-data]
+  (let [{:keys [seq child-workflow-id workflow-fn args]} suspension-data
+        ;; Child span nested under the parent's current span (the child runs
+        ;; inline on this thread, so (octx/current) is the parent root span).
+        ;; Registered + ended at each exit below with the child's terminal status.
+        child-ctx (when (:enable-telemetry engine)
+                    (tracing/ensure-workflow-span! child-workflow-id
+                                                   (str "child " child-workflow-id)
+                                                   (octx/current)))]
     (p/save-events store workflow-id pending-events)
     ;; Execute child workflow synchronously for now
     ;; In a real implementation, this could be async
     (try
-      (let [result (run-workflow-internal engine
-                                          child-workflow-id workflow-fn args
-                                          {:observer observer
-                                           :max-iterations 1000})]
+      (let [result (octx/with-context! (or child-ctx (octx/current))
+                     (run-workflow-internal engine
+                                            child-workflow-id workflow-fn args
+                                            {:observer observer
+                                             :max-iterations 1000}))]
         (if (= :completed (:status result))
           (do
             (p/save-event store workflow-id {:event-type        :child-workflow-completed
@@ -681,17 +699,19 @@
                                              :result            (:result result)
                                              :timestamp         (utils/current-time-ms)})
             (log/infof "Child workflow with id %s completed" child-workflow-id)
+            (tracing/finish-workflow-span! child-workflow-id nil)
             :continue)
           ;; ELSE
-          (do
+          (let [child-error (or (:error result)
+                                {:status (:status result)
+                                 :message (str "Child workflow ended with status: " (:status result))})]
             (p/save-event store workflow-id {:event-type        :child-workflow-failed
                                              :seq               seq
                                              :child-workflow-id child-workflow-id
-                                             :error             (or (:error result)
-                                                                    {:status (:status result)
-                                                                     :message (str "Child workflow ended with status: " (:status result))})
+                                             :error             child-error
                                              :timestamp         (utils/current-time-ms)})
             (log/infof "Child workflow with id %s failed, status: %s, error: %s" child-workflow-id (:status result) (:error result))
+            (tracing/finish-workflow-span! child-workflow-id child-error)
             :continue)))
       (catch Exception e
         (p/save-event store workflow-id {:event-type        :child-workflow-failed
@@ -700,4 +720,5 @@
                                          :error             (error/throwable->map e)
                                          :timestamp         (utils/current-time-ms)})
         (log/warnf e "Error while executing child workflow with id %s" child-workflow-id)
+        (tracing/finish-workflow-span! child-workflow-id e)
         :continue))))

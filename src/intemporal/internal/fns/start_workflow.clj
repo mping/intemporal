@@ -4,7 +4,9 @@
             [intemporal.internal.activity :as a]
             [intemporal.internal.workflow-registry :as wreg]
             [intemporal.protocol :as p]
-            [intemporal.utils :as utils])
+            [intemporal.tracing :as tracing]
+            [intemporal.utils :as utils]
+            [steffan-westcott.clj-otel.context :as octx])
   (:import [java.util.concurrent LinkedBlockingQueue]))
 
 (def ^:private waiting-statuses
@@ -56,28 +58,47 @@
     ;; resumed later by id alone (resume-workflow [engine wf-id]); the name is
     ;; stored in the :workflow-started event below. (improvements.md §B3)
     (log/with-mdc {:workflow-id wf-id}
-      (p/save-event store wf-id {:event-type :workflow-started
-                                 :workflow-id wf-id
-                                 :workflow-fn-name workflow-fn-name
-                                 :args (vec args)
-                                 :timestamp (utils/current-time-ms)})
-      (when observer
-        (p/on-workflow-started observer wf-id workflow-fn-name args))
-      (log/info "Workflow started")
-      (try
-        (loop [result (run-once)]
-          (log/infof "Got result %s with status %s" (:result result) (:status result))
-          (if (waiting-statuses (:status result))
-            (do
-              (log/infof "Workflow waiting: %s" (:status result))
-              ;; Block until woken. A token enqueued before this take (signal
-              ;; arrived during suspension setup) returns immediately — no edge
-              ;; is lost. Drain any extra tokens so one re-run covers coalesced
-              ;; wakes; a wake arriving during the re-run queues for next take.
-              (.take wake-q)
-              (.clear wake-q)
-              (recur (run-once)))
-            result))
-        (catch Exception e
-          (log/warnf e "Caught exception")
-          (throw e))))))
+      ;; Root workflow span (JVM only). Created before save-event so its W3C
+      ;; traceparent is persisted on the :workflow-started event; the whole wake-q
+      ;; loop runs with it current so all nested spans parent under it. Registered
+      ;; in the live-span registry (keyed by wf-id) and ended at the terminal
+      ;; result so it represents the workflow as a single span.
+      (let [span-ctx     (when (:enable-telemetry engine)
+                           (tracing/ensure-workflow-span! wf-id workflow-fn-name nil))
+            tracecontext (when span-ctx (tracing/ctx->tracecontext span-ctx))
+            run-loop     (fn []
+                           (try
+                             (loop [result (run-once)]
+                               (log/infof "Got result %s with status %s" (:result result) (:status result))
+                               (if (waiting-statuses (:status result))
+                                 (do
+                                   (log/infof "Workflow waiting: %s" (:status result))
+                                   ;; Block until woken. A token enqueued before this take (signal
+                                   ;; arrived during suspension setup) returns immediately — no edge
+                                   ;; is lost. Drain any extra tokens so one re-run covers coalesced
+                                   ;; wakes; a wake arriving during the re-run queues for next take.
+                                   (.take wake-q)
+                                   (.clear wake-q)
+                                   (recur (run-once)))
+                                 result))
+                             (catch Exception e
+                               (log/warnf e "Caught exception")
+                               (throw e))))]
+        (p/save-event store wf-id (cond-> {:event-type :workflow-started
+                                           :workflow-id wf-id
+                                           :workflow-fn-name workflow-fn-name
+                                           :args (vec args)
+                                           :timestamp (utils/current-time-ms)}
+                                    tracecontext (assoc :tracecontext tracecontext)))
+        (when observer
+          (p/on-workflow-started observer wf-id workflow-fn-name args))
+        (log/info "Workflow started")
+        ;; The span is ended by the terminal finalizer (finalize-* runs inside the
+        ;; loop); the catch is only a safety net for an unexpected throw.
+        (if span-ctx
+          (try
+            (octx/with-context! span-ctx (run-loop))
+            (catch Throwable e
+              (tracing/finish-workflow-span! wf-id e)
+              (throw e)))
+          (run-loop))))))

@@ -12,6 +12,8 @@
             [intemporal.observer :as obs]
             [intemporal.utils :as utils]
             [intemporal.internal.macros :as im]
+            #?@(:clj  [[intemporal.tracing :as tracing]
+                       [steffan-westcott.clj-otel.context :as octx]])
             #?@(:cljs [[promesa.core :as prom]]))
   #?(:clj  (:require [net.cgrand.macrovich :as macros])
      :cljs (:require-macros [net.cgrand.macrovich :as macros]
@@ -375,16 +377,24 @@
         ;; Seed the child's own history once (crash-safe: parent may re-run this
         ;; if it died before flushing the scheduled marker).
         (when (empty? (p/load-history store child-wf-id))
-          (p/save-event store child-wf-id
-                        {:event-type       :workflow-started
-                         :workflow-id      child-wf-id
-                         :workflow-fn-name fn-name
-                         :args             (vec args)
-                         ;; parent linkage, read by the child's finalizers to
-                         ;; write the parent's completion event and wake it.
-                         :parent-id        parent-id
-                         :parent-seq       seq-num
-                         :timestamp        (utils/current-time-ms)}))
+          ;; If the parent has a live span (telemetry on), open the child's span
+          ;; under it now and persist the child's traceparent, so the child's own
+          ;; worker resumes nest under the parent trace. JVM only.
+          (let [child-tc #?(:clj (when-let [parent-ctx (tracing/active-span parent-id)]
+                                   (tracing/ctx->tracecontext
+                                    (tracing/ensure-workflow-span! child-wf-id fn-name parent-ctx)))
+                            :cljs nil)]
+            (p/save-event store child-wf-id
+                          (cond-> {:event-type       :workflow-started
+                                   :workflow-id      child-wf-id
+                                   :workflow-fn-name fn-name
+                                   :args             (vec args)
+                                   ;; parent linkage, read by the child's finalizers to
+                                   ;; write the parent's completion event and wake it.
+                                   :parent-id        parent-id
+                                   :parent-seq       seq-num
+                                   :timestamp        (utils/current-time-ms)}
+                            child-tc (assoc :tracecontext child-tc)))))
         (p/link-child! store parent-id seq-num child-wf-id policy)
         (ctx/add-pending-event! {:event-type        :child-workflow-scheduled
                                  :seq               seq-num
@@ -493,12 +503,22 @@
    Options: :workflow-id (default: random uuid)."
   [{:keys [store] :as engine} workflow-fn args & {:keys [workflow-id]}]
   (let [wid (or workflow-id (str (random-uuid)))
-        workflow-name (wreg/register-workflow! workflow-fn)]
-    (p/save-event store wid {:event-type       :workflow-started
-                             :workflow-id      wid
-                             :workflow-fn-name workflow-name
-                             :args             (vec args)
-                             :timestamp        (utils/current-time-ms)})
+        workflow-name (wreg/register-workflow! workflow-fn)
+        ;; Worker-driven workflows are only ever resumed (never start-workflow'd),
+        ;; so open the root span here and keep it live in the registry: every
+        ;; worker resume in this process reuses it (one span), and the terminal
+        ;; resume ends it. Its traceparent is persisted so a resume in another
+        ;; process links via :tracecontext (see resume-workflow). JVM only.
+        tracecontext #?(:clj (when (:enable-telemetry engine)
+                               (tracing/ctx->tracecontext
+                                (tracing/ensure-workflow-span! wid workflow-name nil)))
+                        :cljs nil)]
+    (p/save-event store wid (cond-> {:event-type       :workflow-started
+                                     :workflow-id      wid
+                                     :workflow-fn-name workflow-name
+                                     :args             (vec args)
+                                     :timestamp        (utils/current-time-ms)}
+                              tracecontext (assoc :tracecontext tracecontext)))
     ;; submit IS the start of a worker-driven workflow (the worker only ever
     ;; resumes), so observe the start here — once — to create its root span.
     (when-let [observer (get engine :observer)]
@@ -600,15 +620,38 @@
     & {:keys [observer max-iterations]
        :or {max-iterations 1000}}]
    ;; Worker-driven workflows resume via the 1-arity, which passes no :observer;
-   ;; fall back to the engine's so worker drives still emit telemetry (the root
-   ;; span is created by submit-workflow / on-child-workflow-scheduled).
+   ;; fall back to the engine's so worker drives still emit telemetry.
    (let [observer (or observer (get engine :observer))]
      (when observer
        (p/on-workflow-resumed observer workflow-id))
      (log/info "Workflow resumed")
-     (exec/run-workflow-internal engine workflow-id workflow-fn args
-                                 {:observer observer
-                                  :max-iterations max-iterations}))))
+     (let [run #(exec/run-workflow-internal engine workflow-id workflow-fn args
+                                            {:observer observer
+                                             :max-iterations max-iterations})]
+       #?(:clj
+          ;; Reuse this workflow's live span across resumes so it stays a single
+          ;; span. Registry miss = cold/cross-process resume: rehydrate the parent
+          ;; from the persisted :tracecontext and open one linked span. The span is
+          ;; ended by the terminal finalizer (finalize-*/enforce-close-policies!),
+          ;; not here, so a resume that just re-suspends keeps it open; the catch is
+          ;; only a safety net for an unexpected throw.
+          (if-let [span-ctx (and (:enable-telemetry engine)
+                                 (or (tracing/active-span workflow-id)
+                                     (let [started (->> (p/load-history store workflow-id)
+                                                        (filter #(= :workflow-started (:event-type %)))
+                                                        first)]
+                                       (tracing/ensure-workflow-span!
+                                        workflow-id
+                                        (:workflow-fn-name started)
+                                        (tracing/tracecontext->ctx (:tracecontext started))))))]
+            (try
+              (octx/with-context! span-ctx (run))
+              (catch Throwable e
+                (tracing/finish-workflow-span! workflow-id e)
+                (throw e)))
+            (run))
+          :cljs
+          (run))))))
 
 #?(:clj
    (defn start-worker
@@ -917,10 +960,7 @@
   (let [registry (a/make-registry)
         log-atom (when enable-logging (atom []))
         logging-observer (when enable-logging (obs/make-logging-observer log-atom))
-        otel-observer #?(:clj (when enable-telemetry
-                                ((requiring-resolve 'intemporal.observer.otel/make-otel-observer)))
-                         :cljs nil)
-        composite-observer (obs/make-composite-observer [logging-observer otel-observer observer])]
+        composite-observer (obs/make-composite-observer [logging-observer observer])]
     {:store store
      :executor (runtime/make-vthreads-executor registry
                                        :threads threads
@@ -928,6 +968,10 @@
      :scheduler (runtime/make-scheduler :threads scheduler-threads)
      :registry registry
      :observer composite-observer
+     ;; OpenTelemetry tracing is wired at execution boundaries (start-workflow,
+     ;; resume-workflow, process-child-workflow, runtime activity/timer submit)
+     ;; rather than via an observer; this flag gates it. JVM only.
+     :enable-telemetry #?(:clj enable-telemetry :cljs false)
      :log (when enable-logging log-atom)}))
 
 (defn shutdown-engine
