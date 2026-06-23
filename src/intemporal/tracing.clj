@@ -46,7 +46,7 @@
   [workflow-id span-name parent-ctx]
   (or (get @live-spans workflow-id)
       (safe
-       (let [ctx (span/new-span! {:name       (str span-name)
+       (let [ctx (span/new-span! {:name       (str "workflow:" (str span-name))
                                   :parent     parent-ctx
                                   :tracer     (workflow-tracer)
                                   :attributes {:intemporal.workflow/id workflow-id}})]
@@ -97,6 +97,7 @@
         (when span-ctx (safe (span/end-span! {:context span-ctx})))
         (when span-scope (safe (octx/close-scope! span-scope)))
         (when parent-scope (safe (octx/close-scope! parent-scope)))))))
+
 
 ;; --- W3C tracecontext persistence / rehydration -----------------------------
 

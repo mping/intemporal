@@ -80,7 +80,7 @@
         (let [parent-ctx (tracing/capture)
               future (.submit pool ^Callable
                               (fn []
-                                (tracing/traced-call parent-ctx (str "activity " activity-name)
+                                (tracing/traced-call parent-ctx (str "activity: " activity-name)
                                                      {:intemporal.activity/name activity-name}
                                                      (fn [] (apply (:fn act) args)))))]
           (try
@@ -110,38 +110,38 @@
                                                 {:activity-name activity-name}))
                                 {:future        (.submit pool ^Callable
                                                          (fn []
-                                                          (tracing/traced-call parent-ctx (str "activity " activity-name)
+                                                          (tracing/traced-call parent-ctx (str "activity: " activity-name)
                                                                                {:intemporal.activity/name activity-name}
                                                            (fn []
-                                                           (let [start (System/currentTimeMillis)]
-                                                             (if (nil? retry-policy)
-                                                               ;; No retry - execute once
-                                                               {:result   (apply (:fn act) args)
-                                                                :duration (- (System/currentTimeMillis) start)}
-                                                               ;; With retry
-                                                               (loop [attempt 1]
-                                                                 (let [outcome (try
-                                                                                 ;; 1. Try the operation
-                                                                                 (let [result (apply (:fn act) args)]
-                                                                                   {:status :success
-                                                                                    :data   {:result   result
-                                                                                             :duration (- (System/currentTimeMillis) start)
-                                                                                             :attempts attempt}})
-                                                                                 (catch Exception e
-                                                                                   ;; 2. If it fails, determine if we should retry
-                                                                                   (if (activity/should-retry? retry-policy e attempt)
-                                                                                     (do
-                                                                                       ;; Perform side-effects (logging, sleeping) here
-                                                                                       (Thread/sleep (activity/calculate-backoff retry-policy attempt))
-                                                                                       ;; Return a signal value instead of recurring directly
-                                                                                       {:status :retry})
-                                                                                     ;; If we shouldn't retry, rethrow
-                                                                                     (throw e))))]
+                                                             (let [start (System/currentTimeMillis)]
+                                                               (if (nil? retry-policy)
+                                                                 ;; No retry - execute once
+                                                                 {:result   (apply (:fn act) args)
+                                                                  :duration (- (System/currentTimeMillis) start)}
+                                                                 ;; With retry
+                                                                 (loop [attempt 1]
+                                                                   (let [outcome (try
+                                                                                   ;; 1. Try the operation
+                                                                                   (let [result (apply (:fn act) args)]
+                                                                                     {:status :success
+                                                                                      :data   {:result   result
+                                                                                               :duration (- (System/currentTimeMillis) start)
+                                                                                               :attempts attempt}})
+                                                                                   (catch Exception e
+                                                                                     ;; 2. If it fails, determine if we should retry
+                                                                                     (if (activity/should-retry? retry-policy e attempt)
+                                                                                       (do
+                                                                                         ;; Perform side-effects (logging, sleeping) here
+                                                                                         (Thread/sleep (activity/calculate-backoff retry-policy attempt))
+                                                                                         ;; Return a signal value instead of recurring directly
+                                                                                         {:status :retry})
+                                                                                       ;; If we shouldn't retry, rethrow
+                                                                                       (throw e))))]
 
-                                                                   ;; 3. Check the outcome outside the try/catch
-                                                                   (if (= (:status outcome) :retry)
-                                                                     (recur (inc attempt)) ;; This is now in a valid tail position
-                                                                     (:data outcome)))))))))) ;; close if/let-outcome/loop/if-policy/let-start/thunk-fn/traced-call/callable-fn/.submit
+                                                                     ;; 3. Check the outcome outside the try/catch
+                                                                     (if (= (:status outcome) :retry)
+                                                                       (recur (inc attempt)) ;; This is now in a valid tail position
+                                                                       (:data outcome)))))))))) ;; close if/let-outcome/loop/if-policy/let-start/thunk-fn/traced-call/callable-fn/.submit
                                  :timeout       timeout
                                  :activity-name activity-name})))
                           activities)]
