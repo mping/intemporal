@@ -598,7 +598,8 @@
                        (when-not (wreg/not-registered? e)
                          (throw e))))]
        (if wf-fn
-         (resume-workflow engine workflow-id wf-fn (vec (:args started)))
+         (do
+           (resume-workflow engine workflow-id wf-fn (vec (:args started))))
          ;; Unresolvable workflow fn in THIS process: it can never make progress
          ;; here, so terminate it immediately rather than letting the recovery
          ;; worker re-pick it on every poll and throw forever. Writing a terminal
@@ -624,7 +625,6 @@
    (let [observer (or observer (get engine :observer))]
      (when observer
        (p/on-workflow-resumed observer workflow-id))
-     (log/info "Workflow resumed")
      (let [run #(exec/run-workflow-internal engine workflow-id workflow-fn args
                                             {:observer observer
                                              :max-iterations max-iterations})]

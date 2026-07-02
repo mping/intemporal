@@ -10,8 +10,6 @@
                 :modules {:shared {:entries []}
                           :main     {:init-fn intemporal.doc/init
                                      :depends-on #{:shared}}
-                          :automata {:init-fn intemporal.automata/init
-                                     :depends-on #{:shared}}
                           :provision-saga {:init-fn intemporal.provision-saga/init
                                            :depends-on #{:shared}}
                           :provision-automata {:init-fn intemporal.provision-automata/init
