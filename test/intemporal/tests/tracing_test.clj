@@ -136,7 +136,7 @@
         (is (= :completed (:status result)))
         (let [spans      (finished-spans)
               parent-sp  (span-named spans "/parent-flow")
-              child-sp   (first (filter #(.startsWith (.getName %) "child wf-parent/child-") spans))
+              child-sp   (first (filter #(.startsWith (.getName %) "workflow:child wf-parent/child-") spans))
               ;; the child runs one double-activity; there may be several activity
               ;; spans (parent has none here), pick those under the child.
               trace-id   (.. parent-sp getSpanContext getTraceId)]
