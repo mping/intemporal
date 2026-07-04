@@ -2,8 +2,8 @@
   (:require [intemporal.core :as intemporal]
             [intemporal.tests.utils :refer [with-result]]
             [cljs.test :as t :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-)
+            [matcher-combinators.test :refer [match?]])
+
   (:require-macros [intemporal.tests.utils :refer [with-result]]
                    [intemporal.internal.context :refer [blet]]))
 

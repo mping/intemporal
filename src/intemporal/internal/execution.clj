@@ -605,72 +605,72 @@
       (do
         (log/debugf "Internal loop %d of %d" iteration max-iterations)
 
-    ;; Check if executor is shutting down - stop processing to avoid endless rejections
-    (if (p/shutdown? executor)
-      (do
-        (log/infof "Executor shutting down, suspending workflow")
-        {:status :suspended
-         :workflow-id workflow-id})
+        ;; Check if executor is shutting down - stop processing to avoid endless rejections
+        (if (p/shutdown? executor)
+          (do
+            (log/infof "Executor shutting down, suspending workflow")
+            {:status :suspended
+             :workflow-id workflow-id})
 
-      (let [history     (p/load-history store workflow-id)
-            ctx         (make-workflow-context workflow-id history store registry observer)
-            exec-result (binding [ctx/*workflow-context* ctx]
-                          (log/debugf "Executing workflow function %s..." workflow-fn)
-                          (execute-workflow-fn workflow-fn args))]
+          (let [history     (p/load-history store workflow-id)
+                ctx         (make-workflow-context workflow-id history store registry observer)
+                exec-result (binding [ctx/*workflow-context* ctx]
+                              (log/debugf "Executing workflow function %s..." workflow-fn)
+                              (execute-workflow-fn workflow-fn args))]
 
-          (log/debugf "Workflow function executed, got: %s" (:status exec-result))
-          (case (:status exec-result)
-            :completed
-            (finalize-completed store executor workflow-id
-                                (:pending-asyncs exec-result)
-                                (:pending-events exec-result)
-                                (:result exec-result)
-                                observer)
+              (log/debugf "Workflow function executed, got: %s" (:status exec-result))
+              (case (:status exec-result)
+                :completed
+                (finalize-completed store executor workflow-id
+                                    (:pending-asyncs exec-result)
+                                    (:pending-events exec-result)
+                                    (:result exec-result)
+                                    observer)
 
-            :cancelled
-            ;; Cancellation surfaced from the body (a stub's check-cancelled!).
-            ;; Any saga rollback already ran inside the user's catch before the
-            ;; cancel exception was rethrown, so just finalize.
-            (finalize-cancelled store workflow-id
-                                (:pending-events exec-result)
-                                observer)
+                :cancelled
+                ;; Cancellation surfaced from the body (a stub's check-cancelled!).
+                ;; Any saga rollback already ran inside the user's catch before the
+                ;; cancel exception was rethrown, so just finalize.
+                (finalize-cancelled store workflow-id
+                                    (:pending-events exec-result)
+                                    observer)
 
-            :suspended
-            (let [action (handle-suspension engine
-                                            workflow-id
-                                            (:suspension-type exec-result)
-                                            (:suspension-data exec-result)
-                                            (:pending-asyncs exec-result)
-                                            (:pending-events exec-result)
-                                            wake-fn
-                                            observer)]
-              (when (and observer (= action :continue))
-                (p/on-workflow-resumed observer workflow-id))
+                :suspended
+                (let [action (handle-suspension engine
+                                                workflow-id
+                                                (:suspension-type exec-result)
+                                                (:suspension-data exec-result)
+                                                (:pending-asyncs exec-result)
+                                                (:pending-events exec-result)
+                                                wake-fn
+                                                observer)]
+                  (when (and observer (= action :continue))
+                    (p/on-workflow-resumed observer workflow-id))
 
-              (if (= action :continue)
-                (recur (inc iteration))
-                ;; About to wait: register a generic wake callback so an external
-                ;; actor (e.g. cancel-workflow) can force this workflow to
-                ;; re-enter its loop and observe state such as the cancel flag.
-                (do
-                  (when wake-fn
-                    (p/register-wake-callback store workflow-id wake-fn))
-                  ;; C2: record when this workflow next needs attention so the
-                  ;; ownership scan can skip it until due. Timer waits carry a
-                  ;; clock deadline; signal/async waits are always eligible (nil).
-                  (let [sd (:suspension-data exec-result)
-                        wake-at (case action
-                                  :wait-timer          (:fire-at sd)
-                                  :wait-signal-timeout (:deadline sd)
-                                  nil)]
-                    (p/set-wake-at store workflow-id wake-at))
-                  (action->result action workflow-id))))
+                  (if (= action :continue)
+                    (recur (inc iteration))
+                    ;; About to wait: register a generic wake callback so an external
+                    ;; actor (e.g. cancel-workflow) can force this workflow to
+                    ;; re-enter its loop and observe state such as the cancel flag.
+                    (do
+                      (when wake-fn
+                        (p/register-wake-callback store workflow-id wake-fn))
+                      ;; C2: record when this workflow next needs attention so the
+                      ;; ownership scan can skip it until due. Timer waits carry a
+                      ;; clock deadline; signal/async waits are always eligible (nil).
+                      (let [sd (:suspension-data exec-result)
+                            wake-at (case action
+                                      :wait-timer          (:fire-at sd)
+                                      :wait-signal-timeout (:deadline sd)
+                                      nil)]
+                        (p/set-wake-at store workflow-id wake-at))
+                      (action->result action workflow-id))))
 
-            :failed
-            (finalize-failed store workflow-id
-                             (:pending-events exec-result)
-                             (:error exec-result)
-                             observer))))))))
+                :failed
+                (finalize-failed store workflow-id
+                                 (:pending-events exec-result)
+                                 (:error exec-result)
+                                 observer))))))))
 
 (defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
                                suspension-data pending-events observer]

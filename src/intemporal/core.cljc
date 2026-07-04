@@ -599,6 +599,7 @@
                          (throw e))))]
        (if wf-fn
          (do
+           (log/infof "Resuming workflow %s" workflow-id)
            (resume-workflow engine workflow-id wf-fn (vec (:args started))))
          ;; Unresolvable workflow fn in THIS process: it can never make progress
          ;; here, so terminate it immediately rather than letting the recovery
