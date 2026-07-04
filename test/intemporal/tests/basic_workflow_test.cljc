@@ -1,6 +1,7 @@
 (ns intemporal.tests.basic-workflow-test
-  (:require [intemporal.core :as intemporal]
-            [clojure.test :refer [deftest is testing]])
+  (:require [clojure.test :refer [deftest is testing]]
+            [intemporal.core :as intemporal]
+            [intemporal.tests.utils :refer [with-result]])
   #?(:cljs (:require-macros [intemporal.core :as intemporal])))
 
 (defn activity-fn [arg]
@@ -14,10 +15,11 @@
 (deftest basic-workflow-test
   (testing "In-Memory Store Implementation"
     (intemporal/with-workflow-engine [engine {:threads 4}]
-      (let [res   (intemporal/start-workflow engine
-                                             basic-workflow ["arg"]
-                                             :workflow-id "basic")]
-       (is (= res
-              {:workflow-id "basic"
-               :status :completed
-               :result {:result [:processed "arg"]}}))))))
+      (with-result [result (intemporal/start-workflow engine
+                                                      basic-workflow ["arg"]
+                                                      :workflow-id "basic")]
+
+        (is (= result
+               {:workflow-id "basic"
+                :status      :completed
+                :result      {:result [:processed "arg"]}}))))))
