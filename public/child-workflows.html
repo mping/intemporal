@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en-us">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@latest/css/pico.min.css">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/default.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/clojure.min.js"></script>
+    <script>hljs.highlightAll();</script>
+
+    <title>Intemporal — child workflows</title>
+    <style>
+        table {font-size: small}
+        #events section {margin-bottom: 1rem}
+        #results {white-space: pre-wrap}
+    </style>
+</head>
+<body>
+<main class="container">
+    <h1>Child workflows</h1>
+    <p>
+        A parent workflow (<code>deploy-service</code>) fans out one independent
+        <code>deploy-region</code> child per region with
+        <code>run-child-workflow-async</code>, then <code>join-all</code>s them.
+        Each child is a first-class persisted workflow with its own event history:
+        it can <code>sleep</code> (suspend) without blocking the parent, and itself
+        spawns a <code>warm-node</code> grandchild — orchestration nests arbitrarily.
+    </p>
+    <p>
+        Children are scheduled with <code>:parent-close-policy :cascade-cancel</code>,
+        so pressing <b>Cancel</b> cancels the whole tree. Independent children are
+        driven by the CLJS recovery worker, so the page <code>submit-workflow</code>s
+        the parent and starts a worker rather than calling <code>start-workflow</code>.
+    </p>
+
+    <ul>
+        <li><a href="index.html">main</a></li>
+        <li><a href="provision-automata.html">provision with state machine</a></li>
+        <li><a href="provision-saga.html">provision saga</a></li>
+        <li><a href="child-workflows.html">child workflows</a></li>
+    </ul>
+
+    <div>
+        <label for="regions">Regions (comma/space separated)</label>
+        <input type="text" id="regions" value="us-east, eu-west, ap-south">
+        <button id="run-btn">Run</button>
+        <button id="cancel-btn" class="secondary">Cancel</button>
+    </div>
+
+    <h4>Results</h4>
+    <pre id="results">;;Results go here</pre>
+
+    <h4>Orchestration tree (parent + descendants)</h4>
+    <div id="events"></div>
+</main>
+<script src="js/shared.js"></script>
+<script src="js/child-workflows.js"></script>
+</body>
+</html>

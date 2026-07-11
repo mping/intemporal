@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en-us">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@latest/css/pico.min.css">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/default.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/clojure.min.js"></script>
+    <script>hljs.highlightAll();</script>
+
+    <title>Intemporal — provision saga</title>
+    <style>
+        table {font-size: small}
+        #results {white-space: pre-wrap}
+    </style>
+</head>
+<body>
+<main class="container">
+    <h1>Provision saga</h1>
+    <p>
+        A saga-style workflow that provisions an instance, attaches a volume and
+        boots it — each step an activity. Pick a step to inject a failure into and
+        run: the workflow compensates (rolls back) the steps that already succeeded,
+        which you can watch unfold in the event history below.
+    </p>
+
+    <ul>
+        <li><a href="index.html">main</a></li>
+        <li><a href="provision-automata.html">provision with state machine</a></li>
+        <li><a href="provision-saga.html">provision saga</a></li>
+        <li><a href="child-workflows.html">child workflows</a></li>
+    </ul>
+
+    <div>
+        <label for="scenario">Inject failure at</label>
+        <select id="scenario">
+            <option value="">no failure (happy path)</option>
+            <option value="provision">provision</option>
+            <option value="attach">attach</option>
+            <option value="boot">boot</option>
+        </select>
+        <button id="run-btn">Run</button>
+    </div>
+
+    <h4>Results</h4>
+    <pre id="results">;;Results go here</pre>
+
+    <h4>Events</h4>
+    <div id="events"></div>
+</main>
+<script src="js/shared.js"></script>
+<script src="js/provision-saga.js"></script>
+</body>
+</html>

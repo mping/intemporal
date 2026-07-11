@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en-us">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@latest/css/pico.min.css">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/default.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/clojure.min.js"></script>
+    <script>hljs.highlightAll();</script>
+
+    <!-- Mermaid renders the live state-machine diagram (optional: the demo falls
+         back to a text diagram if mermaid is absent). -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+
+    <title>Intemporal — provision state machine</title>
+    <style>
+        table {font-size: small}
+        #results {white-space: pre-wrap}
+        #diagram {margin: 1rem 0}
+    </style>
+</head>
+<body>
+<main class="container">
+    <h1>Provision with a state machine</h1>
+    <p>
+        A workflow driven by an explicit finite state machine. The workflow suspends
+        waiting for the next event; click a transition button to emit it and advance
+        the machine. State is persisted, so the workflow replays from history — reload
+        the page and it resumes where you left off. Use <b>Clear</b> to reset.
+    </p>
+
+    <ul>
+        <li><a href="index.html">main</a></li>
+        <li><a href="provision-automata.html">provision with state machine</a></li>
+        <li><a href="provision-saga.html">provision saga</a></li>
+        <li><a href="child-workflows.html">child workflows</a></li>
+    </ul>
+
+    <div>
+        <button id="clear-btn" class="secondary">Clear saved state</button>
+    </div>
+
+    <h4>State machine</h4>
+    <div id="diagram"></div>
+
+    <h4>Emit an event</h4>
+    <div id="controls"></div>
+
+    <h4>Results</h4>
+    <pre id="results">;;Results go here</pre>
+
+    <h4>Events</h4>
+    <div id="events"></div>
+</main>
+<script src="js/shared.js"></script>
+<script src="js/provision-automata.js"></script>
+</body>
+</html>
