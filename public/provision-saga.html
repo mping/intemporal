@@ -33,6 +33,76 @@
         <li><a href="child-workflows.html">child workflows</a></li>
     </ul>
 
+    <div class="grid">
+        <div>
+            <h3>Requirements</h3>
+            <pre><code>
+(ns intemporal.provision-saga
+  (:require [promesa.core :as p]
+            [intemporal.core :as intemporal]
+            [hiccups.runtime :as hiccupsrt])
+  (:require-macros [hiccups.core :as hiccups :refer [html]]
+                   [intemporal.core :refer [defn-workflow]]
+                   [intemporal.internal.context :refer [bthen]]))
+</code></pre>
+
+            <h3>Activities</h3>
+            <p>
+                <code>maybe-fail!</code> throws when its step matches the selected
+                failure injection, so you can force any step to fail.
+            </p>
+            <pre><code>
+(defn provision-instance! []  (maybe-fail! :provision) {:instance-id "i-demo"})
+(defn attach-volume! [inst]   (maybe-fail! :attach)    {:volume-id "vol-demo"})
+(defn boot-vm! [inst vol]     (maybe-fail! :boot)      {:status :booted})
+
+;; compensations (undo)
+(defn halt-vm! [inst]         {:status :halted})
+(defn detach-volume! [vol]    {:status :detached})
+(defn deprovision! [inst]     {:status :deprovisioned})
+</code></pre>
+
+            <h3>Workflow — sequential steps with LIFO compensation</h3>
+            <p>
+                The happy path reads as a straight sequence of API calls. After each
+                destructive step succeeds, a compensation thunk is registered. Any
+                failure runs compensations in reverse (LIFO), undoing completed steps.
+                No state machine, no signals — the workflow is just code.
+            </p>
+            <pre><code>
+(defn-workflow run-provision-saga []
+  (let [s         (intemporal/saga)
+        provision (intemporal/stub #'provision-instance!)
+        attach    (intemporal/stub #'attach-volume!)
+        boot      (intemporal/stub #'boot-vm!)
+        halt      (intemporal/stub #'halt-vm!)
+        detach    (intemporal/stub #'detach-volume!)
+        depr      (intemporal/stub #'deprovision!)]
+    (try
+      (let [inst (provision)
+            _    (intemporal/add-compensation s #(depr (:instance-id inst)))
+            vol  (attach (:instance-id inst))
+            _    (intemporal/add-compensation s #(detach (:volume-id vol)))]
+        (boot (:instance-id inst) (:volume-id vol))
+        {:status :booted :instance-id (:instance-id inst)})
+      (catch js/Error e
+        (intemporal/compensate s)                 ; undo in reverse order
+        (throw e)))))
+</code></pre>
+
+            <h3>Execution</h3>
+            <pre><code>
+(defn run-demo! []
+  (reset! fail-at (scenario-from-select))          ; which step to fail
+  (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)]
+    (-> (intemporal/start-workflow engine run-provision-saga [] :workflow-id wf-id)
+        (bthen  (fn [res] (set-results! (prn-str res)) (render-tables! engine)))
+        (p/catch (fn [err] (set-results! (str "Error: " (ex-message err)))
+                           (render-tables! engine))))))
+</code></pre>
+        </div>
+    </div>
+
     <div>
         <label for="scenario">Inject failure at</label>
         <select id="scenario">

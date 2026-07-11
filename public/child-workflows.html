@@ -42,6 +42,89 @@
         <li><a href="child-workflows.html">child workflows</a></li>
     </ul>
 
+    <div class="grid">
+        <div>
+            <h3>Requirements</h3>
+            <pre><code>
+(ns intemporal.child-workflows
+  (:require [clojure.string :as str]
+            [intemporal.core :as intemporal]
+            [intemporal.protocol :as p]
+            [hiccups.runtime :as hiccupsrt])
+  (:require-macros [hiccups.core :as hiccups :refer [html]]
+                   [intemporal.core :refer [defn-workflow]]))
+</code></pre>
+
+            <h3>Activities (the side-effecting units of work)</h3>
+            <pre><code>
+(defn provision-node! [region]
+  {:region region :node (str "node-" (name region))})
+
+(defn health-check! [node]
+  {:node node :healthy true})
+
+(defn warm-cache! [node]
+  {:node node :cache :warm})
+</code></pre>
+
+            <h3>Grandchild workflow — warm a node's cache</h3>
+            <pre><code>
+(defn-workflow warm-node [node]
+  (let [warm (intemporal/stub #'warm-cache!)]
+    (:cache (warm node))))
+</code></pre>
+
+            <h3>Child workflow — deploy one region</h3>
+            <p>
+                Sleeps to make the orchestration visible, then runs the
+                <code>warm-node</code> grandchild (also cascade-cancellable).
+            </p>
+            <pre><code>
+(defn-workflow deploy-region [region]
+  (let [provision (intemporal/stub #'provision-node!)
+        health    (intemporal/stub #'health-check!)
+        node      (:node (provision region))]
+    (intemporal/sleep 1000)                       ; child suspends here
+    (let [healthy (:healthy (health node))
+          cache   (intemporal/join
+                    (intemporal/run-child-workflow-async #'warm-node [node]
+                                                         :parent-close-policy :cascade-cancel))]
+      {:region region :node node :healthy healthy :cache cache})))
+</code></pre>
+
+            <h3>Parent workflow — fan out an independent child per region</h3>
+            <pre><code>
+(defn-workflow deploy-service [service regions]
+  (let [handles     (mapv (fn [region]
+                            (intemporal/run-child-workflow-async #'deploy-region [region]
+                                                                :parent-close-policy :cascade-cancel))
+                          regions)
+        deployments (intemporal/join-all handles)]
+    {:service      service
+     :region-count (count regions)
+     :deployments  deployments}))
+</code></pre>
+
+            <h3>Execution</h3>
+            <p>
+                Children are driven by the CLJS recovery worker, so the page
+                <code>submit-workflow</code>s the parent and starts a worker rather
+                than calling <code>start-workflow</code> directly.
+            </p>
+            <pre><code>
+(defn run-demo! []
+  (let [regions (parse-regions)
+        engine  (intemporal/make-workflow-engine :threads 4 :enable-logging true)
+        store   (:store engine)]
+    (reset! app-state {:engine engine :store store
+                       :stop (intemporal/start-worker engine :poll-ms 30)})
+    (intemporal/submit-workflow engine #'deploy-service ["billing-api" regions]
+                                :workflow-id wf-id)
+    (poll! store wf-id)))
+</code></pre>
+        </div>
+    </div>
+
     <div>
         <label for="regions">Regions (comma/space separated)</label>
         <input type="text" id="regions" value="us-east, eu-west, ap-south">

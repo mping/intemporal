@@ -16,23 +16,32 @@
    promise/setTimeout worker), so the page submit-workflows the parent and starts a
    worker rather than calling start-workflow directly."
   (:require [clojure.string :as str]
+            [promesa.core :as prom]
             [intemporal.core :as intemporal]
             [intemporal.protocol :as p]
             [hiccups.runtime :as hiccupsrt])
   (:require-macros [hiccups.core :as hiccups :refer [html]]
-                   [intemporal.core :refer [defn-workflow]]))
+                   [intemporal.core :refer [defn-workflow]]
+                   [intemporal.internal.context :refer [blet]]))
 
 ;;;;
 ;; Activities (the side-effecting units of work)
 
+;; These activities do real (simulated) I/O, so they return promises that resolve
+;; after a delay. The CLJS activity executor awaits a promise-returning activity,
+;; so the workflow suspends on the activity until it settles.
+
 (defn provision-node! [region]
-  {:region region :node (str "node-" (name region))})
+  (-> (prom/delay 5000)
+      (prom/then (fn [_] {:region region :node (str "node-" (name region))}))))
 
 (defn health-check! [node]
-  {:node node :healthy true})
+  (-> (prom/delay 1000)
+      (prom/then (fn [_] {:node node :healthy true}))))
 
 (defn warm-cache! [node]
-  {:node node :cache :warm})
+  (-> (prom/delay 1000)
+      (prom/then (fn [_] {:node node :cache :warm}))))
 
 ;;;;
 ;; Grandchild workflow — warm a freshly provisioned node's cache.
@@ -47,13 +56,17 @@
 
 (defn-workflow deploy-region [region]
   (let [provision (intemporal/stub #'provision-node!)
-        health    (intemporal/stub #'health-check!)
-        node      (:node (provision region))]
-    (intemporal/sleep 1000)                       ; visible work — the child suspends here
-    (let [healthy (:healthy (health node))
-          cache   (intemporal/join
-                    (intemporal/run-child-workflow-async #'warm-node [node]
-                                                         :parent-close-policy :cascade-cancel))]
+        health    (intemporal/stub #'health-check!)]
+    ;; Stub calls to promise-returning activities yield promises in CLJS, so chain
+    ;; them with blet (promesa/let that propagates *workflow-context* across each
+    ;; step, so intemporal/join & run-child-workflow-async keep the workflow context).
+    (blet [prov    (provision region)              ; child suspends on each activity
+           node    (:node prov)
+           hc      (health node)
+           healthy (:healthy hc)
+           cache   (intemporal/join
+                     (intemporal/run-child-workflow-async #'warm-node [node]
+                                                          :parent-close-policy :cascade-cancel))]
       {:region region :node node :healthy healthy :cache cache})))
 
 ;;;;
