@@ -51,8 +51,9 @@
     (:cache (warm node))))
 
 ;;;;
-;; Child workflow — deploy one region. Sleeps to make the orchestration visible,
-;; then runs the warm-node grandchild (also cascade-cancellable).
+;; Child workflow — deploy one region. Its activities take time (they return
+;; delayed promises), making the orchestration visible; the child suspends on each
+;; activity, then runs the warm-node grandchild (also cascade-cancellable).
 
 (defn-workflow deploy-region [region]
   (let [provision (intemporal/stub #'provision-node!)
@@ -138,6 +139,89 @@
     (set-html! "events" (html (into [:div] sections)))))
 
 ;;;;
+;; SVG orchestration tree — a live picture of the parent → children → grandchildren
+;; hierarchy, each node coloured by its current status.
+
+(defn- build-tree
+  "Recursively build a node map {:id :status :children [...]} rooted at `id`,
+   reading child links from history markers."
+  [store id]
+  {:id       id
+   :status   (p/get-workflow-status store id)
+   :children (mapv #(build-tree store %)
+                   (child-ids (intemporal/get-workflow-history store id)))})
+
+(def ^:private status-fill
+  {:completed "#b7e4c7" :failed "#ffbaad" :cancelled "#ffd8a8"
+   :running   "#a5d8ff" :not-found "#e9ecef"})
+
+(def ^:private node-w 150)
+(def ^:private node-h 44)
+(def ^:private h-gap 24)
+(def ^:private v-gap 40)
+
+(defn- layout
+  "Assign each node an [x y] by a simple tidy layout: leaves are packed left to
+   right, a parent is centred over its children. Returns [laid-out-node next-x]."
+  [node depth x]
+  (let [y (* depth (+ node-h v-gap))]
+    (if (empty? (:children node))
+      [(assoc node :x x :y y) (+ x node-w h-gap)]
+      (let [[children next-x]
+            (reduce (fn [[acc cx] child]
+                      (let [[laid cx'] (layout child (inc depth) cx)]
+                        [(conj acc laid) cx']))
+                    [[] x] (:children node))
+            first-c (first children)
+            last-c  (last children)
+            cx      (/ (+ (:x first-c) (:x last-c)) 2)]
+        [(assoc node :x cx :y y :children children) next-x]))))
+
+(defn- flatten-nodes [node]
+  (cons node (mapcat flatten-nodes (:children node))))
+
+(defn- short-id [id]
+  ;; keep the last path segment so deep ids stay readable
+  (let [seg (last (str/split id #"/"))]
+    (if (< (count seg) 18) seg (str (subs seg 0 16) "…"))))
+
+(defn- node-svg [{:keys [id status x y]}]
+  (let [cx (+ x (/ node-w 2))]
+    (list
+      [:rect {:x x :y y :width node-w :height node-h :rx 6
+              :fill (get status-fill status "#e9ecef")
+              :stroke "#495057" :stroke-width 1}]
+      [:text {:x cx :y (+ y 18) :text-anchor "middle"
+              :font-size 12 :font-weight "bold" :fill "#212529"}
+       (short-id id)]
+      [:text {:x cx :y (+ y 34) :text-anchor "middle"
+              :font-size 11 :fill "#495057"}
+       (name status)])))
+
+(defn- edge-svg [parent child]
+  [:line {:x1 (+ (:x parent) (/ node-w 2)) :y1 (+ (:y parent) node-h)
+          :x2 (+ (:x child) (/ node-w 2))  :y2 (:y child)
+          :stroke "#adb5bd" :stroke-width 1.5}])
+
+(defn- edges [node]
+  (concat (for [c (:children node)] (edge-svg node c))
+          (mapcat edges (:children node))))
+
+(defn tree-svg [tree]
+  (let [[laid _] (layout tree 0 10)
+        nodes    (flatten-nodes laid)
+        max-x    (+ 20 (apply max (map #(+ (:x %) node-w) nodes)))
+        max-y    (+ 20 (apply max (map #(+ (:y %) node-h) nodes)))]
+    (into [:svg {:width max-x :height max-y
+                 :viewBox (str "0 0 " max-x " " max-y)
+                 :style "max-width:100%;height:auto"}]
+          (concat (edges laid)
+                  (mapcat node-svg nodes)))))
+
+(defn render-tree-svg! [store root]
+  (set-html! "tree" (html (tree-svg (build-tree store root)))))
+
+;;;;
 ;; Running the workflow
 
 (def ^:private terminal? #{:completed :failed :cancelled})
@@ -147,6 +231,7 @@
   (swap! app-state assoc :stop nil))
 
 (defn- poll! [store root]
+  (render-tree-svg! store root)
   (render-trees! store root)
   (let [status (p/get-workflow-status store root)]
     (set-results! (str "Status: " (name status)
@@ -169,6 +254,7 @@
                        ;; the worker drives the parent AND every descendant child
                        :stop   (intemporal/start-worker engine :poll-ms 30)})
     (set-results! "Running…")
+    (set-html! "tree" "")
     (set-html! "events" "")
     ;; Submit the parent for the worker to drive (NOT start-workflow, whose
     ;; blocking loop would race the worker on the same workflow).
