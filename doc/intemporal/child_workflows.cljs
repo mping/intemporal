@@ -32,15 +32,15 @@
 ;; so the workflow suspends on the activity until it settles.
 
 (defn provision-node! [region]
-  (-> (prom/delay 1000)
+  (-> (prom/delay (+ 500 (rand-int 1000)))
       (prom/then (fn [_] {:region region :node (str "node-" (name region))}))))
 
 (defn health-check! [node]
-  (-> (prom/delay 1000)
+  (-> (prom/delay (+ 500 (rand-int 1000)))
       (prom/then (fn [_] {:node node :healthy true}))))
 
 (defn warm-cache! [node]
-  (-> (prom/delay 1000)
+  (-> (prom/delay (+ 500 (rand-int 1000)))
       (prom/then (fn [_] {:node node :cache :warm}))))
 
 ;;;;
@@ -140,24 +140,37 @@
 ;; SVG orchestration tree — a live picture of the parent → children → grandchildren
 ;; hierarchy, each node coloured by its current status.
 
+(defn- workflow-started
+  "The :workflow-started event from a workflow's history, if present."
+  [history]
+  (some #(when (= :workflow-started (:event-type %)) %) history))
+
 (defn- workflow-fn-name
-  "Short workflow function name (e.g. \"deploy-region\") from a workflow's
-   :workflow-started event, falling back to the id if unavailable."
-  [history id]
-  (let [fq (->> history
-                (some #(when (= :workflow-started (:event-type %))
-                         (:workflow-fn-name %))))]
-    (if fq
-      (last (str/split fq #"/"))
-      id)))
+  "Short workflow function name (e.g. \"deploy-region\") from the :workflow-started
+   event, falling back to the id if unavailable."
+  [started id]
+  (if-let [fq (:workflow-fn-name started)]
+    (last (str/split fq #"/"))
+    id))
+
+(defn- args-label
+  "Compact args string for the node, e.g. [:us-east] → \"us-east\". Truncated so
+   deep args stay readable."
+  [started]
+  (let [args (:args started)]
+    (when (seq args)
+      (let [s (->> args (map pr-str) (str/join " "))]
+        (if (< (count s) 20) s (str (subs s 0 18) "…"))))))
 
 (defn- build-tree
-  "Recursively build a node map {:id :name :status :children [...]} rooted at
-   `id`, reading child links and the fn name from history."
+  "Recursively build a node map {:id :name :args :status :children [...]} rooted at
+   `id`, reading child links, fn name and args from history."
   [store id]
-  (let [history (intemporal/get-workflow-history store id)]
+  (let [history (intemporal/get-workflow-history store id)
+        started (workflow-started history)]
     {:id       id
-     :name     (workflow-fn-name history id)
+     :name     (workflow-fn-name started id)
+     :args     (args-label started)
      :status   (p/get-workflow-status store id)
      :children (mapv #(build-tree store %) (child-ids history))}))
 
@@ -166,7 +179,7 @@
    :running   "#a5d8ff" :not-found "#e9ecef"})
 
 (def ^:private node-w 150)
-(def ^:private node-h 44)
+(def ^:private node-h 58)
 (def ^:private h-gap 24)
 (def ^:private v-gap 40)
 
@@ -190,19 +203,25 @@
 (defn- flatten-nodes [node]
   (cons node (mapcat flatten-nodes (:children node))))
 
-(defn- node-svg [{node-name :name :keys [id status x y]}]
+(defn- node-svg [{node-name :name :keys [id args status x y]}]
   (let [cx (+ x (/ node-w 2))]
-    (list
-      [:rect {:x x :y y :width node-w :height node-h :rx 6
-              :fill (get status-fill status "#e9ecef")
-              :stroke "#495057" :stroke-width 1}
-       [:title id]]                                ; full id on hover
-      [:text {:x cx :y (+ y 18) :text-anchor "middle"
-              :font-size 12 :font-weight "bold" :fill "#212529"}
-       node-name]
-      [:text {:x cx :y (+ y 34) :text-anchor "middle"
-              :font-size 11 :fill "#495057"}
-       (name status)])))
+    (concat
+      (list
+        [:rect {:x x :y y :width node-w :height node-h :rx 6
+                :fill (get status-fill status "#e9ecef")
+                :stroke "#495057" :stroke-width 1}
+         [:title id]]                              ; full id on hover
+        [:text {:x cx :y (+ y 17) :text-anchor "middle"
+                :font-size 12 :font-weight "bold" :fill "#212529"}
+         node-name])
+      (when args
+        [[:text {:x cx :y (+ y 33) :text-anchor "middle"
+                 :font-size 11 :font-family "monospace" :fill "#1864ab"}
+          args]])
+      (list
+        [:text {:x cx :y (+ y 49) :text-anchor "middle"
+                :font-size 11 :fill "#495057"}
+         (name status)]))))
 
 (defn- edge-svg [parent child]
   [:line {:x1 (+ (:x parent) (/ node-w 2)) :y1 (+ (:y parent) node-h)
@@ -232,9 +251,9 @@
 
 (def ^:private terminal? #{:completed :failed :cancelled})
 
-(defn- stop-worker! []
-  (when-let [stop (:stop @app-state)] (stop))
-  (swap! app-state assoc :stop nil))
+(defn- stop-workers! []
+  (doseq [stop (:stops @app-state)] (stop))
+  (swap! app-state assoc :stops nil))
 
 (defn- poll! [store root]
   (render-tree-svg! store root)
@@ -244,21 +263,28 @@
                        (when (= status :completed)
                          (str "\n\n" (prn-str (intemporal/get-workflow-result store root))))))
     (if (terminal? status)
-      (stop-worker!)
+      (stop-workers!)
       (js/setTimeout #(poll! store root) 200))))
 
 (defn run-demo! []
-  (stop-worker!)
+  (stop-workers!)
   (let [regions (->> (-> js/document (.getElementById "regions") .-value
                          (str/split #"[,\s]+"))
                      (remove str/blank?)
                      (mapv keyword))
         engine  (intemporal/make-workflow-engine :threads 4 :enable-logging true)
-        store   (:store engine)]
+        store   (:store engine)
+        ;; A single worker scans pending workflows SEQUENTIALLY (one step at a
+        ;; time), so children/grandchildren would run one region after another.
+        ;; Start a POOL of workers instead — each has its own owner-id and claims
+        ;; disjoint pending workflows, so regions advance in parallel. Peak
+        ;; in-flight ≈ parent + one child + one grandchild per region.
+        n-workers (inc (* 2 (max 1 (count regions))))
+        stops     (mapv (fn [_] (intemporal/start-worker engine :poll-ms 30))
+                        (range n-workers))]
     (reset! app-state {:engine engine
                        :store  store
-                       ;; the worker drives the parent AND every descendant child
-                       :stop   (intemporal/start-worker engine :poll-ms 30)})
+                       :stops  stops})
     (set-results! "Running…")
     (set-html! "tree" "")
     (set-html! "events" "")
