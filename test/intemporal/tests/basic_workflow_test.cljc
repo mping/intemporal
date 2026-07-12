@@ -2,7 +2,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [intemporal.core :as intemporal]
             [intemporal.tests.utils :refer [with-result]])
-  #?(:cljs (:require-macros [intemporal.core :as intemporal])))
+  #?(:cljs (:require-macros [intemporal.core :as intemporal]
+                            [intemporal.tests.utils :refer [with-result]])))
 
 (defn activity-fn [arg]
   [:processed arg])
