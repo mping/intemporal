@@ -174,7 +174,12 @@
         (log/error e "Interrupted while shutting down pool"))))
 
   (shutdown? [_]
-    (.isTerminated pool)))
+    ;; .isShutdown (not .isTerminated): the executor stops ACCEPTING work the
+    ;; moment shutdown is initiated. Using isTerminated left a window where the
+    ;; drive loop kept scheduling activities into a closing pool — each submit
+    ;; rejected, each rejection rescheduled — spinning through the replay budget
+    ;; and wrongly finalizing the workflow as :failed during engine shutdown.
+    (.isShutdown pool)))
 
 (defn create-bounded-executor
   "Creates a bounded ThreadPoolExecutor with virtual threads"

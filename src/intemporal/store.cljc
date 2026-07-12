@@ -136,20 +136,26 @@
     (let [ok (atom false)]
       (swap! state
              (fn [s]
-               (let [cur (get-in s [:workflows workflow-id :owner])]
-                 (if (or (nil? cur) (= cur owner-id))
+               (let [wf  (get-in s [:workflows workflow-id])
+                     cur (:owner wf)]
+                 ;; Never claim a terminal workflow (mirrors the JDBC store's
+                 ;; status predicate): a claim racing a finalization must lose.
+                 (if (and (not (terminal-status? (:status wf)))
+                          (or (nil? cur) (= cur owner-id)))
                    (do (reset! ok true)
                        (assoc-in s [:workflows workflow-id :owner] owner-id))
                    s))))
       @ok))
 
+  ;; A4: cancelled-but-not-finalized workflows MUST stay listed so a worker can
+  ;; re-drive them (body observes the cancel flag, saga compensation runs, the
+  ;; terminal :workflow-cancelled event is written — which then excludes them).
   (list-pending [_ owner-id limit]
     (let [now (utils/current-time-ms)]
       (->> (:workflows @state)
            (filter (fn [[_ wf]]
                      (and (seq (:history wf))
                           (not (terminal-status? (:status wf)))
-                          (not (:cancelled wf))
                           ;; C2: skip workflows not yet due to wake
                           (let [wa (:wake-at wf)] (or (nil? wa) (<= wa now)))
                           (let [o (:owner wf)] (or (nil? o) (= o owner-id))))))

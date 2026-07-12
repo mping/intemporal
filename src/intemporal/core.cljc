@@ -70,6 +70,21 @@
                 err             (some-> (:error existing-failed) (error/map->exception))
                 interrupted?    (boolean (some-> err (error/interruption?)))
                 rejected?       (boolean (some-> err (error/rejection?)))]
+            ;; Replay determinism check: the cached event at this seq must belong
+            ;; to THIS activity. A mismatch means the workflow code changed (or is
+            ;; non-deterministic) since the history was recorded — returning the
+            ;; other activity's cached result would be silent corruption.
+            (when-let [recorded (:activity-name (or existing existing-failed))]
+              (when (not= recorded activity-name)
+                (throw (ex-info (str "Replay non-determinism detected: history records activity "
+                                     (pr-str recorded) " at seq " seq-num
+                                     ", but the workflow now calls " (pr-str activity-name)
+                                     ". Workflow code must be deterministic across replays.")
+                                {:error/type    ::non-deterministic-replay
+                                 :workflow-id   workflow-id
+                                 :seq           seq-num
+                                 :recorded      recorded
+                                 :activity-name activity-name}))))
             (cond
               ;; Replay: return cached result
               existing
@@ -239,7 +254,8 @@
                                    (when (p/find-event store workflow-id :async-completed (:seq-num handle))
                                        idx))
                                handles))]
-        (if completed-idx
+        (cond
+          completed-idx
           (let [result (join (nth handles completed-idx))]
             (ctx/add-pending-event! {:event-type :join-any-completed
                                      :seq seq-num
@@ -247,6 +263,15 @@
                                      :result result
                                      :timestamp (utils/current-time-ms)})
             {:index completed-idx :result result})
+
+          ;; Every handle already failed: no completion can ever arrive, so fail
+          ;; deterministically (recorded events, stable across replays) instead
+          ;; of suspending forever.
+          (every? #(p/find-event store workflow-id :async-failed (:seq-num %)) handles)
+          (let [failed (p/find-event store workflow-id :async-failed (:seq-num (first handles)))]
+            (throw (error/async-failed-exception (:seq-num (first handles)) (:error failed))))
+
+          :else
           (throw (error/make-suspension :join-any-pending
                                         {:seq seq-num
                                          :handle-seqs (mapv :seq-num handles)})))))))
@@ -587,37 +612,22 @@
    (let [history (p/load-history store workflow-id)
          started (first (filter #(= :workflow-started (:event-type %)) history))]
      (when-not started
+       ;; :error/type lets the recovery worker classify this as permanently
+       ;; unresumable-by-id (e.g. a legacy sync-child history) and skip it.
        (throw (ex-info "Cannot resume: no :workflow-started event in history"
-                       {:workflow-id workflow-id})))
-     ;; resolve-workflow throws a descriptive ex-info if the fn is not registered
-     ;; in this process (e.g. a fresh process that forgot to register its vars).
+                       {:error/type  ::no-started-event
+                        :workflow-id workflow-id})))
+     ;; resolve-workflow throws a descriptive ex-info ({:error/type ::wreg/not-
+     ;; registered}) if the fn is not registered in this process. IMPORTANT: an
+     ;; unresolvable workflow is NOT terminated here — this process may simply be
+     ;; missing a registration another pod has (or that arrives later), and
+     ;; destroying the workflow for that would be unrecoverable. Callers (the
+     ;; recovery worker) classify the exception via wreg/not-registered? and skip
+     ;; the workflow until its fn is registered.
      (let [wf-name (:workflow-fn-name started)
-           wf-fn   (try
-                     (wreg/resolve-workflow wf-name)
-                     (catch #?(:clj Throwable :cljs :default) e
-                       (when-not (wreg/not-registered? e)
-                         (throw e))))]
-       (if wf-fn
-         (do
-           (log/infof "Resuming workflow %s" workflow-id)
-           (resume-workflow engine workflow-id wf-fn (vec (:args started))))
-         ;; Unresolvable workflow fn in THIS process: it can never make progress
-         ;; here, so terminate it immediately rather than letting the recovery
-         ;; worker re-pick it on every poll and throw forever. Writing a terminal
-         ;; :workflow-terminated event excludes it from list-pending. (Common in
-         ;; tests that share a persistent store: the scan surfaces leftover
-         ;; workflows from other namespaces whose vars aren't registered here.)
-         (do
-           (log/warnf "Terminating workflow %s: no workflow function registered for name %s"
-                      workflow-id (pr-str wf-name))
-           (p/save-event store workflow-id
-                         {:event-type  :workflow-terminated
-                          :workflow-id workflow-id
-                          :error       {:type    "clojure.lang.ExceptionInfo"
-                                        :message (str "No workflow function registered for name: " wf-name)
-                                        :data    {:workflow-name wf-name}}
-                          :timestamp   (utils/current-time-ms)})
-           {:status :terminated :workflow-id workflow-id})))))
+           wf-fn   (wreg/resolve-workflow wf-name)]
+       (log/infof "Resuming workflow %s" workflow-id)
+       (resume-workflow engine workflow-id wf-fn (vec (:args started))))))
   ([{:keys [store executor scheduler registry] :as engine} workflow-id workflow-fn args
     & {:keys [observer max-iterations]
        :or {max-iterations 1000}}]
@@ -681,13 +691,34 @@
       & {:keys [owner-id poll-ms batch-size]
          :or   {owner-id (str (random-uuid)) poll-ms 500 batch-size 100}}]
      (let [running (atom true)
+           ;; Workflows this process cannot resume: wf-id -> workflow-fn-name
+           ;; (or nil when the history has no :workflow-started event). They are
+           ;; skipped — NOT terminated (another pod, or a later registration in
+           ;; this one, may still run them) — and retried automatically once
+           ;; their fn shows up in the registry.
+           unresumable (atom {})
+           skip?
+           (fn [wf-id]
+             (let [[known? wf-name] (find @unresumable wf-id)]
+               (if-not known?
+                 false
+                 (if (and wf-name (wreg/registered? wf-name))
+                   (do (swap! unresumable dissoc wf-id) false)  ; fn arrived: retry
+                   true))))
            process-one
            (fn [wf-id]
-             (when (p/claim-owner store wf-id owner-id)
+             (when (and (not (skip? wf-id))
+                        (p/claim-owner store wf-id owner-id))
                (try
                  (resume-workflow engine wf-id)
                  (catch Throwable t
-                   (log/warnf t "Worker %s failed resuming %s" owner-id wf-id)))))
+                   (let [etype (:error/type (ex-data t))]
+                     (if (or (wreg/not-registered? t) (= ::no-started-event etype))
+                       (do
+                         (swap! unresumable assoc wf-id (:workflow-name (ex-data t)))
+                         (log/warnf "Worker %s: workflow %s is not resumable here (%s); skipping until its fn is registered"
+                                    owner-id wf-id (ex-message t)))
+                       (log/warnf t "Worker %s failed resuming %s" owner-id wf-id)))))))
            ;; Exponential backoff on consecutive poll failures so a downed
            ;; database doesn't get hammered (and the logs flooded). Resets to
            ;; poll-ms after any successful list-pending query.
@@ -717,11 +748,17 @@
          (.start))
        (fn stop-worker []
          (reset! running false)
-         (.interrupt thread)
-         ;; Wait briefly for an in-flight resume to finish before releasing
-         ;; ownership, so another pod doesn't pick up a workflow that is still
-         ;; executing here (#7). Bounded so stop never blocks indefinitely.
-         (.join thread (long poll-ms))
+         ;; Graceful first: let the loop observe @running=false on its own — the
+         ;; poll sleep is at most poll-ms and an in-flight resume must be allowed
+         ;; to COMPLETE. Interrupting immediately (as before) could abort a store
+         ;; write mid-persist AFTER side effects ran (e.g. an activity executed
+         ;; but its :activity-completed never saved), forcing a re-execution on
+         ;; the next resume. Interrupt only as a last resort for a stuck resume;
+         ;; the drive loop treats interrupt-driven errors as suspensions (#7).
+         (.join thread (long (+ poll-ms 5000)))
+         (when (.isAlive thread)
+           (.interrupt thread)
+           (.join thread (long poll-ms)))
          (p/release-owner store owner-id)))))
 
 #?(:cljs
@@ -747,6 +784,25 @@
          :or   {owner-id (str (random-uuid)) poll-ms 50 batch-size 100}}]
      (let [running     (atom true)
            timer       (atom nil)
+           ;; Workflows this process cannot resume: wf-id -> workflow-fn-name (or
+           ;; nil when the history has no :workflow-started event). Skipped — NOT
+           ;; terminated — and retried once their fn shows up in the registry.
+           unresumable (atom {})
+           skip?       (fn [wf-id]
+                         (let [[known? wf-name] (find @unresumable wf-id)]
+                           (if-not known?
+                             false
+                             (if (and wf-name (wreg/registered? wf-name))
+                               (do (swap! unresumable dissoc wf-id) false)
+                               true))))
+           on-fail     (fn [wf-id e]
+                         (if (or (wreg/not-registered? e)
+                                 (= ::no-started-event (:error/type (ex-data e))))
+                           (do
+                             (swap! unresumable assoc wf-id (:workflow-name (ex-data e)))
+                             (log/warnf "Worker %s: workflow %s is not resumable here (%s); skipping until its fn is registered"
+                                        owner-id wf-id (ex-message e)))
+                           (log/warnf "Worker %s failed resuming %s: %s" owner-id wf-id e)))
            process-one (fn [wf-id]
                          ;; resume-workflow can throw synchronously (e.g. fn not
                          ;; registered) or reject async; swallow both so one bad
@@ -754,10 +810,10 @@
                          (try
                            (-> (resume-workflow engine wf-id)
                                (prom/catch (fn [e]
-                                             (log/warnf "Worker %s failed resuming %s: %s" owner-id wf-id e)
+                                             (on-fail wf-id e)
                                              nil)))
                            (catch :default e
-                             (log/warnf "Worker %s failed resuming %s: %s" owner-id wf-id e)
+                             (on-fail wf-id e)
                              (prom/resolved nil))))]
        (letfn [(schedule-next []
                  (when @running
@@ -769,7 +825,9 @@
                        (-> (reduce (fn [pchain wf-id]
                                      (prom/then pchain
                                                 (fn [_]
-                                                  (if (and @running (p/claim-owner store wf-id owner-id))
+                                                  (if (and @running
+                                                           (not (skip? wf-id))
+                                                           (p/claim-owner store wf-id owner-id))
                                                     (process-one wf-id)
                                                     (prom/resolved nil)))))
                                    (prom/resolved nil)
@@ -824,6 +882,11 @@
         (log/debugf "Cancelling workflow that is already in terminal state %s, skipping" status)
         (do
           (p/mark-cancelled store workflow-id)
+          ;; Make the workflow immediately due for the ownership scan (it may be
+          ;; sleeping with a future wake-at): a worker must re-drive it so the
+          ;; body observes the cancel flag, runs any saga compensation, and the
+          ;; terminal :workflow-cancelled event is written.
+          (p/set-wake-at store workflow-id nil)
           (p/wake-workflow store workflow-id)
           (log/debugf "Cancelling workflow")
           (exec/enforce-close-policies! store workflow-id)))))
@@ -948,8 +1011,8 @@
    - :threads - Number of executor threads (default: 4)
    - :scheduler-threads - Number of scheduler threads (default: 2)
    - :default-timeout-ms - Default activity timeout (default: 30000)
-   - :enable-logging - Enable logging observer (default: false)
-   - :enable-telemetry - Enable OpenTelemetry observer (default: false, JVM only)
+   - :enable-logging - Enable logging observer (default: true)
+   - :enable-telemetry - Enable OpenTelemetry tracing (default: true, JVM only)
    - :observer - Additional observer instance, composed on top of built-in observers"
   [& {:keys [store threads scheduler-threads default-timeout-ms enable-logging enable-telemetry observer]
       :or {store (store/->InMemoryStore (atom {}))

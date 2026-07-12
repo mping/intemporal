@@ -79,6 +79,11 @@
   [e]
   (= ::not-registered (:error/type (ex-data e))))
 
+(defn registered?
+  "True if a workflow fn is registered under `name` in this process."
+  [name]
+  (contains? @registry name))
+
 (defn clear-registry!
   "Test helper: empties the global registry."
   []

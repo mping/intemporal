@@ -3,13 +3,10 @@
             [intemporal.internal.logging :as log]
             [migratus.core :as migratus]
             [next.jdbc :as jdbc]
-            [next.jdbc.prepare :as prepare]
-            [next.jdbc.result-set :as rs]
             [cheshire.core :as json]
             [hikari-cp.core :as hikari])
   (:import (java.lang AutoCloseable)
-           (org.postgresql.util PGobject)
-           (java.sql PreparedStatement)))
+           (org.postgresql.util PGobject)))
 
 ;; ============================================================================
 ;; JDBC URL resolution
@@ -49,12 +46,15 @@
     (.startsWith jdbc-url "jdbc:postgresql") :postgres
     (.startsWith jdbc-url "jdbc:mariadb") :mariadb
     (.startsWith jdbc-url "jdbc:mysql") :mysql
-    :else (throw (ex-info "Unknown jdbc url %s; only postgres and mysql/mariadb supported" {:jdbc-url jdbc-url}))))
+    :else (throw (ex-info (str "Unknown jdbc url " jdbc-url "; only postgres and mysql/mariadb supported")
+                          {:jdbc-url jdbc-url}))))
 
 (defn- migrate! [jdbc-url]
   (let [kind (detect-kind jdbc-url)
+        ;; MySQL shares the MariaDB migrations (there is no migrations/mysql dir).
+        dir  (case kind :postgres "postgres" "mariadb")
         cfg {:store :database
-             :migration-dir (str "migrations/" (name kind))
+             :migration-dir (str "migrations/" dir)
              :db {:jdbcUrl jdbc-url}}]
     (migratus/migrate cfg)
     kind))
@@ -69,15 +69,20 @@
     ;; MariaDB / MySQL
     "INSERT IGNORE INTO intemporal_workflows (id) VALUES (?)"))
 
+;; A1: history is keyed per (workflow_id, seq, event_type) — the engine records
+;; multiple event types at the same seq (scheduled + completed, started +
+;; completed, ...), so the conflict target must include event_type or later
+;; events silently overwrite earlier ones. Re-writing the SAME event type at the
+;; same seq (normal replay) stays idempotent via the upsert.
 (defn- upsert-history-sql [kind]
   (case kind
     :postgres "INSERT INTO intemporal_history (workflow_id, seq, event_type, data)
                 VALUES (?, ?, ?, ?)
-                ON CONFLICT (workflow_id, seq) DO UPDATE SET event_type = EXCLUDED.event_type, data = EXCLUDED.data"
+                ON CONFLICT (workflow_id, seq, event_type) DO UPDATE SET data = EXCLUDED.data"
     ;; MariaDB / MySQL
     "INSERT INTO intemporal_history (workflow_id, seq, event_type, data)
                 VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE event_type = VALUES(event_type), data = VALUES(data)"))
+                ON DUPLICATE KEY UPDATE data = VALUES(data)"))
 
 (defn- upsert-cancel-sql [kind]
   (case kind
@@ -104,41 +109,21 @@
     (.setValue pgobj (json/generate-string x))
     pgobj))
 
-(extend-protocol prepare/SettableParameter
-  clojure.lang.IPersistentMap
-  (set-parameter [m ^PreparedStatement s i]
-    (.setObject s i (->pgobject m)))
-  clojure.lang.IPersistentVector
-  (set-parameter [v ^PreparedStatement s i]
-    (.setObject s i (->pgobject v))))
-
-(extend-protocol rs/ReadableColumn
-  PGobject
-  (read-column-by-label [^PGobject v _]
-    (if (= "jsonb" (.getType v))
-      (json/parse-string (.getValue v) true)
-      (.getValue v)))
-  (read-column-by-index [^PGobject v _ _]
-    (if (= "jsonb" (.getType v))
-      (json/parse-string (.getValue v) true)
-      (.getValue v))))
-
-;; For non-PostgreSQL databases (MariaDB/MySQL), maps/vectors must be
-;; pre-serialized to JSON strings since the PGobject extension above only
-;; fires for PostgreSQL params.  The MariaDB JDBC driver accepts String
-;; values for JSON columns.
+;; JSON conversion is done EXPLICITLY at this store's call sites rather than via
+;; `extend-protocol prepare/SettableParameter` / `rs/ReadableColumn`, which are
+;; JVM-global: extending IPersistentMap/IPersistentVector would silently coerce
+;; every map/vector parameter of every next.jdbc call in the host application
+;; (including non-intemporal, non-PostgreSQL ones) to a PGobject.
 (defn- ->json-param [kind x]
   (case kind
-    :postgres x ; PGobject extension handles it
-    (json/generate-string x))) ; pre-serialize for MariaDB/MySQL
+    :postgres (->pgobject x)          ; native JSONB binding
+    (json/generate-string x)))        ; MariaDB/MySQL accept String for JSON columns
 
-;; For non-PostgreSQL databases (MariaDB/MySQL), JSON columns are returned as
-;; Strings by the JDBC driver (unlike PostgreSQL where PGobject triggers
-;; automatic Cheshire parsing).  Parse them back to Clojure data.
-(defn- <-json-val [kind x]
-  (if (and (not= kind :postgres) (string? x))
-    (json/parse-string x true)
-    x))
+(defn- <-json-val [_kind x]
+  (cond
+    (instance? PGobject x) (json/parse-string (.getValue ^PGobject x) true)
+    (string? x)            (json/parse-string x true)
+    :else x))
 
 ;; ============================================================================
 ;; JdbcStore Implementation
@@ -286,11 +271,14 @@
                                   owner-id workflow-id owner-id])]
       (pos? (or (:next.jdbc/update-count res) 0))))
 
+  ;; A4: cancelled-but-not-finalized workflows MUST stay listed — the worker has
+  ;; to re-drive them so the body observes the cancel flag, runs any saga
+  ;; compensation, and writes the terminal :workflow-cancelled event (which then
+  ;; excludes them via the status filter).
   (list-pending [_ owner-id limit]
     (let [rows (jdbc/execute! datasource
                               ["SELECT id FROM intemporal_workflows
                    WHERE status NOT IN ('completed','failed','cancelled','terminated')
-                     AND cancelled = FALSE
                      AND (wake_at IS NULL OR wake_at <= now())
                      AND (owner = ? OR owner IS NULL)
                    ORDER BY created_at

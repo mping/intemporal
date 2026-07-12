@@ -192,11 +192,15 @@
     (ftr/run db
       (fn [tx]
         (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "cancelled"]) (->bytes true))
-        ;; Drop the workflow out of the ownership scan immediately so list-pending
-        ;; stops re-listing a cancelled-but-not-yet-finalized workflow. The entry
-        ;; lives under the workflow's current owner bucket (or "" if unowned).
-        (let [bucket (or (read-owner tx root-subspace workflow-id) "")]
-          (fdb-core/clear tx root-subspace (owner-index-key root-subspace bucket workflow-id))))))
+        ;; A4: keep the workflow IN the ownership scan (and make it due now) so a
+        ;; worker re-drives it: the body must observe the cancel flag, run any
+        ;; saga compensation, and write the terminal :workflow-cancelled event —
+        ;; which removes the index entry via maintain-owner-index!. Only touch an
+        ;; existing entry: an absent entry means terminal or never started.
+        (let [bucket (or (read-owner tx root-subspace workflow-id) "")
+              k      (owner-index-key root-subspace bucket workflow-id)]
+          (when-let [entry (<-bytes (fdb-core/get tx root-subspace k))]
+            (fdb-core/set tx root-subspace k (->bytes (assoc entry :wake-at nil))))))))
 
   (get-workflow-status [this workflow-id]
     ;; Read both status and cancelled flag in one transaction so that a late
@@ -225,9 +229,14 @@
   (claim-owner [_ workflow-id owner-id]
     (ftr/run db
       (fn [tx]
-        (let [k   (->tuple ["owner" workflow-id])
-              cur (<-bytes (fdb-core/get tx root-subspace k))]
-          (if (or (nil? cur) (= cur owner-id))
+        (let [k        (->tuple ["owner" workflow-id])
+              cur      (<-bytes (fdb-core/get tx root-subspace k))
+              status   (<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "status"])))
+              terminal? (contains? #{"completed" "failed" "cancelled" "terminated"} status)]
+          ;; Never claim a terminal workflow (mirrors the JDBC status predicate);
+          ;; doing so would also resurrect its ownership-index entry below.
+          (if (and (not terminal?)
+                   (or (nil? cur) (= cur owner-id)))
             (let [old-bucket (or cur "")
                   ;; preserve the index value (carries C2 wake-at) across the move
                   entry      (or (<-bytes (fdb-core/get tx root-subspace
@@ -276,9 +285,12 @@
     (ftr/run db
       (fn [tx]
         (let [bucket (or (read-owner tx root-subspace workflow-id) "")
-              k      (owner-index-key root-subspace bucket workflow-id)
-              entry  (or (<-bytes (fdb-core/get tx root-subspace k)) {})]
-          (fdb-core/set tx root-subspace k (->bytes (assoc entry :wake-at wake-at-ms))))))
+              k      (owner-index-key root-subspace bucket workflow-id)]
+          ;; Only update an EXISTING index entry: an absent entry means the
+          ;; workflow is terminal (or never started), and writing one here would
+          ;; resurrect a phantom "pending" workflow into the ownership scan.
+          (when-let [entry (<-bytes (fdb-core/get tx root-subspace k))]
+            (fdb-core/set tx root-subspace k (->bytes (assoc entry :wake-at wake-at-ms)))))))
     nil)
 
   ;; --- Tier 2: independent child workflows ---
