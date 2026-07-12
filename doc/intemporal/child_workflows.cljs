@@ -32,7 +32,7 @@
 ;; so the workflow suspends on the activity until it settles.
 
 (defn provision-node! [region]
-  (-> (prom/delay 5000)
+  (-> (prom/delay 1000)
       (prom/then (fn [_] {:region region :node (str "node-" (name region))}))))
 
 (defn health-check! [node]
@@ -61,10 +61,8 @@
     ;; Stub calls to promise-returning activities yield promises in CLJS, so chain
     ;; them with blet (promesa/let that propagates *workflow-context* across each
     ;; step, so intemporal/join & run-child-workflow-async keep the workflow context).
-    (blet [prov    (provision region)              ; child suspends on each activity
-           node    (:node prov)
-           hc      (health node)
-           healthy (:healthy hc)
+    (blet [node    (:node (provision region))
+           healthy (:healthy (health node))
            cache   (intemporal/join
                      (intemporal/run-child-workflow-async #'warm-node [node]
                                                           :parent-close-policy :cascade-cancel))]
@@ -142,14 +140,26 @@
 ;; SVG orchestration tree — a live picture of the parent → children → grandchildren
 ;; hierarchy, each node coloured by its current status.
 
+(defn- workflow-fn-name
+  "Short workflow function name (e.g. \"deploy-region\") from a workflow's
+   :workflow-started event, falling back to the id if unavailable."
+  [history id]
+  (let [fq (->> history
+                (some #(when (= :workflow-started (:event-type %))
+                         (:workflow-fn-name %))))]
+    (if fq
+      (last (str/split fq #"/"))
+      id)))
+
 (defn- build-tree
-  "Recursively build a node map {:id :status :children [...]} rooted at `id`,
-   reading child links from history markers."
+  "Recursively build a node map {:id :name :status :children [...]} rooted at
+   `id`, reading child links and the fn name from history."
   [store id]
-  {:id       id
-   :status   (p/get-workflow-status store id)
-   :children (mapv #(build-tree store %)
-                   (child-ids (intemporal/get-workflow-history store id)))})
+  (let [history (intemporal/get-workflow-history store id)]
+    {:id       id
+     :name     (workflow-fn-name history id)
+     :status   (p/get-workflow-status store id)
+     :children (mapv #(build-tree store %) (child-ids history))}))
 
 (def ^:private status-fill
   {:completed "#b7e4c7" :failed "#ffbaad" :cancelled "#ffd8a8"
@@ -180,20 +190,16 @@
 (defn- flatten-nodes [node]
   (cons node (mapcat flatten-nodes (:children node))))
 
-(defn- short-id [id]
-  ;; keep the last path segment so deep ids stay readable
-  (let [seg (last (str/split id #"/"))]
-    (if (< (count seg) 18) seg (str (subs seg 0 16) "…"))))
-
-(defn- node-svg [{:keys [id status x y]}]
+(defn- node-svg [{node-name :name :keys [id status x y]}]
   (let [cx (+ x (/ node-w 2))]
     (list
       [:rect {:x x :y y :width node-w :height node-h :rx 6
               :fill (get status-fill status "#e9ecef")
-              :stroke "#495057" :stroke-width 1}]
+              :stroke "#495057" :stroke-width 1}
+       [:title id]]                                ; full id on hover
       [:text {:x cx :y (+ y 18) :text-anchor "middle"
               :font-size 12 :font-weight "bold" :fill "#212529"}
-       (short-id id)]
+       node-name]
       [:text {:x cx :y (+ y 34) :text-anchor "middle"
               :font-size 11 :fill "#495057"}
        (name status)])))
