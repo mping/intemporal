@@ -104,7 +104,7 @@
 
       (intemporal/shutdown-engine engine)))
 
-  (testing "crashing before the async's activity ever ran still heals on resume with a fresh engine"
+  (testing "crashing while parked at the signal wait still resumes to exactly-once completion"
     (reset! execution-counter 0)
     (let [workflow-id      "async-fanout-crash-2"
           persistent-store (store/->InMemoryStore (atom {}))
@@ -112,8 +112,10 @@
           ;; wait-for-signal is our deterministic crash point: the workflow
           ;; suspends there on the very first pass, right after the async is
           ;; scheduled, with zero wall-clock races -- :async-started is
-          ;; guaranteed persisted and the activity behind it guaranteed not
-          ;; yet executed once we observe the suspension.
+          ;; guaranteed persisted before we "crash". Note: the FIXED engine
+          ;; flushes the pending async batch before parking on any wait, so the
+          ;; activity may legitimately have run (once) by crash time; the
+          ;; invariant under test is exactly-once execution across crash+resume.
           fut              (future
                              (intemporal/start-workflow engine-1 async-then-crash-point-workflow
                                                         [7]
@@ -121,8 +123,8 @@
       (Thread/sleep 300)
       (future-cancel fut)
       (intemporal/shutdown-engine engine-1)
-      (is (zero? @execution-counter)
-          "sanity check: the crash point must be reached before the activity runs")
+      (is (<= @execution-counter 1)
+          "the pre-wait async flush may already have run the activity, at most once")
       (is (= 1 (count-events persistent-store workflow-id :async-started))
           "sanity check: async-started must have been persisted before the crash")
 

@@ -351,27 +351,24 @@
                               (when wake-fn (wake-fn))))
           :wait-signal-timeout)))))
 
-(defn process-join-pending [store executor workflow-id suspension-data pending-events
-                             pending-asyncs observer]
+(defn process-join-pending
+  "Handle a :join-pending suspension. handle-suspension flushes the pending-asyncs
+   batch before dispatching, so this only runs with no batch asyncs left (a join
+   whose completion already exists, or an independent child join). Re-enter
+   (:continue) when the handle resolved, else wait for it."
+  [store workflow-id suspension-data pending-events observer]
   (let [{:keys [handle-seq]} suspension-data]
-    ;; First, process any pending asyncs that haven't been executed yet
-    (if (seq pending-asyncs)
-      (blet [_ (process-pending-asyncs-parallel store executor workflow-id
-                                                    pending-asyncs pending-events observer)]
-        :continue)
-      ;; else
-      (do
-        (when (seq pending-events)
-          (p/save-events store workflow-id pending-events))
-        ;; Check if the handle is now complete. Use the passed-in store/workflow-id:
-        ;; handle-suspension runs outside the dynamic workflow-context binding, so
-        ;; (ctx/current-store) would throw here. (This else branch is always taken
-        ;; for independent child joins, which have no pending-asyncs.)
-        (let [completed (p/find-event store workflow-id :async-completed handle-seq)
-              failed    (p/find-event store workflow-id :async-failed handle-seq)]
-          (if (or completed failed)
-            :continue
-            :wait-async))))))
+    (when (seq pending-events)
+      (p/save-events store workflow-id pending-events))
+    ;; Check if the handle is now complete. Use the passed-in store/workflow-id:
+    ;; handle-suspension runs outside the dynamic workflow-context binding, so
+    ;; (ctx/current-store) would throw here.
+    (let [completed (p/find-event store workflow-id :async-completed handle-seq)
+          failed    (p/find-event store workflow-id :async-failed handle-seq)]
+      (prom/resolved
+        (if (or completed failed)
+          :continue
+          :wait-async)))))
 
 ;; ============================================================================
 ;; Helper Functions for Workflow Execution
@@ -543,57 +540,55 @@
         pending-events-list pending-events]
     (-notify p/on-workflow-suspended observer workflow-id suspension-type)
 
-    (case suspension-type
-      :activity
-      (if (seq pending-asyncs-list)
-        (blet [_ (process-pending-asyncs-parallel store executor workflow-id
-                                                      pending-asyncs-list
-                                                      pending-events-list
-                                                      observer)]
-          :continue)
+    ;; Flush the pending async batch BEFORE any suspension dispatch: the batch
+    ;; must run regardless of what the workflow suspended on (a timer/signal/child
+    ;; suspension used to drop it, orphaning the async's activity forever).
+    ;; Returns :continue so the loop re-runs the pass and the original suspension
+    ;; re-arises with an empty batch. (Mirrors execution.clj.)
+    (if (seq pending-asyncs-list)
+      (blet [_ (process-pending-asyncs-parallel store executor workflow-id
+                                                pending-asyncs-list
+                                                pending-events-list
+                                                observer)]
+        :continue)
+      (case suspension-type
+        :activity
         (process-pending-activity store executor workflow-id
                                   suspension-data
                                   pending-events-list
-                                  observer))
+                                  observer)
 
-      :timer
-      (prom/resolved
-        (process-timer store scheduler workflow-id
-                       suspension-data
-                       pending-events-list
-                       wake-fn
-                       observer))
+        :timer
+        (prom/resolved
+          (process-timer store scheduler workflow-id
+                         suspension-data
+                         pending-events-list
+                         wake-fn
+                         observer))
 
-      :wait-signal
-      (prom/resolved
-        (process-signal store workflow-id
-                        suspension-data
-                        pending-events-list
-                        wake-fn
-                        observer))
+        :wait-signal
+        (prom/resolved
+          (process-signal store workflow-id
+                          suspension-data
+                          pending-events-list
+                          wake-fn
+                          observer))
 
-      :wait-signal-timeout
-      (prom/resolved
-        (process-signal-with-timeout store scheduler workflow-id
-                                     suspension-data
-                                     pending-events-list
-                                     wake-fn
-                                     observer))
+        :wait-signal-timeout
+        (prom/resolved
+          (process-signal-with-timeout store scheduler workflow-id
+                                       suspension-data
+                                       pending-events-list
+                                       wake-fn
+                                       observer))
 
-      :join-pending
-      (process-join-pending store executor workflow-id
-                            suspension-data
-                            pending-events-list
-                            pending-asyncs-list
-                            observer)
+        :join-pending
+        (process-join-pending store workflow-id
+                              suspension-data
+                              pending-events-list
+                              observer)
 
-      :join-any-pending
-      (if (seq pending-asyncs-list)
-        (blet [_ (process-pending-asyncs-parallel store executor workflow-id
-                                                  pending-asyncs-list
-                                                  pending-events-list
-                                                  observer)]
-          :continue)
+        :join-any-pending
         ;; No batch asyncs to run: the handles are pending independent child
         ;; workflows. Re-enter (:continue) only when join-any can actually
         ;; resolve — some handle completed, or all failed — otherwise WAIT for a
@@ -607,14 +602,14 @@
               (if (or (some #(p/find-event store workflow-id :async-completed %) handle-seqs)
                       (every? #(p/find-event store workflow-id :async-failed %) handle-seqs))
                 :continue
-                :wait-async)))))
+                :wait-async))))
 
-      :child-workflow
-      (process-child-workflow engine
-                              workflow-id
-                              suspension-data
-                              pending-events-list
-                              observer))))
+        :child-workflow
+        (process-child-workflow engine
+                                workflow-id
+                                suspension-data
+                                pending-events-list
+                                observer)))))
 
 
 (defn run-once

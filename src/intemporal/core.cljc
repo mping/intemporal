@@ -155,21 +155,41 @@
         (log/infof "Async already failed advancing sequence number")
         (->AsyncHandle seq-num))
 
-      ;; Already started but not completed - return handle (will block on join)
-      ;; During replay, don't re-execute the thunk - just wait for completion event
+      ;; Already started but not completed: re-skip the activity seq consumed
+      ;; inside the thunk (the event carries it as :last-seq), then re-enqueue the
+      ;; activity from its persisted :activity-scheduled event so it actually runs
+      ;; - the first pass may have crashed (or suspended on a timer/signal, which
+      ;; used to drop the pending batch) before the activity executed.
       existing-started
-      (do
-        (log/infof "Async already started")
+      (let [;; (inc seq-num) covers pre-:last-seq histories: thunks contain exactly
+            ;; one stub call, so the activity seq is handle-seq + 1.
+            activity-seq (or (:last-seq existing-started) (inc seq-num))
+            scheduled    (p/find-event store workflow-id :activity-scheduled activity-seq)]
+        (ctx/update-seq! (assoc existing-started :last-seq activity-seq))
+        (if scheduled
+          (do
+            (log/infof "Async already started; re-enqueueing activity %s" (:activity-name scheduled))
+            (ctx/add-pending-async! {:handle-seq    seq-num
+                                     :activity-name (:activity-name scheduled)
+                                     :activity-seq  activity-seq
+                                     :args          (:args scheduled)
+                                     :timeout-ms    (:timeout-ms scheduled)
+                                     :retry-policy  (:retry-policy scheduled)}))
+          (log/warnf "Async started at seq %s but no :activity-scheduled found; waiting" seq-num))
         (->AsyncHandle seq-num))
 
       ;; Need to start - record and try to capture what activity it needs
       :else
-      (let [start-event {:event-type :async-started
-                         :seq        seq-num
-                         :timestamp  (utils/current-time-ms)}
-            start-seq seq-num]
-        (ctx/add-pending-event! start-event)
-        (ctx/notify-observer p/on-async-started (:workflow-id ctx) seq-num)
+      (let [start-seq seq-num
+            ;; The :async-started event is recorded once the thunk's fate is known:
+            ;; on activity suspension it carries the activity seq as :last-seq so
+            ;; the replay branch above can re-skip it and re-enqueue the activity.
+            record-started! (fn [last-seq]
+                              (ctx/add-pending-event! (cond-> {:event-type :async-started
+                                                               :seq        start-seq
+                                                               :timestamp  (utils/current-time-ms)}
+                                                        last-seq (assoc :last-seq last-seq)))
+                              (ctx/notify-observer p/on-async-started (:workflow-id ctx) start-seq))]
         ;; Try to execute the thunk to see what activity it wants
         (try
           (log/tracef "Invoking Async thunk")
@@ -177,7 +197,8 @@
                 ;; Capture the last seq number after thunk execution
                 end-seq (dec @(:seq-counter (ctx/current-context)))]
             ;; If thunk completes synchronously (pure computation - first run only),
-            ;; save the completion event immediately with the seq range
+            ;; record the start, then the completion event with the seq range
+            (record-started! nil)
             (ctx/add-pending-event! {:event-type :async-completed
                                      :seq        start-seq
                                      :last-seq   end-seq
@@ -190,11 +211,13 @@
             (if (error/suspension? e)
               ;; The thunk suspended on an activity - capture it for parallel execution
               (let [suspension-info (error/suspension-data e)
-                    activity-name (:activity-name suspension-info)]
+                    activity-name (:activity-name suspension-info)
+                    activity-seq  (:seq suspension-info)]
                 (log/tracef "Async suspended activity %s" activity-name)
+                (record-started! activity-seq)
                 (ctx/add-pending-async! {:handle-seq    start-seq
-                                         :activity-name (:activity-name suspension-info)
-                                         :activity-seq  (:seq suspension-info)
+                                         :activity-name activity-name
+                                         :activity-seq  activity-seq
                                          :args          (:args suspension-info)
                                          :timeout-ms    (:timeout-ms suspension-info)
                                          :retry-policy  (:retry-policy suspension-info)})

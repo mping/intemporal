@@ -341,7 +341,7 @@ Three further points deserve emphasis:
 
 | # | Test | Test Case | Fixed |
 |---|------|-----------|-------|
-| 1 | `intemporal.tests.crash.async-fanout-crash-test` | `async` immediately followed by `sleep`: the `:timer` suspension drops the pending async batch, the activity never runs, and `existing-started` on resume never re-queues it (also drifts the seq counter) — asserted via zero executions, missing `:async-completed`, and duplicate-seq `:timer-scheduled` events | No |
+| 1 | `intemporal.tests.crash.async-fanout-crash-test` | `async` immediately followed by `sleep`, and a crash between `:async-started` and completion followed by resume on a fresh engine — asserts the activity executes exactly once, `:async-completed` is recorded, and the workflow completes with the correct joined result in both cases | Yes |
 | 2 | `intemporal.tests.engine.budget-exhaustion-test` | Drive a workflow past `max-iterations`, assert `:suspended` not `:failed`, then resume with a larger budget and assert completion | No |
 | 3 | `intemporal.tests.engine.async-join-wake-test` | Finish a child/async in the TOCTOU window between the eligibility check and `register-wake-callback`, assert the parent still wakes | No |
 | 4 | `intemporal.tests.runtime.parallel-rejection-test` | Force `RejectedExecutionException` mid-`mapv` in `execute-activities-parallel`, assert `:rejected` + reschedule, no escaping exception | No |
