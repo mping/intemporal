@@ -22,11 +22,12 @@
    ordering it produces is exactly the X5 condition: [parent check: miss] ->
    [completion recorded + wake dropped] -> [callback armed, drive parks].
 
-   Correct behavior (what the fix must achieve): the parent still completes,
-   because the wake callback is armed BEFORE the wait decision (register-first,
-   the bug-2.1 pattern), so the post-registration eligibility check observes the
-   completion. This test currently FAILS against the unfixed engine: the
-   start-workflow promise never settles and the timeout wins the race."
+   Fix (kimi.md improvement #3, option 1): the wake callback is armed BEFORE the
+   wait decision -- `run-workflow-internal` registers `wake-fn` before
+   dispatching to `handle-suspension` (both engines), so the post-registration
+   eligibility check observes the completion (register-first, the bug-2.1
+   pattern). Against the unfixed engine this test FAILED: the start-workflow
+   promise never settled and the timeout won the race."
   (:require [cljs.test :as t :refer [deftest is testing async]]
             [intemporal.core :as intemporal]
             [intemporal.store :as store]

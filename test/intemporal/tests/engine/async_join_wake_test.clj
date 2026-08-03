@@ -23,15 +23,13 @@
    eligibility check runs AFTER the registration and observes the completion
    (register-first, the bug-2.1 pattern already used for signals).
 
-   Proposed fix (kimi.md improvement #3, option 1): register the generic wake
-   callback BEFORE the wait decision -- i.e. in `run-workflow-internal` arm
-   `wake-fn` before dispatching to `handle-suspension` (instead of after a
-   `:wait-*` comes back), or equivalently thread `wake-fn` into
-   `process-join-pending`/`process-join-any` and register before the
-   `find-event` eligibility check, mirroring `process-signal`'s
-   register-then-consume ordering (execution.clj:205-217). Applies to both
-   engines. This test currently FAILS against the unfixed engine: the parent's
-   drive hangs on `.take` and the deref times out."
+   Fix (kimi.md improvement #3, option 1): the generic wake callback is armed
+   BEFORE the wait decision -- `run-workflow-internal` registers `wake-fn` before
+   dispatching to `handle-suspension` (both engines), so the handler's
+   eligibility check observes anything that completed before registration and
+   the armed callback catches anything completing after. Against the unfixed
+   engine this test FAILED: the parent's drive hung on `.take` and the deref
+   timed out."
   (:require [intemporal.core :as intemporal]
             [intemporal.store :as store]
             [intemporal.protocol :as p]

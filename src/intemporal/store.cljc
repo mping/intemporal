@@ -133,19 +133,26 @@
 
   ;; --- Phase C: ownership-based recovery ---
   (claim-owner [_ workflow-id owner-id]
-    (let [ok (atom false)]
-      (swap! state
-             (fn [s]
-               (let [wf  (get-in s [:workflows workflow-id])
-                     cur (:owner wf)]
-                 ;; Never claim a terminal workflow (mirrors the JDBC store's
-                 ;; status predicate): a claim racing a finalization must lose.
-                 (if (and (not (terminal-status? (:status wf)))
-                          (or (nil? cur) (= cur owner-id)))
-                   (do (reset! ok true)
-                       (assoc-in s [:workflows workflow-id :owner] owner-id))
-                   s))))
-      @ok))
+    ;; swap-vals! applies the (pure, retry-safe) update atomically and returns
+    ;; [old new]; derive the outcome from `old`. A side-effect atom inside the
+    ;; swap fn would re-fire on CAS retries: a losing claimant could still see
+    ;; its `ok` flag set by an earlier, rolled-back attempt — double ownership
+    ;; (same failure mode as consume-signal, deepseek code §5).
+    (let [path     [:workflows workflow-id]
+          [old _]  (swap-vals! state
+                               (fn [s]
+                                 (let [wf  (get-in s path)
+                                       cur (:owner wf)]
+                                   ;; Never claim a terminal workflow (mirrors the JDBC store's
+                                   ;; status predicate): a claim racing a finalization must lose.
+                                   (if (and (not (terminal-status? (:status wf)))
+                                            (or (nil? cur) (= cur owner-id)))
+                                     (assoc-in s [:workflows workflow-id :owner] owner-id)
+                                     s))))
+          wf       (get-in old path)
+          cur      (:owner wf)]
+      (boolean (and (not (terminal-status? (:status wf)))
+                    (or (nil? cur) (= cur owner-id))))))
 
   ;; A4: cancelled-but-not-finalized workflows MUST stay listed so a worker can
   ;; re-drive them (body observes the cancel flag, saga compensation runs, the

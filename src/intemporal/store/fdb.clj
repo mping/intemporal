@@ -148,11 +148,15 @@
 
       ;; In-process fast path for an embedded (no-worker) engine in THIS process.
       ;; Worker mode picks the workflow up via the ownership scan (list-pending).
-      (when-let [callback (get-in @callbacks [workflow-id signal-name])]
-        (future
-          (try (callback)
-               (catch Throwable t
-                 (log/warnf t "Signal callback threw for workflow %s signal %s" workflow-id signal-name)))))
+      ;; Atomically remove the callback before firing it (mirrors the InMemory
+      ;; store): rapid successive signals for the same name must not re-fire the
+      ;; same callback, which would consume later signals at the wrong seq-num.
+      (let [[old-callbacks] (swap-vals! callbacks update workflow-id dissoc signal-name)]
+        (when-let [callback (get-in old-callbacks [workflow-id signal-name])]
+          (future
+            (try (callback)
+                 (catch Throwable t
+                   (log/warnf t "Signal callback threw for workflow %s signal %s" workflow-id signal-name))))))
 
       signal-data))
 

@@ -672,35 +672,42 @@
                                     observer)
 
                 :suspended
-                (let [action (handle-suspension engine
-                                                workflow-id
-                                                (:suspension-type exec-result)
-                                                (:suspension-data exec-result)
-                                                (:pending-asyncs exec-result)
-                                                (:pending-events exec-result)
-                                                wake-fn
-                                                observer)]
-                  (when (and observer (= action :continue))
-                    (p/on-workflow-resumed observer workflow-id))
+                (do
+                  ;; Arm the generic wake callback BEFORE the suspension handler
+                  ;; runs its eligibility checks: a completion/wake landing between
+                  ;; a handler's check and a post-hoc registration would be dropped
+                  ;; (X5, the async/child-join lost-wake window — same TOCTOU class
+                  ;; as bug 2.1 for signals). Anything that completed before this
+                  ;; registration is observed by the handler's own checks; anything
+                  ;; completing after fires this callback. An external actor (e.g.
+                  ;; cancel-workflow) can thus always force this workflow to
+                  ;; re-enter its loop. Re-registration each pass simply overwrites.
+                  (when wake-fn
+                    (p/register-wake-callback store workflow-id wake-fn))
+                  (let [action (handle-suspension engine
+                                                  workflow-id
+                                                  (:suspension-type exec-result)
+                                                  (:suspension-data exec-result)
+                                                  (:pending-asyncs exec-result)
+                                                  (:pending-events exec-result)
+                                                  wake-fn
+                                                  observer)]
+                    (when (and observer (= action :continue))
+                      (p/on-workflow-resumed observer workflow-id))
 
-                  (if (= action :continue)
-                    (recur (inc iteration))
-                    ;; About to wait: register a generic wake callback so an external
-                    ;; actor (e.g. cancel-workflow) can force this workflow to
-                    ;; re-enter its loop and observe state such as the cancel flag.
-                    (do
-                      (when wake-fn
-                        (p/register-wake-callback store workflow-id wake-fn))
-                      ;; C2: record when this workflow next needs attention so the
-                      ;; ownership scan can skip it until due. Timer waits carry a
-                      ;; clock deadline; signal/async waits are always eligible (nil).
-                      (let [sd (:suspension-data exec-result)
-                            wake-at (case action
-                                      :wait-timer          (:fire-at sd)
-                                      :wait-signal-timeout (:deadline sd)
-                                      nil)]
-                        (p/set-wake-at store workflow-id wake-at))
-                      (action->result action workflow-id))))
+                    (if (= action :continue)
+                      (recur (inc iteration))
+                      (do
+                        ;; C2: record when this workflow next needs attention so the
+                        ;; ownership scan can skip it until due. Timer waits carry a
+                        ;; clock deadline; signal/async waits are always eligible (nil).
+                        (let [sd (:suspension-data exec-result)
+                              wake-at (case action
+                                        :wait-timer          (:fire-at sd)
+                                        :wait-signal-timeout (:deadline sd)
+                                        nil)]
+                          (p/set-wake-at store workflow-id wake-at))
+                        (action->result action workflow-id)))))
 
                 :failed
                 ;; Interrupt-driven "failures" (worker stop / engine shutdown
