@@ -82,11 +82,15 @@
             (is (= timestamps (sort timestamps))
                 "Events should be ordered by timestamp"))
 
-          ;; Verify sequence numbers are present and valid where expected
-          (let [sequenced-events (filter :seq history)
+          ;; Verify sequence numbers are present and valid where expected.
+          ;; A8: every event now carries a real :seq, including the control
+          ;; events. :workflow-started intentionally uses the fixed sentinel -1
+          ;; (sorts before every op, which start at 0) — exclude just that one
+          ;; from the non-negative check below.
+          (let [sequenced-events (remove #(= :workflow-started (:event-type %)) history)
                 seq-numbers (map :seq sequenced-events)]
             (is (every? (complement neg?) seq-numbers)
-                "Sequence numbers should be non-negative")
+                "Sequence numbers should be non-negative (excluding :workflow-started's -1 sentinel)")
             ;; Note: sequence numbers may have duplicates (scheduled and completed events share seq)
             ;; So we can't test strict monotonicity, just that they're generally ordered
             (is (<= (first seq-numbers) (last seq-numbers))
@@ -243,11 +247,15 @@
               (is (= timestamps (sort timestamps))
                   "Events should be ordered by timestamp"))
 
-            ;; Verify sequence numbers are present and valid where expected
-            (let [sequenced-events (filter :seq history)
+            ;; Verify sequence numbers are present and valid where expected.
+            ;; A8: every event now carries a real :seq, including the control
+            ;; events. :workflow-started intentionally uses the fixed sentinel
+            ;; -1 (sorts before every op, which start at 0) — exclude just that
+            ;; one from the non-negative check below.
+            (let [sequenced-events (remove #(= :workflow-started (:event-type %)) history)
                   seq-numbers (map :seq sequenced-events)]
               (is (every? (complement neg?) seq-numbers)
-                  "Sequence numbers should be non-negative")
+                  "Sequence numbers should be non-negative (excluding :workflow-started's -1 sentinel)")
               ;; Note: sequence numbers may have duplicates (scheduled and completed events share seq)
               ;; So we can't test strict monotonicity, just that they're generally ordered
               (is (<= (first seq-numbers) (last seq-numbers))

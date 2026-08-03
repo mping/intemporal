@@ -180,6 +180,15 @@
       (when row
         (assoc (<-json-val kind (:intemporal_history/data row)) :event-type event-type))))
 
+  (max-seq [_ workflow-id]
+    ;; MAX(seq) WHERE workflow_id = ? is served by the leading (workflow_id,
+    ;; seq, ...) columns of uq_intemporal_history_wf_seq_type — an index range
+    ;; scan for the last matching entry, not a full history load/deserialize.
+    (-> (jdbc/execute-one! datasource
+                           ["SELECT MAX(seq) AS max_seq FROM intemporal_history WHERE workflow_id = ?"
+                            workflow-id])
+        vals first))
+
   (get-pending-signals [_ workflow-id]
     (let [rows (jdbc/execute! datasource
                               ["SELECT signal_name, payload FROM intemporal_signals WHERE workflow_id = ? ORDER BY id ASC"

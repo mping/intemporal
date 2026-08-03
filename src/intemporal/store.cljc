@@ -53,6 +53,14 @@
                          (= (:seq %) seq-num)))
            first)))
 
+  (max-seq [_ workflow-id]
+    ;; Already in memory: a linear scan of the workflow's own history vector,
+    ;; no I/O. Cheap relative to JDBC/FDB, where the equivalent must avoid a
+    ;; full history load.
+    (let [history (get-in @state [:workflows workflow-id :history])]
+      (when (seq history)
+        (apply max (map :seq history)))))
+
   (get-pending-signals [_ workflow-id]
     (get-in @state [:workflows workflow-id :signals] {}))
 

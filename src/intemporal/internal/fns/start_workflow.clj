@@ -85,6 +85,7 @@
                                (log/warnf e "Caught exception")
                                (throw e))))]
         (p/save-event store wf-id (cond-> {:event-type :workflow-started
+                                           :seq -1 ;; A8: fixed sentinel below every op seq
                                            :workflow-id wf-id
                                            :workflow-fn-name workflow-fn-name
                                            :args (vec args)

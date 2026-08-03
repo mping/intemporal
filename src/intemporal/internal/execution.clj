@@ -334,6 +334,19 @@
 
 (def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
 
+(defn- next-terminal-seq
+  "Deterministic :seq for a terminal control event (:workflow-completed/-failed/
+   -cancelled/-terminated): one past the highest seq recorded for `workflow-id`.
+   A8: every event now carries a real seq — this keeps terminal events sorting
+   after every real op (FDB) and re-finalization idempotent under the
+   (workflow_id, seq, event_type) upsert key (JDBC), instead of relying on a
+   NULL/wall-clock seq. :workflow-started always seeds -1 (core.cljc), so an
+   empty-bodied workflow still gets a distinct terminal seq (0). Uses
+   `p/max-seq` rather than a full `load-history` — each store serves it from an
+   index instead of loading/deserializing the whole history."
+  [store workflow-id]
+  (inc (or (p/max-seq store workflow-id) -1)))
+
 (defn- parent-link
   "If `workflow-id` is an independent child, return {:parent-id :parent-seq} read
    from its seeded :workflow-started event; nil for a top-level workflow."
@@ -407,6 +420,7 @@
                               (enforce-close-policies! store child-id))
           :terminate      (do (p/save-event store child-id
                                             {:event-type  :workflow-terminated
+                                             :seq         (next-terminal-seq store child-id)
                                              :workflow-id child-id
                                              :timestamp   (utils/current-time-ms)})
                               (p/wake-workflow store child-id)
@@ -428,6 +442,7 @@
              (seq pending-events))
     (p/save-events store workflow-id pending-events))
   (p/save-event store workflow-id {:event-type :workflow-completed
+                                   :seq        (next-terminal-seq store workflow-id)
                                    :result     result
                                    :timestamp  (utils/current-time-ms)})
   (-notify p/on-workflow-completed observer workflow-id result)
@@ -451,6 +466,7 @@
                    :message "Workflow cancelled"
                    :data {:workflow-id workflow-id}}]
     (p/save-event store workflow-id {:event-type :workflow-cancelled
+                                     :seq        (next-terminal-seq store workflow-id)
                                      :error error-map
                                      :timestamp  (utils/current-time-ms)})
     (-notify p/on-workflow-cancelled observer workflow-id)
@@ -469,6 +485,7 @@
   (p/save-events store workflow-id pending-events)
   (let [error-map (error/throwable->map error)]
     (p/save-event store workflow-id {:event-type :workflow-failed
+                                     :seq        (next-terminal-seq store workflow-id)
                                      :error      error-map
                                      :timestamp  (utils/current-time-ms)})
     (-notify p/on-workflow-failed observer workflow-id error-map)
@@ -766,6 +783,7 @@
                    (:status result))
               (p/save-event store child-workflow-id
                             {:event-type  :workflow-failed
+                             :seq         (next-terminal-seq store child-workflow-id)
                              :workflow-id child-workflow-id
                              :error       {:type    "clojure.lang.ExceptionInfo"
                                            :message (str "Synchronous child workflows cannot suspend (" (:status result) "); use run-child-workflow-async")

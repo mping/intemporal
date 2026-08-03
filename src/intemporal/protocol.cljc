@@ -11,6 +11,12 @@
   (save-event [store workflow-id event] "Append an event to workflow history")
   (save-events [store workflow-id events] "Append multiple events atomically")
   (find-event [store workflow-id event-type seq-num] "Finds the given event type by its sequence number")
+  (max-seq [store workflow-id]
+    "Return the highest :seq recorded in this workflow's history, or nil if it
+     has no history yet. Used to derive a deterministic seq for terminal control
+     events (:workflow-completed/-failed/-cancelled/-terminated) without paying
+     for a full history load. Implementations should serve this from an index
+     rather than scanning/deserializing the whole history.")
   (get-pending-signals [store workflow-id] "Get pending signals for workflow")
   (add-signal [store workflow-id signal-name signal-data] "Add a signal to workflow")
   (consume-signal [store workflow-id signal-name] "Consume and remove a signal")

@@ -25,7 +25,7 @@
   {:a-claimed? :b-claimed? :pending-for-loser}."
   [store]
   (let [wid (str "bug12-" (random-uuid))]
-    (p/save-event store wid {:event-type :workflow-started :workflow-id wid :args []})
+    (p/save-event store wid {:event-type :workflow-started :seq -1 :workflow-id wid :args []})
     (let [a (p/claim-owner store wid "owner-A")
           b (p/claim-owner store wid "owner-B")]   ; A already owns it -> B must fail
       {:a-claimed? a

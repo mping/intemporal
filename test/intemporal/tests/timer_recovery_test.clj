@@ -122,7 +122,7 @@
 
 (defn- check-wake-at-filter [store]
   (let [wid (str "wake-" (random-uuid))]
-    (p/save-event store wid {:event-type :workflow-started :workflow-id wid :args []})
+    (p/save-event store wid {:event-type :workflow-started :seq -1 :workflow-id wid :args []})
     ;; Far-future wake-at -> not due -> excluded from list-pending.
     (p/set-wake-at store wid (+ (System/currentTimeMillis) 3600000))
     (is (not (contains? (set (p/list-pending store "any-owner" 1000)) wid))

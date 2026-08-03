@@ -4,8 +4,10 @@
             [me.vedang.clj-fdb.core :as fdb-core]
             [me.vedang.clj-fdb.transaction :as ftr]
             [me.vedang.clj-fdb.subspace.subspace :as fsub]
+            [me.vedang.clj-fdb.impl :as fimpl]
             [cheshire.core :as json])
-  (:import [com.apple.foundationdb.tuple Tuple]
+  (:import [com.apple.foundationdb Transaction KeyValue]
+           [com.apple.foundationdb.tuple Tuple]
            (java.lang AutoCloseable)))
 
 ;; ============================================================================
@@ -81,8 +83,15 @@
 
   (save-event [_ workflow-id event]
     (let [history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))
-          seq-num (:seq event (System/currentTimeMillis))
-          key (->tuple [seq-num (str (java.util.UUID/randomUUID))])
+          ;; A8: :seq is mandatory (every caller assigns one — see core.cljc /
+          ;; execution.clj); key deterministically on (seq, event-type) instead
+          ;; of [seq random-uuid] so a replay re-save of the SAME event type at
+          ;; the SAME seq overwrites in place (matching JDBC's upsert semantics)
+          ;; rather than accumulating duplicates ordered by random uuid (P4).
+          ;; Different event types legitimately share a seq (scheduled +
+          ;; completed) and still get distinct keys.
+          seq-num (:seq event)
+          key (->tuple [seq-num (name (:event-type event))])
           term (case (:event-type event)
                  :workflow-completed  "completed"
                  :workflow-failed     "failed"
@@ -112,8 +121,8 @@
         (ftr/run db
           (fn [tx]
             (doseq [event events]
-              (let [seq-num (:seq event (System/currentTimeMillis))
-                    key (->tuple [seq-num (str (java.util.UUID/randomUUID))])]
+              (let [seq-num (:seq event)
+                    key (->tuple [seq-num (name (:event-type event))])]
                 (fdb-core/set tx history-sub key (->bytes event))))
             (when term
               (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "status"]) (->bytes term)))
@@ -127,6 +136,20 @@
            (filter #(and (= (:event-type %) event-type)
                          (= (:seq %) seq-num)))
            first)))
+
+  (max-seq [_ workflow-id]
+    ;; Tuple-encoded integer keys preserve numeric order byte-for-byte
+    ;; (including negatives), so a reverse, limit-1 range scan lands directly on
+    ;; the highest seq without loading (or even counting) the rest of the
+    ;; history. clj-fdb's get-range wrapper doesn't expose limit/reverse, so
+    ;; call the underlying Java API directly — same tx, same subspace-relative
+    ;; key decoding load-history uses.
+    (let [history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))]
+      (ftr/run db
+        (fn [^Transaction tx]
+          (when-let [^KeyValue kv (first (.getRange tx (fsub/range history-sub) 1 true))]
+            (let [key (fimpl/decode history-sub (.getKey kv))]
+              (nth key (- (count key) 2))))))))
 
   (get-pending-signals [_ workflow-id]
     (let [signals-sub (fsub/get root-subspace (->tuple ["signals" workflow-id]))]

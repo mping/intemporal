@@ -52,6 +52,7 @@
       (save-event [_ workflow-id event] (p/save-event inner workflow-id event))
       (save-events [_ workflow-id events] (p/save-events inner workflow-id events))
       (find-event [_ workflow-id event-type seq-num] (p/find-event inner workflow-id event-type seq-num))
+      (max-seq [_ workflow-id] (p/max-seq inner workflow-id))
       (get-pending-signals [_ workflow-id] (p/get-pending-signals inner workflow-id))
       (add-signal [_ workflow-id signal-name signal-data] (p/add-signal inner workflow-id signal-name signal-data))
       (consume-signal [_ workflow-id signal-name] (p/consume-signal inner workflow-id signal-name))

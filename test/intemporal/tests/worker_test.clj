@@ -75,7 +75,7 @@
 
 (defn- check-claim-exclusivity [store]
   (let [wid (str "claim-" (random-uuid))]
-    (p/save-event store wid {:event-type :workflow-started :workflow-id wid :args []})
+    (p/save-event store wid {:event-type :workflow-started :seq -1 :workflow-id wid :args []})
     (is (p/claim-owner store wid "owner-A") "A claims the unowned workflow")
     (is (p/claim-owner store wid "owner-A") "A re-claims its own (idempotent)")
     (is (false? (p/claim-owner store wid "owner-B")) "B cannot claim A's workflow")

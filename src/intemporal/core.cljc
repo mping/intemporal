@@ -332,11 +332,24 @@
       (if (:received existing)
         {:received true :payload (:payload existing)}
         {:received false})
-      (throw (error/make-suspension :wait-signal-timeout
-                                    {:seq seq-num
-                                     :signal-name signal-name
-                                     :timeout-ms timeout-ms
-                                     :deadline (+ (utils/current-time-ms) timeout-ms)})))))
+      ;; Reuse the deadline from a prior :signal-wait-scheduled event if one was
+      ;; already persisted for this seq (mirrors sleep's :timer-scheduled reuse).
+      ;; Recomputing (now + timeout-ms) on every replay would push the deadline
+      ;; later on each resume/re-drive — a crash-resumed (or worker-repolled, E1)
+      ;; wait could then never reliably time out.
+      (let [prior    (p/find-event store workflow-id :signal-wait-scheduled seq-num)
+            deadline (or (:deadline prior) (+ (utils/current-time-ms) timeout-ms))]
+        (when-not prior
+          (ctx/add-pending-event! {:event-type :signal-wait-scheduled
+                                   :seq seq-num
+                                   :signal-name signal-name
+                                   :deadline deadline
+                                   :timestamp (utils/current-time-ms)}))
+        (throw (error/make-suspension :wait-signal-timeout
+                                      {:seq seq-num
+                                       :signal-name signal-name
+                                       :timeout-ms timeout-ms
+                                       :deadline deadline}))))))
 
 ;; ================================================================
 ;; ============
@@ -434,6 +447,12 @@
                             :cljs nil)]
             (p/save-event store child-wf-id
                           (cond-> {:event-type       :workflow-started
+                                   ;; A8: every event carries a real :seq. -1 is a
+                                   ;; fixed sentinel below any op seq (which start
+                                   ;; at 0), so :workflow-started always sorts
+                                   ;; first (FDB) and never collides with the
+                                   ;; deterministic terminal-event seq.
+                                   :seq              -1
                                    :workflow-id      child-wf-id
                                    :workflow-fn-name fn-name
                                    :args             (vec args)
@@ -562,6 +581,7 @@
                                 (tracing/ensure-workflow-span! wid workflow-name nil)))
                         :cljs nil)]
     (p/save-event store wid (cond-> {:event-type       :workflow-started
+                                     :seq              -1 ;; A8: fixed sentinel, see schedule-independent-child!
                                      :workflow-id      wid
                                      :workflow-fn-name workflow-name
                                      :args             (vec args)

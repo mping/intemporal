@@ -22,7 +22,9 @@
 (defn run-store-tests [store]
   (testing "Basic store operations"
     (let [wf-id (str "test-" (random-uuid))
-          event {:event-type :workflow-started :workflow-id wf-id :args [1] :timestamp (System/currentTimeMillis)}]
+          ;; A8: :seq is mandatory (JDBC enforces NOT NULL) — the engine always
+          ;; assigns -1 to :workflow-started (core.cljc); mirror that here.
+          event {:event-type :workflow-started :seq -1 :workflow-id wf-id :args [1] :timestamp (System/currentTimeMillis)}]
       
       (testing "save-event and load-history"
         (p/save-event store wf-id event)

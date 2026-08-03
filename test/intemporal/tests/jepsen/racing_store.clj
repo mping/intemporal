@@ -35,6 +35,7 @@
   (save-event              [_ wf-id ev]      (p/save-event inner wf-id ev))
   (save-events             [_ wf-id evs]     (p/save-events inner wf-id evs))
   (find-event              [_ wf-id et sq]   (p/find-event inner wf-id et sq))
+  (max-seq                 [_ wf-id]         (p/max-seq inner wf-id))
   (get-pending-signals     [_ wf-id]         (p/get-pending-signals inner wf-id))
   (add-signal              [_ wf-id sn sd]   (p/add-signal inner wf-id sn sd))
   (register-signal-callback [_ wf-id sn cb] (p/register-signal-callback inner wf-id sn cb))

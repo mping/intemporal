@@ -20,7 +20,7 @@
   [trial]
   (let [store (store/->InMemoryStore (atom {}))
         wid   (str "cas-" trial "-" (random-uuid))]
-    (p/save-event store wid {:event-type :workflow-started :workflow-id wid :args []})
+    (p/save-event store wid {:event-type :workflow-started :seq -1 :workflow-id wid :args []})
     (let [ready   (CountDownLatch. n-threads)
           go      (CountDownLatch. 1)
           results (atom [])]

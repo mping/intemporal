@@ -37,6 +37,7 @@
         workflow-fn-name (wreg/register-workflow! workflow-fn)
         observer         (or observer (get engine :observer))]
     (p/save-event store wf-id {:event-type       :workflow-started
+                               :seq              -1 ;; A8: fixed sentinel below every op seq
                                :workflow-id      wf-id
                                :workflow-fn-name workflow-fn-name
                                :args             (vec args)
@@ -140,6 +141,7 @@
                                  (on-complete {:status :failed :error e}))))))))]
     (log/with-mdc {:workflow-id wf-id}
       (p/save-event store wf-id {:event-type       :workflow-started
+                                 :seq              -1 ;; A8: fixed sentinel below every op seq
                                  :workflow-id      wf-id
                                  :workflow-fn-name workflow-fn-name
                                  :args             (vec args)
