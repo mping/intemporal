@@ -351,10 +351,10 @@ Three further points deserve emphasis:
 | 8 | `intemporal.tests.store.lease-recovery-test` | Orphan a non-null owner (simulate dead pod), assert another worker reclaims after lease expiry | No    |
 | 9 | `intemporal.tests.engine.terminal-guard-test` | Race a `:terminate` close-policy write against an in-flight child completion, assert terminal status is write-once | No    |
 | 10 | `intemporal.tests.store.conditional-append-test` | Concurrent `fire!`/`save-completed`/`save-received` on the same seq, assert exactly one write wins across all three stores | No    |
-| 11 | `intemporal.tests.store.mandatory-seq-test` | Assert `:workflow-started`/`:workflow-completed`/etc. carry a real `:seq`, and FDB `load-history` returns `:workflow-started` first | No    |
+| 11 | `intemporal.tests.store.mandatory-seq-test` | Assert `:workflow-started`/`:workflow-completed`/etc. carry a real `:seq`, and FDB `load-history` returns `:workflow-started` first | Yes    |
 | 12 | `intemporal.tests.store.claim-owner-cas-test` | N threads racing `claim-owner` on one unowned workflow, assert exactly one success (InMemory) | Yes    |
 | 13 | `intemporal.tests.store.signal-double-fire-test` | Two rapid signals at the same wait-seq on JDBC/FDB, assert only one `:signal-received` is recorded | Yes    |
-| 14 | `intemporal.tests.crash.signal-timeout-deadline-test` | Crash and resume mid `wait-for-signal-with-timeout`, assert the deadline doesn't extend on replay | No    |
+| 14 | `intemporal.tests.crash.signal-timeout-deadline-test` | Crash and resume mid `wait-for-signal-with-timeout`, assert the deadline doesn't extend on replay | Yes    |
 | 15 | `intemporal.tests.engine.cascade-cancel-wake-test` | Cascade-cancel a timer-sleeping child, assert it's driven immediately (not stuck until original `wake-at`) on JDBC/InMemory | No    |
 | 16 | `intemporal.tests.store.list-pending-phantom-test` | History-less row via `cancel-workflow`/`add-signal` upsert on JDBC, assert it's excluded from `list-pending` | No    |
 | 17 | `intemporal.tests.engine.executor-wiring-test` | Assert `make-workflow-engine {:threads N}` bounds concurrency, and a saturated bounded executor rejects instead of running on the caller thread | No    |
