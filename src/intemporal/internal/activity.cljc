@@ -10,7 +10,7 @@
    On JVM: uses var metadata when available, otherwise class name.
    On CLJS: demangles the JS function .name property (e.g. ns$fn_name -> ns/fn-name)."
   [f]
-  #?(:clj  (str (symbol f))
+  #?(:clj (str (symbol f))
      :cljs (let [raw (.-name f)]
              (if (and raw (not (str/blank? raw)))
                ;; JS mangled name: intemporal$tests$deleteme_test$noop_activity
@@ -18,10 +18,10 @@
                (let [parts (str/split raw #"\$")]
                  (if (> (count parts) 1)
                    (let [ns-parts (butlast parts)
-                         fn-part  (last parts)
+                         fn-part (last parts)
                          ;; underscores in ns segments -> hyphens
-                         ns-str   (str/join "." (map #(str/replace % "_" "-") ns-parts))
-                         fn-str   (str/replace fn-part "_" "-")]
+                         ns-str (str/join "." (map #(str/replace % "_" "-") ns-parts))
+                         fn-str (str/replace fn-part "_" "-")]
                      (str ns-str "/" fn-str))
                    ;; Single segment - no namespace
                    (str/replace raw "_" "-")))
@@ -52,15 +52,15 @@
   [registry protocol implementation]
   #?(:clj
      (let [proto-map (if (var? protocol) @protocol protocol)
-           pvar      (:var proto-map)
+           pvar (:var proto-map)
            ;; #'ns/Name -> ns
-           pns       (namespace (symbol (subs (str pvar) 2)))
-           sigs      (:sigs proto-map)]
+           pns (namespace (symbol (subs (str pvar) 2)))
+           sigs (:sigs proto-map)]
        (doseq [[msym _] sigs]
-         (let [mname    (name msym)
+         (let [mname (name msym)
                fullname (str pns "/" mname)
                ;; Resolve the actual protocol method function
-               mfn      (requiring-resolve (symbol fullname))]
+               mfn (requiring-resolve (symbol fullname))]
            (register-activity! registry
                                (fn [& args]
                                  (apply mfn implementation args))

@@ -4,7 +4,7 @@
             [intemporal.internal.logging :as log]
             [intemporal.protocol :as p]
             [intemporal.tracing :as tracing])
-  (:import (java.util.concurrent ArrayBlockingQueue ExecutorService Executors Future ScheduledExecutorService ScheduledFuture ThreadPoolExecutor ThreadPoolExecutor$CallerRunsPolicy TimeUnit TimeoutException)))
+  (:import (java.util.concurrent ArrayBlockingQueue CancellationException ExecutorService Executors Future RejectedExecutionException ScheduledExecutorService ScheduledFuture ThreadPoolExecutor ThreadPoolExecutor$CallerRunsPolicy TimeUnit TimeoutException)))
 
 
 ;; ============================================================================
@@ -68,6 +68,18 @@
 ;; Default Parallel Executor
 ;; ============================================================================
 
+(defn- interrupted-cause?
+  "True when `t` is — or wraps, anywhere in its cause chain — an
+   InterruptedException. `.get` surfaces an activity thread interrupted by
+   `.shutdownNow` as an ExecutionException *wrapping* the InterruptedException,
+   so a plain `instance?` check is not enough."
+  [^Throwable t]
+  (loop [c t]
+    (cond
+      (nil? c)                            false
+      (instance? InterruptedException c)  true
+      :else                               (recur (.getCause c)))))
+
 (defrecord ParallelActivityExecutor [^ExecutorService pool
                                      registry-atom
                                      default-timeout-ms]
@@ -108,59 +120,107 @@
                               (if (nil? act)
                                 (throw (ex-info "Activity not found"
                                                 {:activity-name activity-name}))
-                                {:future        (.submit pool ^Callable
-                                                         (fn []
-                                                          (tracing/traced-call parent-ctx (str "activity: " activity-name)
-                                                                               {:intemporal.activity/name activity-name}
+                                ;; X4: the .submit must NOT be allowed to escape this
+                                ;; mapv. A saturated or closing pool rejects here, and an
+                                ;; escaping RejectedExecutionException blows straight
+                                ;; through process-pending-asyncs-parallel ->
+                                ;; handle-suspension -> run-workflow-internal (none of
+                                ;; which catch it), killing the drive AND leaving the
+                                ;; already-submitted activities' side effects with no
+                                ;; recorded events. Instead degrade the same way the
+                                ;; sequential path does (see attempt-once): record
+                                ;; :rejected for whatever could not be submitted, let the
+                                ;; futures that WERE submitted run to completion so their
+                                ;; events are still written, and let `stub` / `async`
+                                ;; reschedule the rejected ones on the next pass.
+                                (try
+                                  {:future        (.submit pool ^Callable
                                                            (fn []
-                                                             (let [start (System/currentTimeMillis)]
-                                                               (if (nil? retry-policy)
-                                                                 ;; No retry - execute once
-                                                                 {:result   (apply (:fn act) args)
-                                                                  :duration (- (System/currentTimeMillis) start)}
-                                                                 ;; With retry
-                                                                 (loop [attempt 1]
-                                                                   (let [outcome (try
-                                                                                   ;; 1. Try the operation
-                                                                                   (let [result (apply (:fn act) args)]
-                                                                                     {:status :success
-                                                                                      :data   {:result   result
-                                                                                               :duration (- (System/currentTimeMillis) start)
-                                                                                               :attempts attempt}})
-                                                                                   (catch Exception e
-                                                                                     ;; 2. If it fails, determine if we should retry
-                                                                                     (if (activity/should-retry? retry-policy e attempt)
-                                                                                       (do
-                                                                                         ;; Perform side-effects (logging, sleeping) here
-                                                                                         (Thread/sleep (activity/calculate-backoff retry-policy attempt))
-                                                                                         ;; Return a signal value instead of recurring directly
-                                                                                         {:status :retry})
-                                                                                       ;; If we shouldn't retry, rethrow
-                                                                                       (throw e))))]
+                                                            (tracing/traced-call parent-ctx (str "activity: " activity-name)
+                                                                                 {:intemporal.activity/name activity-name}
+                                                             (fn []
+                                                               (let [start (System/currentTimeMillis)]
+                                                                 (if (nil? retry-policy)
+                                                                   ;; No retry - execute once
+                                                                   {:result   (apply (:fn act) args)
+                                                                    :duration (- (System/currentTimeMillis) start)}
+                                                                   ;; With retry
+                                                                   (loop [attempt 1]
+                                                                     (let [outcome (try
+                                                                                     ;; 1. Try the operation
+                                                                                     (let [result (apply (:fn act) args)]
+                                                                                       {:status :success
+                                                                                        :data   {:result   result
+                                                                                                 :duration (- (System/currentTimeMillis) start)
+                                                                                                 :attempts attempt}})
+                                                                                     (catch Exception e
+                                                                                       ;; 2. If it fails, determine if we should retry
+                                                                                       (if (activity/should-retry? retry-policy e attempt)
+                                                                                         (do
+                                                                                           ;; Perform side-effects (logging, sleeping) here
+                                                                                           (Thread/sleep (activity/calculate-backoff retry-policy attempt))
+                                                                                           ;; Return a signal value instead of recurring directly
+                                                                                           {:status :retry})
+                                                                                         ;; If we shouldn't retry, rethrow
+                                                                                         (throw e))))]
 
-                                                                     ;; 3. Check the outcome outside the try/catch
-                                                                     (if (= (:status outcome) :retry)
-                                                                       (recur (inc attempt)) ;; This is now in a valid tail position
-                                                                       (:data outcome)))))))))) ;; close if/let-outcome/loop/if-policy/let-start/thunk-fn/traced-call/callable-fn/.submit
-                                 :timeout       timeout
-                                 :activity-name activity-name})))
+                                                                       ;; 3. Check the outcome outside the try/catch
+                                                                       (if (= (:status outcome) :retry)
+                                                                         (recur (inc attempt)) ;; This is now in a valid tail position
+                                                                         (:data outcome)))))))))) ;; close if/let-outcome/loop/if-policy/let-start/thunk-fn/traced-call/callable-fn/.submit
+                                   :timeout       timeout
+                                   :activity-name activity-name}
+                                  (catch RejectedExecutionException e
+                                    (log/warnf e "Activity %s rejected by executor; recording :rejected for reschedule" activity-name)
+                                    {:rejected      (error/throwable->map
+                                                      (error/activity-rejected-exception activity-name e))
+                                     :activity-name activity-name})))))
                           activities)]
-        (mapv (fn [{:keys [^Future future timeout activity-name]}]
-                (try
-                  (let [result (if timeout
-                                 (.get future timeout TimeUnit/MILLISECONDS)
-                                 (.get future))]
-                    {:status   :success
-                     :result   (:result result)
-                     :duration (:duration result)})
-                  (catch TimeoutException _
-                    (.cancel future true)
-                    {:status :failed
-                     :error  (error/throwable->map
-                               (error/activity-timeout-exception activity-name timeout))})
-                  (catch Exception e
-                    {:status :failed
-                     :error  (error/throwable->map (or (.getCause e) e))})))
+        (mapv (fn [{:keys [^Future future timeout activity-name rejected]}]
+                (if rejected
+                  ;; Never submitted: no side effect happened, so this is safe to
+                  ;; re-run. The :rejected exception-kind is what makes `stub` /
+                  ;; `async` reschedule instead of replaying a durable failure.
+                  {:status :failed :error rejected}
+                  (try
+                    (let [result (if timeout
+                                   (.get future timeout TimeUnit/MILLISECONDS)
+                                   (.get future))]
+                      {:status   :success
+                       :result   (:result result)
+                       :duration (:duration result)})
+                    (catch TimeoutException _
+                      (.cancel future true)
+                      {:status :failed
+                       :error  (error/throwable->map
+                                 (error/activity-timeout-exception activity-name timeout))})
+                    ;; E4: an interrupt is INFRASTRUCTURE (worker stop / engine
+                    ;; shutdown), not a workflow outcome. It must be classified with
+                    ;; the same :activity-interrupted kind the single-activity path
+                    ;; uses (execute-activity), or the replay branches cannot tell it
+                    ;; apart from a genuine failure and durably fail the workflow.
+                    (catch InterruptedException e
+                      ;; The collecting (drive) thread itself was interrupted. Re-arm
+                      ;; the flag — .get cleared it — so the remaining collections and
+                      ;; the engine's interrupt-error? guard still see the interrupt.
+                      (.interrupt (Thread/currentThread))
+                      (.cancel future true)
+                      {:status :failed
+                       :error  (error/throwable->map
+                                 (error/activity-interrupted-exception activity-name e))})
+                    (catch CancellationException e
+                      {:status :failed
+                       :error  (error/throwable->map
+                                 (error/activity-interrupted-exception activity-name e))})
+                    (catch Exception e
+                      (let [cause (or (.getCause e) e)]
+                        {:status :failed
+                         :error  (error/throwable->map
+                                   (if (interrupted-cause? e)
+                                     ;; .shutdownNow interrupted the ACTIVITY thread:
+                                     ;; arrives as ExecutionException(InterruptedException).
+                                     (error/activity-interrupted-exception activity-name cause)
+                                     cause))})))))
               futures))))
 
   (shutdown-executor [_ grace-period-secs]

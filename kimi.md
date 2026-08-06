@@ -344,8 +344,8 @@ Three further points deserve emphasis:
 | 1 | `intemporal.tests.crash.async-fanout-crash-test` | `async` immediately followed by `sleep`, and a crash between `:async-started` and completion followed by resume on a fresh engine — asserts the activity executes exactly once, `:async-completed` is recorded, and the workflow completes with the correct joined result in both cases | Yes   |
 | 2 | `intemporal.tests.engine.budget-exhaustion-test` | Drive a workflow past `max-iterations`, assert `:suspended` not `:failed`, then resume with a larger budget and assert completion | No    |
 | 3 | `intemporal.tests.engine.async-join-wake-test` | Finish a child/async in the TOCTOU window between the eligibility check and `register-wake-callback`, assert the parent still wakes | Yes    |
-| 4 | `intemporal.tests.runtime.parallel-rejection-test` | Force `RejectedExecutionException` mid-`mapv` in `execute-activities-parallel`, assert `:rejected` + reschedule, no escaping exception | No    |
-| 5 | `intemporal.tests.crash.async-interrupt-test` | Interrupt an in-flight async batch, resume, assert the activity is retried (not durably failed) | No    |
+| 4 | `intemporal.tests.runtime.parallel-rejection-test` | Force `RejectedExecutionException` mid-`mapv` in `execute-activities-parallel`, assert `:rejected` + reschedule, no escaping exception | Yes   |
+| 5 | `intemporal.tests.crash.async-interrupt-test` | Interrupt an in-flight async batch, resume, assert the activity is retried (not durably failed) | Yes   |
 | 6 | `intemporal.tests.engine.replay-snapshot-test` | Assert stub ops read from the pass-local history snapshot, not a live per-op store read, under a concurrent signal write mid-pass | No    |
 | 7 | `intemporal.tests.worker.busy-loop-test` | One idle signal-waiting workflow under `start-worker`, assert the poll thread sleeps between polls (no 100%-CPU hot loop) | No    |
 | 8 | `intemporal.tests.store.lease-recovery-test` | Orphan a non-null owner (simulate dead pod), assert another worker reclaims after lease expiry | No    |

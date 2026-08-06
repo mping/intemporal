@@ -118,6 +118,24 @@
 ;; Treat as an opaque token — only the intemporal engine reads :seq-num directly.
 (defrecord AsyncHandle [seq-num])
 
+(defn- runtime-failure?
+  "True when a recorded `:async-failed` / `:activity-failed` error describes an
+   INFRASTRUCTURE condition rather than a workflow outcome:
+
+   - `:activity-interrupted` — a worker stop / engine shutdown interrupted the
+     activity mid-flight (X6/E4);
+   - `:rejected` — the executor refused to accept the activity because it was
+     saturated or closing (X4).
+
+   Neither is something the workflow did; both must be RE-RUN on the next pass,
+   exactly as the synchronous `stub` already does. Replaying them as durable
+   failures turns a routine `stop-worker` into a permanently failed workflow."
+  [failed-event]
+  (boolean
+    (when-let [err (some-> (:error failed-event) (error/map->exception))]
+      (or (error/interruption? err)
+          (error/rejection? err)))))
+
 (defn async
   "Schedule an activity call for parallel (out-of-band) execution.
    `thunk` must contain exactly one `stub` call (the activity to run asynchronously).
@@ -137,8 +155,7 @@
         existing-completed (p/find-event store workflow-id :async-completed seq-num)
         existing-failed (p/find-event store workflow-id :async-failed seq-num)
         existing-started (p/find-event store workflow-id :async-started seq-num)
-        err             (some-> (:error existing-failed) (error/map->exception))
-        interrupted?    (boolean (some-> err (error/interruption?)))]
+        runtime-failed?   (runtime-failure? existing-failed)]
     (cond
       ;; Already completed - advance seq past consumed numbers during replay
       existing-completed
@@ -148,33 +165,59 @@
         (log/tracef "Async already succeeded advancing sequence number")
         (->AsyncHandle seq-num))
 
-      ;; Already failed - advance seq past consumed numbers during replay
-      existing-failed #_(not interrupted?)
+      ;; Already failed - advance seq past consumed numbers during replay.
+      ;; NOT for infrastructure failures (interrupt / executor rejection): those
+      ;; fall through to `existing-started` below, which re-enqueues the activity
+      ;; so it actually runs, mirroring the sync `stub`'s reschedule (X6/E4/X4).
+      (and existing-failed (not runtime-failed?))
       (do
         (ctx/update-seq! existing-failed)
         (log/infof "Async already failed advancing sequence number")
         (->AsyncHandle seq-num))
 
-      ;; Already started but not completed: re-skip the activity seq consumed
-      ;; inside the thunk (the event carries it as :last-seq), then re-enqueue the
-      ;; activity from its persisted :activity-scheduled event so it actually runs
-      ;; - the first pass may have crashed (or suspended on a timer/signal, which
-      ;; used to drop the pending batch) before the activity executed.
+      ;; Already started but not usefully completed: re-skip the activity seq
+      ;; consumed inside the thunk (the event carries it as :last-seq), then
+      ;; re-enqueue the activity from its persisted :activity-scheduled event so it
+      ;; actually runs - the first pass may have crashed (or suspended on a
+      ;; timer/signal, which used to drop the pending batch) before the activity
+      ;; executed, or the activity was interrupted / rejected (runtime-failed?).
       existing-started
       (let [;; (inc seq-num) covers pre-:last-seq histories: thunks contain exactly
             ;; one stub call, so the activity seq is handle-seq + 1.
             activity-seq (or (:last-seq existing-started) (inc seq-num))
-            scheduled    (p/find-event store workflow-id :activity-scheduled activity-seq)]
+            scheduled    (p/find-event store workflow-id :activity-scheduled activity-seq)
+            ;; Re-invoke the thunk. Two things it produces cannot be recovered from
+            ;; history: the activity must be REGISTERED in this process's registry
+            ;; (`stub` does that, and the engine can only look activities up by
+            ;; name — a resumed process starts with an empty registry, so a purely
+            ;; history-derived re-enqueue fails with "Activity not found"), and the
+            ;; full retry policy, whose :retryable-fn is a function and was never
+            ;; serialized onto the :activity-scheduled event. Re-running is safe
+            ;; here: this branch only runs when the activity has NOT completed, so
+            ;; nothing durable resulted from the previous attempt, and the thunk is
+            ;; workflow code — its side effects live inside the stubbed activity,
+            ;; which suspends before executing anything.
+            live         (try
+                           (thunk)
+                           nil
+                           (catch #?(:clj Throwable :cljs :default) e
+                             (if (error/suspension? e)
+                               (error/suspension-data e)
+                               (throw e))))
+            src          (or live scheduled)]
+        ;; Backstop for a thunk that did not suspend (nothing to re-run): realign
+        ;; the counter with the seqs the first pass consumed. A no-op when the
+        ;; thunk did suspend, since `stub`'s next-seq! already advanced it.
         (ctx/update-seq! (assoc existing-started :last-seq activity-seq))
-        (if scheduled
+        (if src
           (do
-            (log/infof "Async already started; re-enqueueing activity %s" (:activity-name scheduled))
+            (log/infof "Async already started; re-enqueueing activity %s" (:activity-name src))
             (ctx/add-pending-async! {:handle-seq    seq-num
-                                     :activity-name (:activity-name scheduled)
-                                     :activity-seq  activity-seq
-                                     :args          (:args scheduled)
-                                     :timeout-ms    (:timeout-ms scheduled)
-                                     :retry-policy  (:retry-policy scheduled)}))
+                                     :activity-name (:activity-name src)
+                                     :activity-seq  (or (:seq live) activity-seq)
+                                     :args          (:args src)
+                                     :timeout-ms    (:timeout-ms src)
+                                     :retry-policy  (:retry-policy src)}))
           (log/warnf "Async started at seq %s but no :activity-scheduled found; waiting" seq-num))
         (->AsyncHandle seq-num))
 
@@ -243,7 +286,11 @@
       completed
       (:result completed)
 
-      failed
+      ;; An infrastructure failure (interrupt / rejection) is NOT a resolution:
+      ;; `async` has already re-enqueued the activity for this pass, so suspend
+      ;; and let handle-suspension flush the batch. Throwing here instead would
+      ;; durably fail the workflow for a routine worker stop (X6/E4/X4).
+      (and failed (not (runtime-failure? failed)))
       (throw (error/async-failed-exception handle-seq (:error failed)))
 
       :else
@@ -287,10 +334,15 @@
                                      :timestamp (utils/current-time-ms)})
             {:index completed-idx :result result})
 
-          ;; Every handle already failed: no completion can ever arrive, so fail
-          ;; deterministically (recorded events, stable across replays) instead
-          ;; of suspending forever.
-          (every? #(p/find-event store workflow-id :async-failed (:seq-num %)) handles)
+          ;; Every handle already failed *for real*: no completion can ever arrive,
+          ;; so fail deterministically (recorded events, stable across replays)
+          ;; instead of suspending forever. Handles whose failure is only an
+          ;; interrupt/rejection don't count — `async` re-enqueued those, so a
+          ;; completion is still coming.
+          (every? (fn [h]
+                    (let [failed (p/find-event store workflow-id :async-failed (:seq-num h))]
+                      (and failed (not (runtime-failure? failed)))))
+                  handles)
           (let [failed (p/find-event store workflow-id :async-failed (:seq-num (first handles)))]
             (throw (error/async-failed-exception (:seq-num (first handles)) (:error failed))))
 
@@ -398,13 +450,14 @@
         workflow-id (ctx/current-workflow-id)
         existing (p/find-event store workflow-id :child-workflow-completed seq-num)
         existing-failed (p/find-event store workflow-id :child-workflow-failed seq-num)
-        err             (some-> (:error existing-failed) (error/map->exception))
-        interrupted?    (boolean (some-> err (error/interruption?)))]
+        runtime-failed?  (runtime-failure? existing-failed)]
     (cond
       existing
       (:result existing)
 
-      existing-failed #_(not interrupted?)
+      ;; Same rule as `stub` / `async` (X6): a child whose recorded failure is an
+      ;; infrastructure condition is re-scheduled, not replayed as an outcome.
+      (and existing-failed (not runtime-failed?))
       (throw (error/map->exception (:error existing-failed)))
 
       :else
