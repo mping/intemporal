@@ -56,7 +56,14 @@
                       :deps        {io.github.clojure/tools.build {:mvn/version "0.10.10"}}
                       :ns-default  build}
 
-              :test  {:jvm-opts  ["--enable-native-access=ALL-UNNAMED"]
+              ;; clojure.spec.check-asserts turns on the inline `intemporal.spec/check!`
+              ;; assertions in every IStore implementation, so each existing test
+              ;; namespace doubles as a store-conformance suite. Deliberately NOT set on
+              ;; the :jepsen aliases below: that harness calls load-history in a tight
+              ;; resume loop, and validating long histories would distort the very race
+              ;; windows those tests exist to reproduce.
+              :test  {:jvm-opts  ["--enable-native-access=ALL-UNNAMED"
+                                  "-Dclojure.spec.check-asserts=true"]
                       :main-opts ["-m" "kaocha.runner"]}
 
               ;; Run the chaos harness against a live Postgres instance:

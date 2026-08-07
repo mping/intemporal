@@ -1,5 +1,6 @@
 (ns intemporal.store
   (:require [intemporal.protocol :as p]
+            [intemporal.spec :as spec]
             [intemporal.utils :as utils]
             [intemporal.internal.logging :as log])
   ;; logging fns (warnf, …) are macros — load them as macros for CLJS too
@@ -14,9 +15,11 @@
 (defrecord InMemoryStore [state]
   p/IStore
   (load-history [_ workflow-id]
-    (get-in @state [:workflows workflow-id :history] []))
+    (->> (get-in @state [:workflows workflow-id :history] [])
+         (spec/check! ::spec/events)))
 
   (save-event [_ workflow-id event]
+    (spec/check! ::spec/event event)
     (swap! state
            (fn [s]
              (let [s (update-in s [:workflows workflow-id :history] (fnil conj []) event)]
@@ -29,6 +32,7 @@
     event)
 
   (save-events [_ workflow-id events]
+    (spec/check! ::spec/events events)
     (when (seq events)
       (swap! state
              (fn [s]
@@ -47,22 +51,26 @@
     events)
 
   (find-event [this workflow-id event-type seq-num]
-    (let [history (p/load-history this workflow-id)]
-      (->> history
-           (filter #(and (= (:event-type %) event-type)
-                         (= (:seq %) seq-num)))
-           first)))
+    (spec/check! ::spec/event-type event-type)
+    (spec/check! ::spec/seq seq-num)
+    (->> (p/load-history this workflow-id)
+         (filter #(and (= (:event-type %) event-type)
+                       (= (:seq %) seq-num)))
+         first
+         (spec/check! ::spec/maybe-event)))
 
   (max-seq [_ workflow-id]
     ;; Already in memory: a linear scan of the workflow's own history vector,
     ;; no I/O. Cheap relative to JDBC/FDB, where the equivalent must avoid a
     ;; full history load.
     (let [history (get-in @state [:workflows workflow-id :history])]
-      (when (seq history)
-        (apply max (map :seq history)))))
+      (->> (when (seq history)
+             (apply max (map :seq history)))
+           (spec/check! ::spec/max-seq-result))))
 
   (get-pending-signals [_ workflow-id]
-    (get-in @state [:workflows workflow-id :signals] {}))
+    (->> (get-in @state [:workflows workflow-id :signals] {})
+         (spec/check! ::spec/pending-signals)))
 
   (add-signal [_ workflow-id signal-name signal-data]
     (swap! state update-in [:workflows workflow-id :signals signal-name]
@@ -118,26 +126,28 @@
                               0))))
 
   (is-cancelled? [_ workflow-id]
-    (get-in @state [:workflows workflow-id :cancelled] false))
+    (->> (get-in @state [:workflows workflow-id :cancelled] false)
+         (spec/check! ::spec/boolean-result)))
 
   (mark-cancelled [_ workflow-id]
     (swap! state assoc-in [:workflows workflow-id :cancelled] true))
 
   (get-workflow-status [_ workflow-id]
     (let [wf (get-in @state [:workflows workflow-id])]
-      (cond
-        ;; Check terminal status first: a late mark-cancelled must not override
-        ;; a workflow that already completed or failed.
-        (terminal-status? (:status wf)) (:status wf)   ; Phase B2 O(1) fast path
-        (:cancelled wf) :cancelled
-        (empty? (:history wf)) :not-found
-        :else (let [last-event (last (:history wf))]
-                (case (:event-type last-event)
-                  :workflow-completed :completed
-                  :workflow-failed :failed
-                  :workflow-cancelled :cancelled
-                  :workflow-terminated :terminated
-                  :running)))))
+      (->> (cond
+             ;; Check terminal status first: a late mark-cancelled must not override
+             ;; a workflow that already completed or failed.
+             (terminal-status? (:status wf)) (:status wf)   ; Phase B2 O(1) fast path
+             (:cancelled wf) :cancelled
+             (empty? (:history wf)) :not-found
+             :else (let [last-event (last (:history wf))]
+                     (case (:event-type last-event)
+                       :workflow-completed :completed
+                       :workflow-failed :failed
+                       :workflow-cancelled :cancelled
+                       :workflow-terminated :terminated
+                       :running)))
+           (spec/check! ::spec/workflow-status))))
 
   ;; --- Phase C: ownership-based recovery ---
   (claim-owner [_ workflow-id owner-id]
@@ -159,13 +169,15 @@
                                      s))))
           wf       (get-in old path)
           cur      (:owner wf)]
-      (boolean (and (not (terminal-status? (:status wf)))
-                    (or (nil? cur) (= cur owner-id))))))
+      (->> (boolean (and (not (terminal-status? (:status wf)))
+                         (or (nil? cur) (= cur owner-id))))
+           (spec/check! ::spec/boolean-result))))
 
   ;; A4: cancelled-but-not-finalized workflows MUST stay listed so a worker can
   ;; re-drive them (body observes the cancel flag, saga compensation runs, the
   ;; terminal :workflow-cancelled event is written — which then excludes them).
   (list-pending [_ owner-id limit]
+    (spec/check! ::spec/limit limit)
     (let [now (utils/current-time-ms)]
       (->> (:workflows @state)
            (filter (fn [[_ wf]]
@@ -179,7 +191,8 @@
            (sort-by (fn [[_ wf]] (or (:wake-at wf) 0)))
            (map first)
            (take limit)
-           vec)))
+           vec
+           (spec/check! ::spec/pending-ids))))
 
   (release-owner [_ owner-id]
     (swap! state
@@ -194,11 +207,14 @@
     nil)
 
   (set-wake-at [_ workflow-id wake-at-ms]
+    (spec/check! ::spec/wake-at-ms wake-at-ms)
     (swap! state assoc-in [:workflows workflow-id :wake-at] wake-at-ms)
     nil)
 
   ;; --- Tier 2: independent child workflows ---
   (link-child! [_ parent-id parent-seq child-id policy]
+    (spec/check! ::spec/parent-seq parent-seq)
+    (spec/check! ::spec/policy policy)
     ;; Idempotent: re-linking the same child (parent replay / crash) is a no-op.
     (swap! state update-in [:workflows parent-id :children]
            (fn [children]
@@ -213,4 +229,5 @@
                  {:child-id   child-id
                   :parent-seq parent-seq
                   :policy     policy
-                  :status     (p/get-workflow-status this child-id)})))))
+                  :status     (p/get-workflow-status this child-id)}))
+         (spec/check! ::spec/children))))

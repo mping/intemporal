@@ -1,6 +1,8 @@
 (ns intemporal.tests.store.test-suite
-  (:require [intemporal.core :as intemporal]
+  (:require [clojure.spec.alpha :as s]
+            [intemporal.core :as intemporal]
             [intemporal.protocol :as p]
+            [intemporal.spec :as spec]
             [clojure.test :refer [is testing]]
             [matcher-combinators.test :refer [match?]]))
 
@@ -30,7 +32,10 @@
         (p/save-event store wf-id event)
         (let [history (p/load-history store wf-id)]
           (is (= 1 (count history)))
-          (is (= :workflow-started (keyword (:event-type (first history)))))))
+          ;; No `keyword` coercion here: every implementation re-keywordizes
+          ;; :event-type on read (JDBC from its event_type column, FDB via
+          ;; update/keyword), and ::spec/event-type now enforces that.
+          (is (= :workflow-started (:event-type (first history))))))
 
       (testing "mark-cancelled and is-cancelled?"
         (is (not (p/is-cancelled? store wf-id)))
@@ -44,7 +49,32 @@
             (is (contains? pending "test-sig"))
             (is (= [sig-data] (get pending "test-sig"))))
           (is (= sig-data (p/consume-signal store wf-id "test-sig")))
-          (is (nil? (p/consume-signal store wf-id "test-sig")))))))
+          (is (nil? (p/consume-signal store wf-id "test-sig")))))
+
+      ;; Explicit s/valid? rather than relying on the inline check! calls: a
+      ;; failure here is a clojure.test failure carrying explain-str, instead of
+      ;; a thrown ex-info that aborts the whole deftest. This block is also the
+      ;; only place several read methods get exercised at all, and — since every
+      ;; backend (memory, postgres, mariadb, fdb) calls run-store-tests — the
+      ;; only MariaDB coverage they get.
+      (testing "IStore return values conform to intemporal.spec"
+        (doseq [[spec value] [[::spec/events          (p/load-history store wf-id)]
+                              [::spec/workflow-status (p/get-workflow-status store wf-id)]
+                              [::spec/max-seq-result  (p/max-seq store wf-id)]
+                              [::spec/pending-signals (p/get-pending-signals store wf-id)]
+                              [::spec/maybe-event     (p/find-event store wf-id :workflow-started -1)]
+                              [::spec/maybe-event     (p/find-event store wf-id :timer-fired 999)]
+                              [::spec/pending-ids     (p/list-pending store "owner-spec" 10)]
+                              [::spec/boolean-result  (p/claim-owner store wf-id "owner-spec")]
+                              [::spec/boolean-result  (p/is-cancelled? store wf-id)]]]
+          (is (s/valid? spec value)
+              (str spec " => " (s/explain-str spec value))))
+
+        (let [child-id (str wf-id "-child")]
+          (p/link-child! store wf-id 0 child-id :terminate)
+          (let [children (p/list-children store wf-id)]
+            (is (s/valid? ::spec/children children)
+                (s/explain-str ::spec/children children)))))))
 
   (testing "Workflow execution with store"
     (intemporal/with-workflow-engine [engine {:store store :threads 2}]
