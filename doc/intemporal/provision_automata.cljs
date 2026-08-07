@@ -336,8 +336,8 @@
         current-state  (or derived-state init-state)
         engine         (if derived-state
                          ;; Valid saved history: create store with it so the workflow can replay
-                         (let [store (store/->InMemoryStore
-                                       (atom {:workflows {wf-id {:history saved-history}}}))]
+                         (let [store (store/create-store
+                                       :state (atom {:workflows {wf-id {:history saved-history}}}))]
                            (intemporal/make-workflow-engine
                              :store store :threads 4 :enable-logging true
                              :default-timeout-ms nil))

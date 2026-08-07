@@ -40,12 +40,12 @@
 
 (deftest claim-is-exclusive-in-memory
   (testing "InMemoryStore"
-    (assert-fixed (run-scenario (mem/->InMemoryStore (atom {}))))))
+    (assert-fixed (run-scenario (mem/create-store)))))
 
 (deftest ^:integration claim-is-exclusive-jdbc
   (testing "JdbcStore"
     (let [url   (jdbc-store/resolve-jdbc-url)
-          store (jdbc-store/make-jdbc-store url)]
+          store (jdbc-store/create-store url)]
       (try (assert-fixed (run-scenario store)) (finally (.close store))))))
 
 (deftest ^:integration claim-is-exclusive-fdb
@@ -53,5 +53,5 @@
     (let [root  (str "bug12-" (random-uuid))
           fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
-          store (fdb-store/make-fdb-store db root)]
+          store (fdb-store/create-store db root)]
       (assert-fixed (run-scenario store)))))

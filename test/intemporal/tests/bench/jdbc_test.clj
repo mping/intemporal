@@ -17,7 +17,7 @@
 (deftest jdbc-store-test
   (testing "JDBC Store Implementation"
     (ensure-database!)
-    (with-open [store (jdbc-store/make-jdbc-store db-spec)]
+    (with-open [store (jdbc-store/create-store db-spec)]
       (suite/run-store-tests store 1))))
 
 (comment
@@ -26,5 +26,5 @@
     ;; 1000 => 3s
     ;; 10_000 => ~800MB, 13s
     ;; 100_000 => timeouts
-    (suite/run-store-tests (jdbc-store/make-jdbc-store db-spec) 100000))
+    (suite/run-store-tests (jdbc-store/create-store db-spec) 100000))
   "")

@@ -64,7 +64,7 @@
           num-activities 5
           crash-after 3  ;; Cancel after 3 activities complete
           ;; Create store that persists across "crash"
-          persistent-store (store/->InMemoryStore (atom {}))]
+          persistent-store (store/create-store)]
 
       ;; ======================================================================
       ;; Phase 1: Execute workflow in future and cancel it (simulate crash)

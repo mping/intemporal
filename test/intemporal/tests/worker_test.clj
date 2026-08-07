@@ -55,12 +55,12 @@
 
 (deftest worker-recovery-in-memory
   (testing "shared InMemoryStore: worker resumes a crashed, then-signalled workflow"
-    (check-worker-recovery (store/->InMemoryStore (atom {})))))
+    (check-worker-recovery (store/create-store))))
 
 (deftest ^:integration worker-recovery-jdbc
   (testing "JdbcStore: worker resumes via the ownership scan"
     (let [url   (jdbc-store/resolve-jdbc-url)
-          store (jdbc-store/make-jdbc-store url)]
+          store (jdbc-store/create-store url)]
       (try (check-worker-recovery store) (finally (.close store))))))
 
 (deftest ^:integration worker-recovery-fdb
@@ -68,7 +68,7 @@
     (let [root  (str "worker-" (random-uuid))
           fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
-          store (fdb-store/make-fdb-store db root)]
+          store (fdb-store/create-store db root)]
       (check-worker-recovery store))))
 
 ;; ── exclusivity: claim-owner lets exactly one owner run a workflow ──────────────
@@ -87,12 +87,12 @@
 
 (deftest claim-exclusivity-in-memory
   (testing "InMemoryStore claim-owner exclusivity"
-    (check-claim-exclusivity (store/->InMemoryStore (atom {})))))
+    (check-claim-exclusivity (store/create-store))))
 
 (deftest ^:integration claim-exclusivity-jdbc
   (testing "JdbcStore claim-owner exclusivity"
     (let [url   (jdbc-store/resolve-jdbc-url)
-          store (jdbc-store/make-jdbc-store url)]
+          store (jdbc-store/create-store url)]
       (try (check-claim-exclusivity store) (finally (.close store))))))
 
 (deftest ^:integration claim-exclusivity-fdb
@@ -100,5 +100,5 @@
     (let [root  (str "claim-" (random-uuid))
           fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
-          store (fdb-store/make-fdb-store db root)]
+          store (fdb-store/create-store db root)]
       (check-claim-exclusivity store))))

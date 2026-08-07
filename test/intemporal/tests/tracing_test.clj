@@ -115,7 +115,7 @@
 
 (deftest tracecontext-persisted-on-start-event
   (testing ":workflow-started event carries the W3C traceparent of the workflow span"
-    (let [st (store/->InMemoryStore (atom {}))]
+    (let [st (store/create-store)]
       (intemporal/with-workflow-engine [engine {:enable-telemetry true :store st}]
         (intemporal/start-workflow engine simple-flow [21] :workflow-id "wf-tc")
         (let [started (->> (p/load-history st "wf-tc")
@@ -167,7 +167,7 @@
 
 (deftest cross-process-resume-links-trace
   (testing "a resume (cold path) links its spans to the original trace via tracecontext"
-    (let [st (store/->InMemoryStore (atom {}))]
+    (let [st (store/create-store)]
       ;; First engine: submit-workflow anchors the trace (worker-style entry),
       ;; persisting tracecontext without driving the workflow.
       (intemporal/with-workflow-engine [engine {:enable-telemetry true :store st}]

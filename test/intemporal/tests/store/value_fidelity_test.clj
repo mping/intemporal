@@ -146,7 +146,7 @@
 
 (deftest value-fidelity-in-memory
   (testing "InMemoryStore: keyword values survive the store round-trip"
-    (run-value-fidelity-test (store/->InMemoryStore (atom {})))))
+    (run-value-fidelity-test (store/create-store))))
 
 (def ^:private db-spec
   (jdbc-store/resolve-jdbc-url
@@ -164,12 +164,12 @@
 (deftest ^:integration value-fidelity-jdbc
   (testing "JdbcStore: keyword values survive JSON serialization round-trip"
     (ensure-database!)
-    (with-open [store (jdbc-store/make-jdbc-store db-spec)]
+    (with-open [store (jdbc-store/create-store db-spec)]
       (run-value-fidelity-test store))))
 
 (deftest ^:integration value-fidelity-fdb
   (testing "FDBStore: keyword values survive JSON serialization round-trip"
     (let [db (cfdb/select-api-version 710)
           db (cfdb/open db "docker/fdb.cluster")]
-      (with-open [store (fdb-store/make-fdb-store db "intemporal-tests")]
+      (with-open [store (fdb-store/create-store db "intemporal-tests")]
         (run-value-fidelity-test store)))))

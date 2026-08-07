@@ -5,11 +5,11 @@
 
 (deftest memory-store-test
   (testing "In-Memory Store Implementation"
-    (let [store (store/->InMemoryStore (atom {}))]
+    (let [store (store/create-store)]
       (suite/run-store-tests store 1))))
 
 (comment
   (time
     ;; 100k => 3GB, 10s
-    (suite/run-store-tests (store/->InMemoryStore (atom {})) 100000))
+    (suite/run-store-tests (store/create-store) 100000))
   "")

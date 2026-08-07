@@ -47,7 +47,7 @@
   (testing "resume-workflow [engine wf-id] resolves fn+args from history"
     (reset! exec-count 0)
     (wreg/clear-registry!)
-    (let [st  (store/->InMemoryStore (atom {}))
+    (let [st  (store/create-store)
           wid "reg-resume-1"]
       ;; Phase 1: start, run until it suspends on signal, then simulate a crash.
       (let [e1 (intemporal/make-workflow-engine :store st :threads 2)

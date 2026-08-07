@@ -35,7 +35,7 @@
   (testing "wait-for-signal-with-timeout's deadline does not extend across a crash/resume"
     (let [workflow-id      "signal-timeout-deadline-test-1"
           timeout-ms       300
-          persistent-store (store/->InMemoryStore (atom {}))
+          persistent-store (store/create-store)
 
           ;; ==================================================================
           ;; Phase 1: drive the workflow to the signal-timeout suspension point,

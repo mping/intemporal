@@ -7,5 +7,5 @@
 
 (deftest mariadb-store-test
   (testing "JDBC Store backed by MariaDB"
-    (with-open [store (jdbc-store/make-jdbc-store (jdbc-store/resolve-jdbc-url))]
+    (with-open [store (jdbc-store/create-store (jdbc-store/resolve-jdbc-url))]
       (suite/run-store-tests store))))

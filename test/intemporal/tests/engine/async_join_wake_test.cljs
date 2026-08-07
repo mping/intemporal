@@ -134,7 +134,7 @@
     (async done
       (let [parent-id "cljs-async-join-wake-parent"
             child-id  "cljs-async-join-wake-child"
-            inner     (store/->InMemoryStore (atom {}))
+            inner     (store/create-store)
             wrapped   (window-store inner parent-id
                                     #(simulate-child-terminal! inner parent-id parent-seq
                                                                child-id 42))

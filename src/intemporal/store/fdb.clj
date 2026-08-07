@@ -1,6 +1,6 @@
 (ns intemporal.store.fdb
   (:require [intemporal.protocol :as p]
-            [intemporal.spec :as spec]
+            [intemporal.store.checked :as checked]
             [intemporal.internal.codec :as codec]
             [intemporal.internal.logging :as log]
             [me.vedang.clj-fdb.core :as fdb-core]
@@ -82,20 +82,18 @@
   p/IStore
   (load-history [_ workflow-id]
     (let [history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))]
-      (->> (ftr/run db
-             (fn [tx]
-               (->> (fdb-core/get-range tx (fsub/range history-sub))
-                    (map (fn [[key value]]
-                           (let [event (<-bytes value)
-                                 seq-num (nth key (- (count key) 2))]
-                             (assoc (update event :event-type keyword)
-                                    :seq seq-num))))
-                    (sort-by :seq)
-                    vec)))
-           (spec/check! ::spec/events))))
+      (ftr/run db
+        (fn [tx]
+          (->> (fdb-core/get-range tx (fsub/range history-sub))
+               (map (fn [[key value]]
+                      (let [event (<-bytes value)
+                            seq-num (nth key (- (count key) 2))]
+                        (assoc (update event :event-type keyword)
+                               :seq seq-num))))
+               (sort-by :seq)
+               vec)))))
 
   (save-event [_ workflow-id event]
-    (spec/check! ::spec/event event)
     (let [history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))
           ;; A8: :seq is mandatory (every caller assigns one — see core.cljc /
           ;; execution.clj); key deterministically on (seq, event-type) instead
@@ -123,7 +121,6 @@
       event))
 
   (save-events [_ workflow-id events]
-    (spec/check! ::spec/events events)
     (when (seq events)
       (let [history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))
             term        (some #(case (:event-type %)
@@ -146,13 +143,10 @@
     events)
 
   (find-event [this workflow-id event-type seq-num]
-    (spec/check! ::spec/event-type event-type)
-    (spec/check! ::spec/seq seq-num)
     (->> (p/load-history this workflow-id)
          (filter #(and (= (:event-type %) event-type)
                        (= (:seq %) seq-num)))
-         first
-         (spec/check! ::spec/maybe-event)))
+         first))
 
   (max-seq [_ workflow-id]
     ;; Tuple-encoded integer keys preserve numeric order byte-for-byte
@@ -162,23 +156,21 @@
     ;; call the underlying Java API directly — same tx, same subspace-relative
     ;; key decoding load-history uses.
     (let [history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))]
-      (->> (ftr/run db
-             (fn [^Transaction tx]
-               (when-let [^KeyValue kv (first (.getRange tx (fsub/range history-sub) 1 true))]
-                 (let [key (fimpl/decode history-sub (.getKey kv))]
-                   (nth key (- (count key) 2))))))
-           (spec/check! ::spec/max-seq-result))))
+      (ftr/run db
+        (fn [^Transaction tx]
+          (when-let [^KeyValue kv (first (.getRange tx (fsub/range history-sub) 1 true))]
+            (let [key (fimpl/decode history-sub (.getKey kv))]
+              (nth key (- (count key) 2))))))))
 
   (get-pending-signals [_ workflow-id]
     (let [signals-sub (fsub/get root-subspace (->tuple ["signals" workflow-id]))]
-      (->> (ftr/run db
-             (fn [tx]
-               (->> (fdb-core/get-range tx (fsub/range signals-sub))
-                    (reduce (fn [acc [key value]]
-                              (let [signal-name (nth key (- (count key) 3))]
-                                (update acc signal-name (fnil conj []) (<-bytes value))))
-                            {}))))
-           (spec/check! ::spec/pending-signals))))
+      (ftr/run db
+        (fn [tx]
+          (->> (fdb-core/get-range tx (fsub/range signals-sub))
+               (reduce (fn [acc [key value]]
+                         (let [signal-name (nth key (- (count key) 3))]
+                           (update acc signal-name (fnil conj []) (<-bytes value))))
+                       {}))))))
 
   (add-signal [_ workflow-id signal-name signal-data]
     (let [signals-sub (fsub/get root-subspace (->tuple ["signals" workflow-id signal-name]))
@@ -229,10 +221,9 @@
                (log/warnf t "Wake callback threw for workflow %s" workflow-id))))))
 
   (is-cancelled? [_ workflow-id]
-    (->> (ftr/run db
-           (fn [tx]
-             (boolean (<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "cancelled"]))))))
-         (spec/check! ::spec/boolean-result)))
+    (ftr/run db
+      (fn [tx]
+        (boolean (<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "cancelled"])))))))
 
   (mark-cancelled [_ workflow-id]
     (ftr/run db
@@ -256,64 +247,60 @@
             (fn [tx]
               [(<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "status"])))
                (boolean (<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "cancelled"]))))]))]
-      (->> (cond
-             ;; Check terminal status first: takes precedence over the cancelled flag.
-             (#{"completed" "failed" "cancelled" "terminated"} cached) (keyword cached)
-             cancelled? :cancelled
-             :else (let [history (p/load-history this workflow-id)]
-                     (if (empty? history)
-                       :not-found
-                       (let [last-event (last history)]
-                         (case (:event-type last-event)
-                           :workflow-completed :completed
-                           :workflow-failed :failed
-                           :workflow-cancelled :cancelled
-                           :workflow-terminated :terminated
-                           :running)))))
-           (spec/check! ::spec/workflow-status))))
+      (cond
+        ;; Check terminal status first: takes precedence over the cancelled flag.
+        (#{"completed" "failed" "cancelled" "terminated"} cached) (keyword cached)
+        cancelled? :cancelled
+        :else (let [history (p/load-history this workflow-id)]
+                (if (empty? history)
+                  :not-found
+                  (let [last-event (last history)]
+                    (case (:event-type last-event)
+                      :workflow-completed :completed
+                      :workflow-failed :failed
+                      :workflow-cancelled :cancelled
+                      :workflow-terminated :terminated
+                      :running)))))))
 
   ;; --- Phase C: ownership-based recovery (serializable read-modify-write) ---
   (claim-owner [_ workflow-id owner-id]
-    (->> (ftr/run db
-           (fn [tx]
-             (let [k        (->tuple ["owner" workflow-id])
-                   cur      (<-bytes (fdb-core/get tx root-subspace k))
-                   status   (<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "status"])))
-                   terminal? (contains? #{"completed" "failed" "cancelled" "terminated"} status)]
-               ;; Never claim a terminal workflow (mirrors the JDBC status predicate);
-               ;; doing so would also resurrect its ownership-index entry below.
-               (if (and (not terminal?)
-                        (or (nil? cur) (= cur owner-id)))
-                 (let [old-bucket (or cur "")
-                       ;; preserve the index value (carries C2 wake-at) across the move
-                       entry      (or (<-bytes (fdb-core/get tx root-subspace
-                                                 (owner-index-key root-subspace old-bucket workflow-id)))
-                                      {:wake-at nil})]
-                   (fdb-core/set tx root-subspace k (->bytes owner-id))
-                   (fdb-core/clear tx root-subspace (owner-index-key root-subspace old-bucket workflow-id))
-                   (fdb-core/set tx root-subspace (owner-index-key root-subspace owner-id workflow-id)
-                                 (->bytes entry))
-                   true)
-                 false))))
-         (spec/check! ::spec/boolean-result)))
+    (ftr/run db
+      (fn [tx]
+        (let [k        (->tuple ["owner" workflow-id])
+              cur      (<-bytes (fdb-core/get tx root-subspace k))
+              status   (<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "status"])))
+              terminal? (contains? #{"completed" "failed" "cancelled" "terminated"} status)]
+          ;; Never claim a terminal workflow (mirrors the JDBC status predicate);
+          ;; doing so would also resurrect its ownership-index entry below.
+          (if (and (not terminal?)
+                   (or (nil? cur) (= cur owner-id)))
+            (let [old-bucket (or cur "")
+                  ;; preserve the index value (carries C2 wake-at) across the move
+                  entry      (or (<-bytes (fdb-core/get tx root-subspace
+                                            (owner-index-key root-subspace old-bucket workflow-id)))
+                                 {:wake-at nil})]
+              (fdb-core/set tx root-subspace k (->bytes owner-id))
+              (fdb-core/clear tx root-subspace (owner-index-key root-subspace old-bucket workflow-id))
+              (fdb-core/set tx root-subspace (owner-index-key root-subspace owner-id workflow-id)
+                            (->bytes entry))
+              true)
+            false)))))
 
   (list-pending [_ owner-id limit]
-    (spec/check! ::spec/limit limit)
-    (->> (ftr/run db
-           (fn [tx]
-             (let [now  (System/currentTimeMillis)
-                   due? (fn [v] (let [wa (:wake-at v)] (or (nil? wa) (<= wa now))))
-                   scan (fn [bucket]
-                          (let [sub (fsub/get root-subspace (->tuple ["wf-owner" bucket]))]
-                            (->> (fdb-core/get-range tx (fsub/range sub))
-                                 (keep (fn [[key value]]
-                                         (when (due? (<-bytes value))
-                                           (nth key (dec (count key)))))))))]
-               (->> (concat (scan owner-id) (scan ""))
-                    distinct
-                    (take limit)
-                    vec))))
-         (spec/check! ::spec/pending-ids)))
+    (ftr/run db
+      (fn [tx]
+        (let [now  (System/currentTimeMillis)
+              due? (fn [v] (let [wa (:wake-at v)] (or (nil? wa) (<= wa now))))
+              scan (fn [bucket]
+                     (let [sub (fsub/get root-subspace (->tuple ["wf-owner" bucket]))]
+                       (->> (fdb-core/get-range tx (fsub/range sub))
+                            (keep (fn [[key value]]
+                                    (when (due? (<-bytes value))
+                                      (nth key (dec (count key)))))))))]
+          (->> (concat (scan owner-id) (scan ""))
+               distinct
+               (take limit)
+               vec)))))
 
   (release-owner [_ owner-id]
     (ftr/run db
@@ -332,7 +319,6 @@
     nil)
 
   (set-wake-at [_ workflow-id wake-at-ms]
-    (spec/check! ::spec/wake-at-ms wake-at-ms)
     (ftr/run db
       (fn [tx]
         (let [bucket (or (read-owner tx root-subspace workflow-id) "")
@@ -346,8 +332,6 @@
 
   ;; --- Tier 2: independent child workflows ---
   (link-child! [_ parent-id parent-seq child-id policy]
-    (spec/check! ::spec/parent-seq parent-seq)
-    (spec/check! ::spec/policy policy)
     ;; The child's :workflow-started event (and thus its ownership-index entry)
     ;; was already written; here we just record the parent->child relationship.
     (ftr/run db
@@ -363,14 +347,21 @@
                         (->> (fdb-core/get-range tx (fsub/range sub))
                              (mapv (fn [[key value]]
                                      [(nth key (dec (count key))) (<-bytes value)]))))))]
-      (->> entries
-           (mapv (fn [[child-id entry]]
-                   {:child-id   child-id
-                    :parent-seq (:parent-seq entry)
-                    :policy     (keyword (:policy entry))
-                    :status     (p/get-workflow-status this child-id)}))
-           (spec/check! ::spec/children)))))
+      (mapv (fn [[child-id entry]]
+              {:child-id   child-id
+               :parent-seq (:parent-seq entry)
+               :policy     (keyword (:policy entry))
+               :status     (p/get-workflow-status this child-id)})
+            entries))))
 
-(defn make-fdb-store [db subspace-name]
-  (let [root (fsub/create (->tuple [subspace-name]))]
-    (->FDBStore db root (atom {}))))
+(defn create-store
+  "Creates a new FoundationDB-backed IStore, wrapped with intemporal.spec
+  assertions by default (intemporal.store.checked/CheckedStore).
+
+  Options:
+  - :checked? - wrap with spec assertions (default true). Pass false for a
+                raw, unwrapped store."
+  [db subspace-name & {:keys [checked?] :or {checked? true}}]
+  (let [root  (fsub/create (->tuple [subspace-name]))
+        store (->FDBStore db root (atom {}))]
+    (if checked? (checked/->CheckedStore store) store)))

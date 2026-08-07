@@ -64,13 +64,13 @@
 (deftest signal-across-instances-in-memory
   (testing "InMemoryStore sharing one backing atom"
     (let [state (atom {})]
-      (assert-woke (run-scenario (mem/->InMemoryStore state) (mem/->InMemoryStore state))))))
+      (assert-woke (run-scenario (mem/create-store :state state) (mem/create-store :state state))))))
 
 (deftest ^:integration signal-across-instances-jdbc
   (testing "two JdbcStore instances over the same Postgres"
     (let [url     (jdbc-store/resolve-jdbc-url)
-          store-a (jdbc-store/make-jdbc-store url)
-          store-b (jdbc-store/make-jdbc-store url)]
+          store-a (jdbc-store/create-store url)
+          store-b (jdbc-store/create-store url)]
       (try (assert-woke (run-scenario store-a store-b))
            (finally (.close store-a) (.close store-b))))))
 
@@ -79,6 +79,6 @@
     (let [root    (str "bug11-" (random-uuid))
           fdb     (cfdb/select-api-version 710)
           db      (.open fdb "docker/fdb.cluster")
-          store-a (fdb-store/make-fdb-store db root)
-          store-b (fdb-store/make-fdb-store db root)]
+          store-a (fdb-store/create-store db root)
+          store-b (fdb-store/create-store db root)]
       (assert-woke (run-scenario store-a store-b)))))

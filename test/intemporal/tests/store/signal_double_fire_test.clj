@@ -48,7 +48,7 @@
 
 (deftest signal-double-fire-in-memory
   (testing "InMemoryStore: callback fires once (parity reference)"
-    (check-callback-fires-once (store/->InMemoryStore (atom {})))))
+    (check-callback-fires-once (store/create-store))))
 
 ;; --- JDBC (mirrors jdbc_test.clj setup) ---
 
@@ -65,7 +65,7 @@
 (deftest ^:integration signal-double-fire-jdbc
   (testing "JdbcStore: callback fires once for two rapid signals"
     (ensure-database!)
-    (with-open [store (jdbc-store/make-jdbc-store db-spec)]
+    (with-open [store (jdbc-store/create-store db-spec)]
       (check-callback-fires-once store))))
 
 ;; --- FDB (mirrors fdb_test.clj setup) ---
@@ -74,5 +74,5 @@
   (testing "FDBStore: callback fires once for two rapid signals"
     (let [db (cfdb/select-api-version 710)
           db (cfdb/open db "docker/fdb.cluster")]
-      (with-open [store (fdb-store/make-fdb-store db "intemporal-tests")]
+      (with-open [store (fdb-store/create-store db "intemporal-tests")]
         (check-callback-fires-once store)))))

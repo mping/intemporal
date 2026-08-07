@@ -18,7 +18,7 @@
   "N threads race `claim-owner` on one freshly-started, unowned workflow.
   Returns the vector of booleans each claimant got back."
   [trial]
-  (let [store (store/->InMemoryStore (atom {}))
+  (let [store (store/create-store)
         wid   (str "cas-" trial "-" (random-uuid))]
     (p/save-event store wid {:event-type :workflow-started :seq -1 :workflow-id wid :args []})
     (let [ready   (CountDownLatch. n-threads)

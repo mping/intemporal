@@ -61,7 +61,7 @@
   (testing "Compensation suspended mid-way resumes and runs each step exactly once"
     (reset! exec-counts {})
     (let [workflow-id      "saga-crash-1"
-          persistent-store (store/->InMemoryStore (atom {}))]
+          persistent-store (store/create-store)]
 
       ;; Phase 1: run until the flight compensation suspends waiting for a signal
       (testing "Phase 1: fails, begins compensation, suspends mid-compensation"

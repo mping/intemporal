@@ -41,12 +41,12 @@
 
 (deftest status-in-memory
   (testing "status lifecycle on InMemoryStore"
-    (check-status (store/->InMemoryStore (atom {})))))
+    (check-status (store/create-store))))
 
 (deftest ^:integration status-jdbc
   (testing "status lifecycle on JdbcStore"
     (let [url   (jdbc-store/resolve-jdbc-url)
-          store (jdbc-store/make-jdbc-store url)]
+          store (jdbc-store/create-store url)]
       (try (check-status store) (finally (.close store))))))
 
 (deftest ^:integration status-fdb
@@ -54,5 +54,5 @@
     (let [root  (str "status-" (random-uuid))
           fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
-          store (fdb-store/make-fdb-store db root)]
+          store (fdb-store/create-store db root)]
       (check-status store))))

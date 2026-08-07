@@ -56,7 +56,7 @@
           num-activities 5
           crash-point 3  ;; Suspend after completing activities 0, 1, 2
           ;; Create store that persists across "crash"
-          persistent-store (store/->InMemoryStore (atom {}))]
+          persistent-store (store/create-store)]
 
       ;; ======================================================================
       ;; Phase 1: Execute workflow until suspension point ("crash")

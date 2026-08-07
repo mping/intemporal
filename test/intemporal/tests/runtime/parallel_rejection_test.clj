@@ -135,7 +135,7 @@
   (testing "rejected members of an async batch are rescheduled and run on a later pass"
     (reset! exec-log [])
     (let [workflow-id "parallel-rejection-wf"
-          st          (store/->InMemoryStore (atom {}))
+          st          (store/create-store)
           base        (intemporal/make-workflow-engine :store st)
           inner       (Executors/newVirtualThreadPerTaskExecutor)
           ;; Reject submits #2 and #3 — i.e. the 2nd and 3rd members of the very

@@ -30,4 +30,4 @@
     (-> (body-fn engine)
         (prom/finally (fn [_ _] (stop) (intemporal/shutdown-engine engine))))))
 
-(defn in-memory [] (store/->InMemoryStore (atom {})))
+(defn in-memory [] (store/create-store))

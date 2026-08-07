@@ -5,5 +5,5 @@
 
 (deftest memory-store-test
   (testing "In-Memory Store Implementation"
-    (let [store (store/->InMemoryStore (atom {}))]
+    (let [store (store/create-store)]
       (suite/run-store-tests store))))

@@ -269,13 +269,19 @@ above). Use `submit-workflow` (not `start-workflow`) to hand a workflow to the w
 
 Three `IStore` implementations ship with the library:
 
+Every store is built through a `create-store` factory (one per namespace), which wraps
+the raw backend in `intemporal.store.checked/CheckedStore` — a decorator that validates
+every value crossing the `IStore` boundary against `intemporal.spec` (a no-op unless
+`clojure.spec.check-asserts` is enabled, see `intemporal.spec`). Pass `:checked? false`
+to get the raw, unwrapped store instead.
+
 ### InMemoryStore
 An in-process atom-based store. Default; adequate for development and single-process
 CLJS (the CLJS worker is also single-process). No persistence across restarts.
 
 ```clojure
 (require '[intemporal.store :as store])
-(store/->InMemoryStore (atom {}))
+(store/create-store)
 ```
 
 ### JDBC (PostgreSQL)
@@ -284,7 +290,7 @@ construction. Requires the `:jdbc` deps.edn alias.
 
 ```clojure
 (require '[intemporal.store.jdbc :as jdbc])
-(def store (jdbc/make-jdbc-store "jdbc:postgresql://localhost:5432/mydb?user=...&password=..."))
+(def store (jdbc/create-store "jdbc:postgresql://localhost:5432/mydb?user=...&password=..."))
 ;; .close the store to release the HikariCP pool
 ```
 
@@ -299,7 +305,7 @@ index, and child linkage. Requires the `:fdb` deps.edn alias.
 (require '[intemporal.store.fdb :as fdb])
 (import '[com.apple.foundationdb FDB])
 (let [db (-> (FDB/selectAPIVersion 710) (.open "path/to/fdb.cluster"))]
-  (fdb/make-fdb-store db "my-subspace"))
+  (fdb/create-store db "my-subspace"))
 ```
 
 ## Platform differences

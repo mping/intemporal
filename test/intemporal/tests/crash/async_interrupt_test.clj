@@ -78,7 +78,7 @@
     (reset! completed-log [])
 
     (let [workflow-id "async-interrupt-1"
-          st          (store/->InMemoryStore (atom {}))]
+          st          (store/create-store)]
 
       ;; ======================================================================
       ;; Phase 1: interrupt the batch mid-flight

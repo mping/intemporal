@@ -38,12 +38,12 @@
 
 ;; ── store fixtures ──────────────────────────────────────────────────────────────
 
-(defn in-memory [] (store/->InMemoryStore (atom {})))
+(defn in-memory [] (store/create-store))
 
 (defn jdbc []
-  (jdbc-store/make-jdbc-store (jdbc-store/resolve-jdbc-url)))
+  (jdbc-store/create-store (jdbc-store/resolve-jdbc-url)))
 
 (defn fdb []
   (let [fdb-api (cfdb/select-api-version 710)
         db      (.open fdb-api "docker/fdb.cluster")]
-    (fdb-store/make-fdb-store db (str "child-" (random-uuid)))))
+    (fdb-store/create-store db (str "child-" (random-uuid)))))

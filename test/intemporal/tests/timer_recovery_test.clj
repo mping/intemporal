@@ -63,12 +63,12 @@
 
 (deftest fire-at-deterministic-in-memory
   (testing "InMemoryStore"
-    (check-determinism (store/->InMemoryStore (atom {})))))
+    (check-determinism (store/create-store))))
 
 (deftest ^:integration fire-at-deterministic-jdbc
   (testing "JdbcStore"
     (let [url   (jdbc-store/resolve-jdbc-url)
-          store (jdbc-store/make-jdbc-store url)]
+          store (jdbc-store/create-store url)]
       (try (check-determinism store) (finally (.close store))))))
 
 (deftest ^:integration fire-at-deterministic-fdb
@@ -76,7 +76,7 @@
     (let [root  (str "det-" (random-uuid))
           fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
-          store (fdb-store/make-fdb-store db root)]
+          store (fdb-store/create-store db root)]
       (check-determinism store))))
 
 ;; ── 2. timer recovery: worker drives a crashed sleeper to completion ────────────
@@ -102,12 +102,12 @@
 
 (deftest timer-recovery-in-memory
   (testing "InMemoryStore"
-    (check-timer-recovery (store/->InMemoryStore (atom {})))))
+    (check-timer-recovery (store/create-store))))
 
 (deftest ^:integration timer-recovery-jdbc
   (testing "JdbcStore"
     (let [url   (jdbc-store/resolve-jdbc-url)
-          store (jdbc-store/make-jdbc-store url)]
+          store (jdbc-store/create-store url)]
       (try (check-timer-recovery store) (finally (.close store))))))
 
 (deftest ^:integration timer-recovery-fdb
@@ -115,7 +115,7 @@
     (let [root  (str "trec-" (random-uuid))
           fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
-          store (fdb-store/make-fdb-store db root)]
+          store (fdb-store/create-store db root)]
       (check-timer-recovery store))))
 
 ;; ── 3. wake_at filtering: list-pending skips not-yet-due workflows ──────────────
@@ -138,12 +138,12 @@
 
 (deftest wake-at-filter-in-memory
   (testing "InMemoryStore"
-    (check-wake-at-filter (store/->InMemoryStore (atom {})))))
+    (check-wake-at-filter (store/create-store))))
 
 (deftest ^:integration wake-at-filter-jdbc
   (testing "JdbcStore"
     (let [url   (jdbc-store/resolve-jdbc-url)
-          store (jdbc-store/make-jdbc-store url)]
+          store (jdbc-store/create-store url)]
       (try (check-wake-at-filter store) (finally (.close store))))))
 
 (deftest ^:integration wake-at-filter-fdb
@@ -151,5 +151,5 @@
     (let [root  (str "wake-" (random-uuid))
           fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
-          store (fdb-store/make-fdb-store db root)]
+          store (fdb-store/create-store db root)]
       (check-wake-at-filter store))))

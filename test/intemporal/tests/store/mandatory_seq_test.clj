@@ -70,7 +70,7 @@
 
 (deftest mandatory-seq-in-memory
   (testing "InMemoryStore: every event has a real seq"
-    (let [store (store/->InMemoryStore (atom {}))
+    (let [store (store/create-store)
           [_ history] (check-mandatory-seq store)]
       (is (= :workflow-started (:event-type (first history)))
           "workflow-started is the first event (insertion order)"))))
@@ -90,7 +90,7 @@
 (deftest ^:integration mandatory-seq-jdbc
   (testing "JdbcStore: seq column is NOT NULL and every persisted row satisfies it"
     (ensure-database!)
-    (with-open [store (jdbc-store/make-jdbc-store db-spec)]
+    (with-open [store (jdbc-store/create-store db-spec)]
       (check-mandatory-seq store)
       (let [ds       (jdbc/get-datasource db-spec)
             col      (jdbc/execute-one! ds
@@ -105,7 +105,7 @@
   (testing "FDBStore: load-history sorts :workflow-started first (no random-uuid tie-break)"
     (let [db (cfdb/select-api-version 710)
           db (cfdb/open db "docker/fdb.cluster")]
-      (with-open [store (fdb-store/make-fdb-store db "intemporal-tests")]
+      (with-open [store (fdb-store/create-store db "intemporal-tests")]
         (let [[_ history] (check-mandatory-seq store)]
           (is (= :workflow-started (:event-type (first history)))
               "workflow-started sorts first by :seq"))))))

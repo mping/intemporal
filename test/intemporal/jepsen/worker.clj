@@ -119,7 +119,7 @@
   (assert db-url  ":db-url required")
   (assert test-run ":test-run required")
 
-  (let [store    (jdbc-store/make-jdbc-store db-url)
+  (let [store    (jdbc-store/create-store db-url)
         main-ds  (:datasource store)
         side-ds  (make-pool db-url 2 true)   ; auto-commit for side-channel
         engine   (intemporal/make-workflow-engine :store store :threads 8)

@@ -105,7 +105,7 @@
   (testing "child finishing between the eligibility check and register-wake-callback is not lost"
     (let [parent-id "async-join-wake-parent"
           child-id  "async-join-wake-child"
-          inner     (store/->InMemoryStore (atom {}))
+          inner     (store/create-store)
           ;; Forward reference: the window fn drives the child via a second
           ;; engine once the parent's drive reaches register-wake-callback.
           engine-2  (atom nil)

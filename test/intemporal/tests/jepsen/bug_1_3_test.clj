@@ -64,12 +64,12 @@
 
 (deftest engine-restart-recovers-in-memory
   (testing "shared InMemoryStore: worker recovers after crash"
-    (assert-recovered (run-scenario (mem/->InMemoryStore (atom {}))))))
+    (assert-recovered (run-scenario (mem/create-store)))))
 
 (deftest ^:integration engine-restart-recovers-jdbc
   (testing "JdbcStore: worker recovers after crash"
     (let [url   (jdbc-store/resolve-jdbc-url)
-          store (jdbc-store/make-jdbc-store url)]
+          store (jdbc-store/create-store url)]
       (try (assert-recovered (run-scenario store)) (finally (.close store))))))
 
 (deftest ^:integration engine-restart-recovers-fdb
@@ -77,5 +77,5 @@
     (let [root  (str "bug13-" (random-uuid))
           fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
-          store (fdb-store/make-fdb-store db root)]
+          store (fdb-store/create-store db root)]
       (assert-recovered (run-scenario store)))))

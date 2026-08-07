@@ -74,14 +74,14 @@
 
 (deftest cancellation-reaches-sleeping-workflow-in-memory
   (testing "cancel-workflow terminates a signal-sleeping workflow (InMemoryStore)"
-    (assert-cancelled (run-scenario (mem/->InMemoryStore (atom {}))))))
+    (assert-cancelled (run-scenario (mem/create-store)))))
 
 ;; ── JDBC (requires Postgres) ──────────────────────────────────────────────────
 
 (deftest ^:integration cancellation-reaches-sleeping-workflow-jdbc
   (testing "cancel-workflow terminates a signal-sleeping workflow (JdbcStore)"
     (let [url   (jdbc-store/resolve-jdbc-url)
-          store (jdbc-store/make-jdbc-store url)]
+          store (jdbc-store/create-store url)]
       (try
         (assert-cancelled (run-scenario store))
         (finally (.close store))))))
@@ -93,5 +93,5 @@
     (let [root  (str "bug23-" (random-uuid))
           fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
-          store (fdb-store/make-fdb-store db root)]
+          store (fdb-store/create-store db root)]
       (assert-cancelled (run-scenario store)))))

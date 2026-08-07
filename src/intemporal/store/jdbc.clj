@@ -1,6 +1,6 @@
 (ns intemporal.store.jdbc
   (:require [intemporal.protocol :as p]
-            [intemporal.spec :as spec]
+            [intemporal.store.checked :as checked]
             [intemporal.internal.codec :as codec]
             [intemporal.internal.logging :as log]
             [migratus.core :as migratus]
@@ -137,16 +137,13 @@
                                workflow-id])]
       (->> rows
            (mapv (fn [{:intemporal_history/keys [event_type data]}]
-                   (assoc (<-payload-val kind data) :event-type (keyword event_type))))
-           (spec/check! ::spec/events))))
+                   (assoc (<-payload-val kind data) :event-type (keyword event_type)))))))
 
   (save-event [this workflow-id event]
-    ;; No check! here — this delegates to save-events, which asserts.
     (p/save-events this workflow-id [event])
     event)
 
   (save-events [_ workflow-id events]
-    (spec/check! ::spec/events events)
     (when (seq events)
       (jdbc/with-transaction [tx datasource]
         ;; Ensure workflow exists
@@ -174,14 +171,11 @@
     events)
 
   (find-event [_ workflow-id event-type seq-num]
-    (spec/check! ::spec/event-type event-type)
-    (spec/check! ::spec/seq seq-num)
     (let [row (jdbc/execute-one! datasource
                                  ["SELECT data FROM intemporal_history WHERE workflow_id = ? AND event_type = ? AND seq = ?"
                                   workflow-id (name event-type) seq-num])]
-      (->> (when row
-             (assoc (<-payload-val kind (:intemporal_history/data row)) :event-type event-type))
-           (spec/check! ::spec/maybe-event))))
+      (when row
+        (assoc (<-payload-val kind (:intemporal_history/data row)) :event-type event-type))))
 
   (max-seq [_ workflow-id]
     ;; MAX(seq) WHERE workflow_id = ? is served by the leading (workflow_id,
@@ -191,8 +185,7 @@
                             ["SELECT MAX(seq) AS max_seq FROM intemporal_history WHERE workflow_id = ?"
                              workflow-id])
          vals
-         first
-         (spec/check! ::spec/max-seq-result)))
+         first))
 
   (get-pending-signals [_ workflow-id]
     (let [rows (jdbc/execute! datasource
@@ -201,8 +194,7 @@
       (->> rows
            (reduce (fn [acc {:intemporal_signals/keys [signal_name payload]}]
                      (update acc signal_name (fnil conj []) (<-payload-val kind payload)))
-                   {})
-           (spec/check! ::spec/pending-signals))))
+                   {}))))
 
   (add-signal [_ workflow-id signal-name signal-data]
     (jdbc/with-transaction [tx datasource]
@@ -251,8 +243,7 @@
     (let [row (jdbc/execute-one! datasource
                                  ["SELECT cancelled FROM intemporal_workflows WHERE id = ?"
                                   workflow-id])]
-      (->> (boolean (:intemporal_workflows/cancelled row))
-           (spec/check! ::spec/boolean-result))))
+      (boolean (:intemporal_workflows/cancelled row))))
 
   (mark-cancelled [_ workflow-id]
     (jdbc/execute! datasource
@@ -263,24 +254,23 @@
                                     ["SELECT cancelled, status FROM intemporal_workflows WHERE id = ?"
                                      workflow-id])
           status (:intemporal_workflows/status wf-row)]
-      (->> (cond
-             (nil? wf-row) :not-found
-             ;; Check terminal status first: a late mark-cancelled must not override
-             ;; a workflow that already completed or failed.
-             (#{"completed" "failed" "cancelled" "terminated"} status) (keyword status)
-             (:intemporal_workflows/cancelled wf-row) :cancelled
-             ;; Otherwise (running / pre-migration) derive from history as before.
-             :else (let [history (p/load-history this workflow-id)]
-                     (if (empty? history)
-                       :not-found
-                       (let [last-event (last history)]
-                         (case (:event-type last-event)
-                           :workflow-completed :completed
-                           :workflow-failed :failed
-                           :workflow-cancelled :cancelled
-                           :workflow-terminated :terminated
-                           :running)))))
-           (spec/check! ::spec/workflow-status))))
+      (cond
+        (nil? wf-row) :not-found
+        ;; Check terminal status first: a late mark-cancelled must not override
+        ;; a workflow that already completed or failed.
+        (#{"completed" "failed" "cancelled" "terminated"} status) (keyword status)
+        (:intemporal_workflows/cancelled wf-row) :cancelled
+        ;; Otherwise (running / pre-migration) derive from history as before.
+        :else (let [history (p/load-history this workflow-id)]
+                (if (empty? history)
+                  :not-found
+                  (let [last-event (last history)]
+                    (case (:event-type last-event)
+                      :workflow-completed :completed
+                      :workflow-failed :failed
+                      :workflow-cancelled :cancelled
+                      :workflow-terminated :terminated
+                      :running)))))))
 
   ;; --- Phase C: ownership-based recovery ---
   (claim-owner [_ workflow-id owner-id]
@@ -290,15 +280,13 @@
                     AND (owner IS NULL OR owner = ?)
                     AND status NOT IN ('completed','failed','cancelled','terminated')"
                                   owner-id workflow-id owner-id])]
-      (->> (pos? (or (:next.jdbc/update-count res) 0))
-           (spec/check! ::spec/boolean-result))))
+      (pos? (or (:next.jdbc/update-count res) 0))))
 
   ;; A4: cancelled-but-not-finalized workflows MUST stay listed — the worker has
   ;; to re-drive them so the body observes the cancel flag, runs any saga
   ;; compensation, and writes the terminal :workflow-cancelled event (which then
   ;; excludes them via the status filter).
   (list-pending [_ owner-id limit]
-    (spec/check! ::spec/limit limit)
     (let [rows (jdbc/execute! datasource
                               ["SELECT id FROM intemporal_workflows
                    WHERE status NOT IN ('completed','failed','cancelled','terminated')
@@ -307,9 +295,7 @@
                    ORDER BY created_at
                    LIMIT ?"
                                owner-id limit])]
-      (->> rows
-           (mapv :intemporal_workflows/id)
-           (spec/check! ::spec/pending-ids))))
+      (mapv :intemporal_workflows/id rows)))
 
   (release-owner [_ owner-id]
     (jdbc/execute! datasource
@@ -319,7 +305,6 @@
     nil)
 
   (set-wake-at [_ workflow-id wake-at-ms]
-    (spec/check! ::spec/wake-at-ms wake-at-ms)
     (if wake-at-ms
       (jdbc/execute! datasource
                      [(set-wake-at-sql kind) wake-at-ms workflow-id])
@@ -330,8 +315,6 @@
 
   ;; --- Tier 2: independent child workflows ---
   (link-child! [_ parent-id parent-seq child-id policy]
-    (spec/check! ::spec/parent-seq parent-seq)
-    (spec/check! ::spec/policy policy)
     ;; The child row already exists (its :workflow-started event was saved just
     ;; before this call). Stamp the parent linkage on it; idempotent — re-linking
     ;; writes the same values.
@@ -348,20 +331,25 @@
                               ["SELECT id, parent_seq, parent_close_policy
                    FROM intemporal_workflows WHERE parent_workflow_id = ?"
                                parent-id])]
-      (->> rows
-           (mapv (fn [{:intemporal_workflows/keys [id parent_seq parent_close_policy]}]
-                   {:child-id id
-                    :parent-seq parent_seq
-                    :policy (keyword parent_close_policy)
-                    :status (p/get-workflow-status this id)}))
-           (spec/check! ::spec/children)))))
+      (mapv (fn [{:intemporal_workflows/keys [id parent_seq parent_close_policy]}]
+              {:child-id id
+               :parent-seq parent_seq
+               :policy (keyword parent_close_policy)
+               :status (p/get-workflow-status this id)})
+            rows))))
 
 ;; TODO use more complete opts
-(defn make-jdbc-store
-  "Creates a new jdbc store.  The JDBC URL prefix determines the database kind
-  (postgresql | mariadb | mysql) and thus the SQL dialect and migration directory
-  used."
-  [jdbc-url]
-  (let [kind (migrate! jdbc-url)
-        ds (hikari/make-datasource {:jdbc-url jdbc-url})]
-    (->JdbcStore ds (atom {}) kind)))
+(defn create-store
+  "Creates a new JDBC-backed IStore, wrapped with intemporal.spec assertions
+  by default (intemporal.store.checked/CheckedStore). The JDBC URL prefix
+  determines the database kind (postgresql | mariadb | mysql) and thus the SQL
+  dialect and migration directory used.
+
+  Options:
+  - :checked? - wrap with spec assertions (default true). Pass false for a
+                raw, unwrapped store."
+  [jdbc-url & {:keys [checked?] :or {checked? true}}]
+  (let [kind  (migrate! jdbc-url)
+        ds    (hikari/make-datasource {:jdbc-url jdbc-url})
+        store (->JdbcStore ds (atom {}) kind)]
+    (if checked? (checked/->CheckedStore store) store)))

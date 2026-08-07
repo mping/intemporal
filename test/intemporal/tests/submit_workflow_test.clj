@@ -16,7 +16,7 @@
 
 (deftest submit-returns-id-then-await-completes
   (testing "submit-workflow returns an id immediately; a worker runs it; await yields the result"
-    (let [st (store/->InMemoryStore (atom {}))
+    (let [st (store/create-store)
           e  (intemporal/make-workflow-engine :store st :threads 2)
           stop (intemporal/start-worker e :poll-ms 25)]
       (try
@@ -29,7 +29,7 @@
 
 (deftest submit-honours-explicit-id
   (testing "submit-workflow uses a caller-supplied :workflow-id"
-    (let [st (store/->InMemoryStore (atom {}))
+    (let [st (store/create-store)
           e  (intemporal/make-workflow-engine :store st :threads 2)
           stop (intemporal/start-worker e :poll-ms 25)]
       (try

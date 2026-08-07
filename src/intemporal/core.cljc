@@ -1128,7 +1128,7 @@
    - :enable-telemetry - Enable OpenTelemetry tracing (default: true, JVM only)
    - :observer - Additional observer instance, composed on top of built-in observers"
   [& {:keys [store threads scheduler-threads default-timeout-ms enable-logging enable-telemetry observer]
-      :or {store (store/->InMemoryStore (atom {}))
+      :or {store (store/create-store)
            threads             default-executor-threads
            scheduler-threads   default-scheduler-threads
            default-timeout-ms  default-activity-timeout-ms

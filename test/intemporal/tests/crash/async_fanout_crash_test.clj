@@ -74,7 +74,7 @@
   (testing "async fired right before a sleep still executes and the workflow completes"
     (reset! execution-counter 0)
     (let [workflow-id      "async-fanout-crash-1"
-          persistent-store (store/->InMemoryStore (atom {}))
+          persistent-store (store/create-store)
           engine           (intemporal/make-workflow-engine :store persistent-store :threads 2)
           ;; Short sleep: enough to force a :timer suspension in between the
           ;; async being scheduled and it being joined, without slowing the test.
@@ -107,7 +107,7 @@
   (testing "crashing while parked at the signal wait still resumes to exactly-once completion"
     (reset! execution-counter 0)
     (let [workflow-id      "async-fanout-crash-2"
-          persistent-store (store/->InMemoryStore (atom {}))
+          persistent-store (store/create-store)
           engine-1         (intemporal/make-workflow-engine :store persistent-store :threads 2)
           ;; wait-for-signal is our deterministic crash point: the workflow
           ;; suspends there on the very first pass, right after the async is

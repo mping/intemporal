@@ -88,14 +88,14 @@
 
 (deftest signal-delivered-in-register-consume-window-in-memory
   (testing "RacingStore on InMemoryStore: in-window signal wakes the workflow"
-    (assert-woke (run-scenario (mem/->InMemoryStore (atom {}))))))
+    (assert-woke (run-scenario (mem/create-store)))))
 
 ;; ── JDBC (requires Postgres) ──────────────────────────────────────────────────
 
 (deftest ^:integration signal-delivered-in-register-consume-window-jdbc
   (testing "RacingStore on JdbcStore: in-window signal wakes the workflow"
     (let [url   (jdbc-store/resolve-jdbc-url)
-          inner (jdbc-store/make-jdbc-store url)]
+          inner (jdbc-store/create-store url)]
       (try
         (assert-woke (run-scenario inner))
         (finally (.close inner))))))
@@ -107,5 +107,5 @@
     (let [root  (str "bug21-" (random-uuid))
           fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
-          inner (fdb-store/make-fdb-store db root)]
+          inner (fdb-store/create-store db root)]
       (assert-woke (run-scenario inner)))))
