@@ -23,6 +23,11 @@
 
 (deftest test-log-once-workflow
   (testing "run-once facility can be used for any purpose"
+    ;; `total` is a namespace-level atom, so it survives between runs of this
+    ;; test in a long-lived JVM (REPL, repeated `run-test-var`). Reset it first
+    ;; or the second run sees 2 and fails — the assertion below is about
+    ;; run-once firing exactly once per workflow, not about an absolute count.
+    (reset! total 0)
     (intemporal/with-workflow-engine [engine {:threads 4 :enable-logging true}]
       ;; Register activities
       (let [result (intemporal/start-workflow engine

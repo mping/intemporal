@@ -99,3 +99,11 @@
        (close [_]
          (when (instance? java.lang.AutoCloseable inner)
            (.close ^java.lang.AutoCloseable inner)))]))
+
+(defn unwrap
+  "Returns the concrete store `s` decorates, or `s` itself when it is not a
+   CheckedStore. Use this when you need a backend-specific field that only the
+   concrete record carries — e.g. a JdbcStore's :datasource — since those keys
+   are not readable through the wrapper."
+  [s]
+  (if (instance? CheckedStore s) (:inner s) s))

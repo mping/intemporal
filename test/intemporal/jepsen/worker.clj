@@ -17,6 +17,7 @@
   on restart — this reproduces bug 1.3 (no recovery poller)."
   (:require [intemporal.core :as intemporal]
             [intemporal.store.jdbc :as jdbc-store]
+            [intemporal.store.checked :as checked]
             [intemporal.jepsen.workflows :as wf]
             [next.jdbc :as jdbc]
             [hikari-cp.core :as hikari]
@@ -120,7 +121,9 @@
   (assert test-run ":test-run required")
 
   (let [store    (jdbc-store/create-store db-url)
-        main-ds  (:datasource store)
+        ;; :datasource lives on the concrete JdbcStore, not on the CheckedStore
+        ;; wrapper create-store returns — unwrap to reach it.
+        main-ds  (:datasource (checked/unwrap store))
         side-ds  (make-pool db-url 2 true)   ; auto-commit for side-channel
         engine   (intemporal/make-workflow-engine :store store :threads 8)
         stop-fn  (start-poll-loop! engine main-ds side-ds test-run owner)]
