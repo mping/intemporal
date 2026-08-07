@@ -362,7 +362,7 @@ Three further points deserve emphasis:
 | 19 | `intemporal.tests.engine.cljs-clj-parity-test` | Run the same workflow through both engines, assert identical persisted histories | No    |
 | 20 | `intemporal.tests.store.jdbc-schema-test` | Assert `intemporal_signals` has an index on `workflow_id`, and the poller query uses an index plan | No    |
 | 21 | `intemporal.tests.worker.wake-latency-test` | Signal a waiting workflow under worker mode, assert it's resumed near-instantly rather than on the next `poll-ms` tick | No    |
-| 22 | `intemporal.tests.store.value-fidelity-test` | Round-trip a keyword-valued activity result (`[:processed 5]`) through JDBC/FDB, assert it comes back as keywords, not strings | No    |
+| 22 | `intemporal.tests.store.value-fidelity-test` | Round-trip a keyword-valued activity result (`[:processed 5]`) through JDBC/FDB, assert it comes back as keywords, not strings | Yes    |
 | 23 | `intemporal.tests.signal.signal-id-idempotency-test` | Send two signals with the same `:signal-id`, assert only one is delivered | No    |
 | 24 | `intemporal.tests.store.signal-lifecycle-test` | Send a signal to a workflow that goes terminal concurrently, assert it's rejected/cleared rather than orphaned | No    |
 | 25 | `intemporal.tests.error.exception-replay-test` | Throw a multi-level cause chain from an activity, resume, assert the replayed exception preserves `:type` and nested `:cause` | No    |

@@ -1,1 +1,0 @@
-ALTER TABLE intemporal_history ALTER COLUMN seq DROP NOT NULL;
