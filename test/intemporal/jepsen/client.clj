@@ -83,8 +83,9 @@
   [db-spec test-run workflow-id signal-name]
   (try
     (jdbc/execute! db-spec
+      ;; payload is EDN text since migration 20260807000007 (bug #22) — no ::jsonb cast
       ["INSERT INTO intemporal_signals (workflow_id, signal_name, payload)
-        VALUES (?,?,'{}'::jsonb)"
+        VALUES (?,?,'{}')"
        workflow-id signal-name])
     (jdbc/execute! db-spec
       ["INSERT INTO jepsen_signals_sent (test_run, workflow_id, signal_name)
@@ -139,9 +140,10 @@
                          ON CONFLICT (id) DO NOTHING"
                         wf-id])
                      (jdbc/execute! tx
+                       ;; data is EDN text since migration 20260807000007 (bug #22)
                        ["INSERT INTO intemporal_history
                            (workflow_id, seq, event_type, data)
-                         VALUES (?,?,?,'{}'::jsonb)
+                         VALUES (?,?,?,'{}')
                          ON CONFLICT (workflow_id, seq) DO UPDATE
                            SET event_type = EXCLUDED.event_type,
                                data = EXCLUDED.data"

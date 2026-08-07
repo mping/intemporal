@@ -1,13 +1,12 @@
 (ns intemporal.store.jdbc
   (:require [intemporal.protocol :as p]
             [intemporal.spec :as spec]
+            [intemporal.internal.codec :as codec]
             [intemporal.internal.logging :as log]
             [migratus.core :as migratus]
             [next.jdbc :as jdbc]
-            [cheshire.core :as json]
             [hikari-cp.core :as hikari])
-  (:import (java.lang AutoCloseable)
-           (org.postgresql.util PGobject)))
+  (:import (java.lang AutoCloseable)))
 
 ;; ============================================================================
 ;; JDBC URL resolution
@@ -100,31 +99,28 @@
     "UPDATE intemporal_workflows SET wake_at = FROM_UNIXTIME(? / 1000.0) WHERE id = ?"))
 
 ;; ============================================================================
-;; JSON serialization
+;; Payload serialization
 ;; ============================================================================
 
-;; PostgreSQL: PGobject for native JSONB binding
-(defn- ->pgobject [x]
-  (let [pgobj (PGobject.)]
-    (.setType pgobj "jsonb")
-    (.setValue pgobj (json/generate-string x))
-    pgobj))
-
-;; JSON conversion is done EXPLICITLY at this store's call sites rather than via
+;; EDN, via the codec shared with the FDB store. Previously cheshire, whose
+;; `(parse-string s true)` keywordizes map KEYS but not VALUES — so a keyword
+;; activity result came back as a string and broke replay determinism (bug #22).
+;; Migration 20260807000007 changed `intemporal_history.data` and
+;; `intemporal_signals.payload` from JSONB/JSON to text accordingly, so there is
+;; no longer a PGobject to bind and `kind` no longer affects serialization.
+;;
+;; Conversion stays EXPLICIT at this store's call sites rather than going through
 ;; `extend-protocol prepare/SettableParameter` / `rs/ReadableColumn`, which are
 ;; JVM-global: extending IPersistentMap/IPersistentVector would silently coerce
 ;; every map/vector parameter of every next.jdbc call in the host application
-;; (including non-intemporal, non-PostgreSQL ones) to a PGobject.
-(defn- ->json-param [kind x]
-  (case kind
-    :postgres (->pgobject x)          ; native JSONB binding
-    (json/generate-string x)))        ; MariaDB/MySQL accept String for JSON columns
+;; (including non-intemporal ones).
+(defn- ->payload-param [_kind x]
+  (codec/encode x))
 
-(defn- <-json-val [_kind x]
-  (cond
-    (instance? PGobject x) (json/parse-string (.getValue ^PGobject x) true)
-    (string? x)            (json/parse-string x true)
-    :else x))
+(defn- <-payload-val [_kind x]
+  (if (string? x)
+    (codec/decode x)
+    x))
 
 ;; ============================================================================
 ;; JdbcStore Implementation
@@ -141,7 +137,7 @@
                                workflow-id])]
       (->> rows
            (mapv (fn [{:intemporal_history/keys [event_type data]}]
-                   (assoc (<-json-val kind data) :event-type (keyword event_type))))
+                   (assoc (<-payload-val kind data) :event-type (keyword event_type))))
            (spec/check! ::spec/events))))
 
   (save-event [this workflow-id event]
@@ -162,7 +158,7 @@
         (doseq [event events]
           (let [seq-num (:seq event)
                 event-type (name (:event-type event))
-                data (->json-param kind (dissoc event :event-type))]
+                data (->payload-param kind (dissoc event :event-type))]
             (jdbc/execute! tx [(upsert-history-sql kind)
                                workflow-id seq-num event-type data])))
         ;; Phase B2: maintain the O(1) status column on terminal events.
@@ -184,7 +180,7 @@
                                  ["SELECT data FROM intemporal_history WHERE workflow_id = ? AND event_type = ? AND seq = ?"
                                   workflow-id (name event-type) seq-num])]
       (->> (when row
-             (assoc (<-json-val kind (:intemporal_history/data row)) :event-type event-type))
+             (assoc (<-payload-val kind (:intemporal_history/data row)) :event-type event-type))
            (spec/check! ::spec/maybe-event))))
 
   (max-seq [_ workflow-id]
@@ -204,7 +200,7 @@
                                workflow-id])]
       (->> rows
            (reduce (fn [acc {:intemporal_signals/keys [signal_name payload]}]
-                     (update acc signal_name (fnil conj []) (<-json-val kind payload)))
+                     (update acc signal_name (fnil conj []) (<-payload-val kind payload)))
                    {})
            (spec/check! ::spec/pending-signals))))
 
@@ -212,7 +208,7 @@
     (jdbc/with-transaction [tx datasource]
       (jdbc/execute! tx [(upsert-workflow-sql kind) workflow-id])
       (jdbc/execute! tx ["INSERT INTO intemporal_signals (workflow_id, signal_name, payload) VALUES (?, ?, ?)"
-                         workflow-id signal-name (->json-param kind signal-data)]))
+                         workflow-id signal-name (->payload-param kind signal-data)]))
     ;; In-process fast path for an embedded (no-worker) engine in THIS process.
     ;; Worker mode picks the workflow up via the ownership scan (list-pending).
     ;; Atomically remove the callback before firing it (mirrors the InMemory
@@ -233,7 +229,7 @@
                                     workflow-id signal-name])]
         (when row
           (jdbc/execute! tx ["DELETE FROM intemporal_signals WHERE id = ?" (:intemporal_signals/id row)])
-          (<-json-val kind (:intemporal_signals/payload row))))))
+          (<-payload-val kind (:intemporal_signals/payload row))))))
 
   (register-signal-callback [_ workflow-id signal-name callback]
     (swap! callbacks assoc-in [workflow-id signal-name] callback))

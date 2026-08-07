@@ -135,24 +135,43 @@
       (::async-failed data)         :async-failed
       (::suspension data)           :suspension)))
 
+(def ^:dynamic *capture-stack-traces?*
+  "When true, `throwable->map` includes a `:stack-trace` entry.
+
+   Off by default: these maps are PERSISTED into workflow history, and a full
+   JVM stack trace is written on every failure — including every mid-retry
+   failure of every activity — so leaving it on bloats history substantially for
+   information that is usually already in the logs.
+
+   Bind to true when debugging a workflow whose failures you need to inspect
+   after the fact:
+
+       (binding [error/*capture-stack-traces?* true] ...)
+
+   `:stack-trace` is `:opt-un` in `:intemporal.spec/error`, so both shapes
+   validate."
+  false)
+
 (defn throwable->map [t]
   (when t
     (let [data #?(:clj (when (instance? IExceptionInfo t) (ex-data t))
                   :cljs (or (.-data t) (ex-data t)))]
       (cond-> #?(:clj
-                 {:type        (str (type t))
-                  :message     (ex-message t)
-                  :data        data
-                  :stack-trace (mapv str (.getStackTrace t))
-                  :cause       (throwable->map (.getCause t))}
+                 {:type    (str (type t))
+                  :message (ex-message t)
+                  :data    data
+                  :cause   (throwable->map (.getCause t))}
                  :cljs
-                 {:type        (str (type t))
-                  :message     (.-message t)
-                  :data        data
-                  :stack-trace (when (.-stack t)
-                                 (str/split-lines (.-stack t)))
-                  :cause       (when (.-cause t)
-                                 (throwable->map (.-cause t)))})
+                 {:type    (str (type t))
+                  :message (.-message t)
+                  :data    data
+                  :cause   (when (.-cause t)
+                             (throwable->map (.-cause t)))})
+        *capture-stack-traces?*
+        (assoc :stack-trace #?(:clj  (mapv str (.getStackTrace t))
+                               :cljs (when (.-stack t)
+                                       (str/split-lines (.-stack t)))))
+
         (exception-kind data) (assoc :exception-kind (exception-kind data))))))
 
 (defn map->exception

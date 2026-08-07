@@ -1,12 +1,12 @@
 (ns intemporal.store.fdb
   (:require [intemporal.protocol :as p]
             [intemporal.spec :as spec]
+            [intemporal.internal.codec :as codec]
             [intemporal.internal.logging :as log]
             [me.vedang.clj-fdb.core :as fdb-core]
             [me.vedang.clj-fdb.transaction :as ftr]
             [me.vedang.clj-fdb.subspace.subspace :as fsub]
-            [me.vedang.clj-fdb.impl :as fimpl]
-            [cheshire.core :as json])
+            [me.vedang.clj-fdb.impl :as fimpl])
   (:import [com.apple.foundationdb Transaction KeyValue]
            [com.apple.foundationdb.tuple Tuple]
            (java.lang AutoCloseable)))
@@ -15,13 +15,25 @@
 ;; Serialization Helpers
 ;; ============================================================================
 
+;; VALUE codec: EDN, shared with the JDBC store. Previously cheshire, whose
+;; `(parse-string s true)` keywordizes map KEYS but not VALUES — so a keyword
+;; activity result came back as a string and broke replay determinism (bug #22).
+;;
+;; EDN is faithful in both directions, which this store relies on beyond the
+;; event payloads: the cached `"completed"` status, the owner-id, and the
+;; `{:wake-at ..}` / `{:parent-seq .. :policy ..}` index entries all go through
+;; here, and are compared against string sets (see get-workflow-status and
+;; claim-owner). A codec that keywordized on read would silently make terminal
+;; workflows claimable again.
 (defn ->bytes [x]
-  (.getBytes (json/generate-string x) "UTF-8"))
+  (.getBytes (codec/encode x) "UTF-8"))
 
 (defn <-bytes [^bytes b]
   (when b
-    (json/parse-string (String. b "UTF-8") true)))
+    (codec/decode (String. b "UTF-8"))))
 
+;; KEY codec — unrelated to the value codec above. FDB tuple components are
+;; strings/ints, so keywords are demoted to their name here by design.
 (defn ->tuple [v]
   (Tuple/from (into-array Object (map #(if (keyword? %) (name %) %) v))))
 

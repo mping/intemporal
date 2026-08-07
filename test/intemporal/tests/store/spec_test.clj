@@ -212,12 +212,13 @@
   (testing "nested :cause recurses"
     (is (s/valid? ::spec/error (assoc an-error :cause an-error))))
 
-  (testing ":exception-kind survives the JDBC/FDB round-trip as a string"
-    ;; error/map->exception already reads this as (some-> ... keyword), so both
-    ;; forms are legal by the existing runtime contract.
+  (testing ":exception-kind round-trips as a keyword on every store"
+    ;; Since bug #22 was fixed (EDN codec), a string here would be a real defect
+    ;; rather than a serialization artifact — so the spec rejects it.
     (doseq [k spec/exception-kinds]
       (is (s/valid? ::spec/error (assoc an-error :exception-kind k)))
-      (is (s/valid? ::spec/error (assoc an-error :exception-kind (name k)))))))
+      (is (not (s/valid? ::spec/error (assoc an-error :exception-kind (name k))))
+          (str (name k) " must not validate as a string")))))
 
 (deftest non-event-return-shapes
   (testing "::events tolerates nil and lazy seqs"
@@ -232,10 +233,12 @@
       (is (s/valid? ::spec/workflow-status st)))
     (is (not (s/valid? ::spec/workflow-status :bogus))))
 
-  (testing "::pending-signals key type diverges by implementation"
+  (testing "::pending-signals keys are strings on every implementation"
+    ;; core/send-signal and core/wait-for-signal coerce the name with `str`.
     (is (s/valid? ::spec/pending-signals {}))
     (is (s/valid? ::spec/pending-signals {"approve" [{:id "1" :payload {:a 1}}]}))
-    (is (s/valid? ::spec/pending-signals {:approve [{:id "1" :payload {:a 1}}]}))
+    (is (not (s/valid? ::spec/pending-signals {:approve [{:id "1" :payload {:a 1}}]}))
+        "a keyword key means a signal name escaped normalization")
     (is (not (s/valid? ::spec/pending-signals {"approve" {:not "a collection"}}))))
 
   (testing "::children"

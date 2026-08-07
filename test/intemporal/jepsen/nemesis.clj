@@ -109,8 +109,9 @@
         (when signal-name
           (try
             (jdbc/execute! db-spec
+              ;; payload is EDN text since migration 20260807000007 (bug #22)
               ["INSERT INTO intemporal_signals (workflow_id, signal_name, payload)
-                VALUES (?,?,'{}'::jsonb)"
+                VALUES (?,?,'{}')"
                workflow_id signal-name])
             (jdbc/execute! db-spec
               ["INSERT INTO jepsen_signals_sent (test_run, workflow_id, signal_name)

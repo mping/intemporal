@@ -16,11 +16,12 @@
       leaves keys present-with-nil throughout the engine; with `s/keys` an
       absent key passes but a present-nil key is validated, so a non-nilable
       optional spec would reject correct data.
-   3. User payloads (`:result`, `:args`, `:payload`, `:data`) are `any?`. The
-      JDBC/FDB JSON round-trip degrades keyword *values* to strings (cheshire
-      keywordizes map keys only) — that is bug #22, owned by
-      `intemporal.tests.store.value-fidelity-test`. These specs must not
-      duplicate it.
+   3. User payloads (`:result`, `:args`, `:payload`, `:data`) are `any?` —
+      genuinely arbitrary caller data, not a concession. Since bug #22 was fixed
+      (the JDBC and FDB stores now serialize with EDN via
+      `intemporal.internal.codec`), these values round-trip faithfully on every
+      store, so the specs below can be strict about the fields intemporal itself
+      controls. `intemporal.tests.store.value-fidelity-test` guards the payloads.
    4. `:seq` is `int?`, not `nat-int?` — `:workflow-started` uses a -1 sentinel.
 
    The InMemoryStore state atom is deliberately NOT spec'd: it holds live
@@ -30,16 +31,6 @@
   ;; cljs.analyzer/rewrite-cljs-aliases rewrites clojure.spec.alpha ->
   ;; cljs.spec.alpha automatically, so no reader conditional is needed here.
   (:require [clojure.spec.alpha :as s]))
-
-;; ============================================================================
-;; Predicates
-;; ============================================================================
-
-(defn string-or-keyword?
-  "True for a value that is a keyword before serialization and its string name
-   after a JDBC/FDB JSON round-trip. See rule 3 in the namespace docstring."
-  [x]
-  (or (string? x) (keyword? x)))
 
 ;; ============================================================================
 ;; Canonical event-type registry
@@ -107,8 +98,9 @@
 (s/def ::signal-id         (s/nilable string?))
 (s/def ::tracecontext      any?)
 
-;; Crosses the JSON boundary as a *value*, so it degrades keyword -> string.
-(s/def ::signal-name       string-or-keyword?)
+;; `core/send-signal` and `core/wait-for-signal` coerce with `str` at the API
+;; boundary, so every store sees a string.
+(s/def ::signal-name       string?)
 
 ;; User payloads: deliberately unconstrained. See rule 3.
 (s/def ::result            any?)
@@ -153,13 +145,11 @@
 (s/def :intemporal.spec.error/data        any?)
 (s/def :intemporal.spec.error/stack-trace (s/nilable (s/coll-of string? :kind sequential?)))
 
-;; Relaxed to keyword-or-string on purpose: error/map->exception already reads
-;; this as `(some-> (:exception-kind m) keyword)`, i.e. the runtime contract is
-;; already "keyword or its string name". Constraining the *value* to
-;; `exception-kinds` still catches the genuine finding — a typo'd or
-;; unregistered kind.
-(s/def :intemporal.spec.error/exception-kind
-  (s/and string-or-keyword? #(contains? exception-kinds (keyword %))))
+;; Strict keyword since bug #22: the EDN codec round-trips it faithfully on
+;; every store, so a string here would be a real defect rather than an artifact
+;; of serialization. (`error/map->exception`'s defensive
+;; `(some-> (:exception-kind m) keyword)` is now a no-op, but harmless.)
+(s/def :intemporal.spec.error/exception-kind exception-kinds)
 
 (s/def ::error
   (s/nilable
@@ -324,10 +314,10 @@
 (s/def ::signal-data any?)
 (s/def ::signal-envelope (s/keys :req-un [::id ::payload]))
 
-;; Key type diverges by implementation: InMemory preserves whatever the caller
-;; passed, JDBC/FDB always yield a String.
+;; Keys are signal names, normalized to strings at the API boundary (see
+;; ::signal-name), so all three implementations agree.
 (s/def ::pending-signals
-  (s/map-of string-or-keyword? (s/coll-of ::signal-data :kind sequential?)))
+  (s/map-of string? (s/coll-of ::signal-data :kind sequential?)))
 
 (s/def ::child-entry (s/keys :req-un [::child-id ::parent-seq ::policy ::status]))
 (s/def ::children    (s/coll-of ::child-entry :kind sequential?))

@@ -357,10 +357,14 @@
 
 (defn wait-for-signal
   "Wait for a signal with the given name.
-   Returns the signal payload when received."
+   Returns the signal payload when received.
+
+   `signal-name` is coerced with `str`, so every store sees the same type — see
+   `send-signal` for why."
   [signal-name]
   (ctx/check-cancelled!)
-  (let [ctx (ctx/current-context)
+  (let [signal-name (str signal-name)
+        ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
         store (ctx/current-store)
         workflow-id (ctx/current-workflow-id)
@@ -372,10 +376,13 @@
 
 (defn wait-for-signal-with-timeout
   "Wait for a signal with timeout.
-   Returns {:received true :payload ...} or {:received false} on timeout."
+   Returns {:received true :payload ...} or {:received false} on timeout.
+
+   `signal-name` is coerced with `str` — see `send-signal`."
   [signal-name timeout-ms]
   (ctx/check-cancelled!)
-  (let [ctx (ctx/current-context)
+  (let [signal-name (str signal-name)
+        ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
         store (ctx/current-store)
         workflow-id (ctx/current-workflow-id)
@@ -951,15 +958,25 @@
    Options:
    - :signal-id - Custom signal ID for idempotency"
   [store workflow-id signal-name payload & {:keys [signal-id]}]
-  (let [status (p/get-workflow-status store workflow-id)]
+  ;; Normalize the signal name at the API boundary so all three stores agree on
+  ;; its type. Untouched, a keyword name behaves differently per store: FDB's
+  ;; tuple encoder demotes it to its `name`, JDBC would try to bind a keyword as
+  ;; a SQL parameter, and InMemory keeps it as a distinct map key.
+  ;;
+  ;; `str`, not `name`: (str :approve) is ":approve" and (str "approve") is
+  ;; "approve", so a keyword and a like-named string stay DIFFERENT signals.
+  ;; `name` would collapse them and silently deliver one caller's signal to
+  ;; another's waiter.
+  (let [signal-name (str signal-name)
+        status      (p/get-workflow-status store workflow-id)]
     (when-not (= status :running)
       (throw (ex-info "Cannot send signal: workflow is not active"
-                      {:workflow-id workflow-id :status status}))))
-  (let [id (or signal-id (str (random-uuid)))]
-    (log/with-mdc {:workflow-id workflow-id}
-      (p/add-signal store workflow-id signal-name {:id id :payload payload})
-      (log/debugf "Adding signal %s" signal-name))
-    {:signal-id id}))
+                      {:workflow-id workflow-id :status status})))
+    (let [id (or signal-id (str (random-uuid)))]
+      (log/with-mdc {:workflow-id workflow-id}
+        (p/add-signal store workflow-id signal-name {:id id :payload payload})
+        (log/debugf "Adding signal %s" signal-name))
+      {:signal-id id})))
 
 (defn cancel-workflow
   "Cancel a running workflow.
