@@ -339,38 +339,38 @@ Three further points deserve emphasis:
 29. **Ops hardening (A14)**: configure the HikariCP pool explicitly (`jdbc.clj:337` — size, timeouts, leak detection; TODO already at `jdbc.clj:330`); don't run migrations at store construction with the runtime DB user; remove hardcoded credentials from `default-jdbc-url`; reject anonymous/unstable-named workflow fns at `register-workflow!`; document the CLJS `:advanced` constraint; fix the `cljs.analyzer.api` hard require (A11).
 30. **Expand the store conformance suite** (`tests/store/test_suite.clj`, currently 64 lines): claim exclusivity under contention, claim on missing workflow, `list-pending` filtering/ordering/wake-at, `set-wake-at` on terminal workflows, callback single-fire under rapid signals, signal FIFO, duplicate re-save idempotency, `get-workflow-status` on history-less rows, mid-fan-out crash seq alignment (X1), orphaned-owner recovery (E2) — run against all three stores. Also: delete or update `dev/verify_bugs.clj`, dedupe the two `store_test.clj` copies, refresh `DEVELOPMENT.md`, fix dangling `improvements.md` references (A15).
 
-| # | Test | Test Case | Fixed |
-|---|------|-----------|-------|
-| 1 | `intemporal.tests.crash.async-fanout-crash-test` | `async` immediately followed by `sleep`, and a crash between `:async-started` and completion followed by resume on a fresh engine — asserts the activity executes exactly once, `:async-completed` is recorded, and the workflow completes with the correct joined result in both cases | Yes   |
-| 2 | `intemporal.tests.engine.budget-exhaustion-test` | Drive a workflow past `max-iterations`, assert `:suspended` not `:failed`, then resume with a larger budget and assert completion | No    |
-| 3 | `intemporal.tests.engine.async-join-wake-test` | Finish a child/async in the TOCTOU window between the eligibility check and `register-wake-callback`, assert the parent still wakes | Yes    |
-| 4 | `intemporal.tests.runtime.parallel-rejection-test` | Force `RejectedExecutionException` mid-`mapv` in `execute-activities-parallel`, assert `:rejected` + reschedule, no escaping exception | Yes   |
-| 5 | `intemporal.tests.crash.async-interrupt-test` | Interrupt an in-flight async batch, resume, assert the activity is retried (not durably failed) | Yes   |
-| 6 | `intemporal.tests.engine.replay-snapshot-test` | Assert stub ops read from the pass-local history snapshot, not a live per-op store read, under a concurrent signal write mid-pass | Yes   |
-| 7 | `intemporal.tests.worker.busy-loop-test` | One idle signal-waiting workflow under `start-worker`, assert the poll thread sleeps between polls (no 100%-CPU hot loop) | No    |
-| 8 | `intemporal.tests.store.lease-recovery-test` | Orphan a non-null owner (simulate dead pod), assert another worker reclaims after lease expiry | No    |
-| 9 | `intemporal.tests.engine.terminal-guard-test` | Race a `:terminate` close-policy write against an in-flight child completion, assert terminal status is write-once | No    |
-| 10 | `intemporal.tests.store.conditional-append-test` | Concurrent `fire!`/`save-completed`/`save-received` on the same seq, assert exactly one write wins across all three stores | No    |
-| 11 | `intemporal.tests.store.mandatory-seq-test` | Assert `:workflow-started`/`:workflow-completed`/etc. carry a real `:seq`, and FDB `load-history` returns `:workflow-started` first | Yes    |
-| 12 | `intemporal.tests.store.claim-owner-cas-test` | N threads racing `claim-owner` on one unowned workflow, assert exactly one success (InMemory) | Yes    |
-| 13 | `intemporal.tests.store.signal-double-fire-test` | Two rapid signals at the same wait-seq on JDBC/FDB, assert only one `:signal-received` is recorded | Yes    |
-| 14 | `intemporal.tests.crash.signal-timeout-deadline-test` | Crash and resume mid `wait-for-signal-with-timeout`, assert the deadline doesn't extend on replay | Yes    |
-| 15 | `intemporal.tests.engine.cascade-cancel-wake-test` | Cascade-cancel a timer-sleeping child, assert it's driven immediately (not stuck until original `wake-at`) on JDBC/InMemory | No    |
-| 16 | `intemporal.tests.store.list-pending-phantom-test` | History-less row via `cancel-workflow`/`add-signal` upsert on JDBC, assert it's excluded from `list-pending` | No    |
-| 17 | `intemporal.tests.engine.executor-wiring-test` | Assert `make-workflow-engine {:threads N}` bounds concurrency, and a saturated bounded executor applies backpressure instead of running on the caller thread (rejecting only on shutdown/submit-timeout) | Yes   |
-| 18 | `intemporal.tests.engine.determinism-check-test` | Reorder a signal wait and a timer in a resumed workflow body, assert a loud `NonDeterministicWorkflowError` instead of silent history overwrite | No    |
-| 19 | `intemporal.tests.engine.cljs-clj-parity-test` | Run the same workflow through both engines, assert identical persisted histories | No    |
-| 20 | `intemporal.tests.store.jdbc-schema-test` | Assert `intemporal_signals` has an index on `workflow_id`, and the poller query uses an index plan | No    |
-| 21 | `intemporal.tests.worker.wake-latency-test` | Signal a waiting workflow under worker mode, assert it's resumed near-instantly rather than on the next `poll-ms` tick | No    |
-| 22 | `intemporal.tests.store.value-fidelity-test` | Round-trip a keyword-valued activity result (`[:processed 5]`) through JDBC/FDB, assert it comes back as keywords, not strings | Yes    |
-| 23 | `intemporal.tests.signal.signal-id-idempotency-test` | Send two signals with the same `:signal-id`, assert only one is delivered | No    |
-| 24 | `intemporal.tests.store.signal-lifecycle-test` | Send a signal to a workflow that goes terminal concurrently, assert it's rejected/cleared rather than orphaned | No    |
-| 25 | `intemporal.tests.error.exception-replay-test` | Throw a multi-level cause chain from an activity, resume, assert the replayed exception preserves `:type` and nested `:cause` | No    |
-| 26 | `intemporal.tests.observer.observer-isolation-test` | A throwing `on-workflow-completed`/`on-activity-completed` observer, assert it doesn't hang the parent, retry the activity, or starve other observers | No    |
-| 27 | `intemporal.tests.engine.lifecycle-owner-test` | `shutdown-engine` while a worker is mid-drive, assert a graceful stop waits at least one max activity timeout | No    |
-| 28 | `intemporal.tests.crash.retry-durability-test` | Crash mid-retry, resume, assert the attempt counter (not just the activity) survives across resumes | No    |
-| 29 | `intemporal.tests.store.jdbc-ops-hardening-test` | Assert HikariCP pool options are explicit and migrations don't run under the runtime DB user | No    |
-| 30 | `intemporal.tests.store.conformance-suite` (expanded) | Claim exclusivity, `list-pending` ordering/wake-at, callback single-fire, signal FIFO, re-save idempotency, orphaned-owner recovery, run against InMemory/JDBC/FDB | No    |
+| # | Finding | Test | Test Case | Fixed |
+|---|---------|------|-----------|-------|
+| 1 | X1/X2 | `intemporal.tests.crash.async-fanout-crash-test` | `async` immediately followed by `sleep`, and a crash between `:async-started` and completion followed by resume on a fresh engine — asserts the activity executes exactly once, `:async-completed` is recorded, and the workflow completes with the correct joined result in both cases | Yes   |
+| 2 | X3 | `intemporal.tests.engine.budget-exhaustion-test` | Drive a workflow past `max-iterations`, assert `:suspended` not `:failed`, then resume with a larger budget and assert completion | No    |
+| 3 | X5 | `intemporal.tests.engine.async-join-wake-test` | Finish a child/async in the TOCTOU window between the eligibility check and `register-wake-callback`, assert the parent still wakes | Yes    |
+| 4 | X4 | `intemporal.tests.runtime.parallel-rejection-test` | Force `RejectedExecutionException` mid-`mapv` in `execute-activities-parallel`, assert `:rejected` + reschedule, no escaping exception | Yes   |
+| 5 | X6/E4 | `intemporal.tests.crash.async-interrupt-test` | Interrupt an in-flight async batch, resume, assert the activity is retried (not durably failed) | Yes   |
+| 6 | A16/X9 | `intemporal.tests.engine.replay-snapshot-test` | Assert stub ops read from the pass-local history snapshot, not a live per-op store read, under a concurrent signal write mid-pass | Yes   |
+| 7 | E1/A2 | `intemporal.tests.worker.busy-loop-test` | One idle signal-waiting workflow under `start-worker`, assert the poll thread sleeps between polls (no 100%-CPU hot loop) | No    |
+| 8 | E2 | `intemporal.tests.store.lease-recovery-test` | Orphan a non-null owner (simulate dead pod), assert another worker reclaims after lease expiry | No    |
+| 9 | E3/X7 | `intemporal.tests.engine.terminal-guard-test` | Race a `:terminate` close-policy write against an in-flight child completion, assert terminal status is write-once | No    |
+| 10 | P9/P4 | `intemporal.tests.store.conditional-append-test` | Concurrent `fire!`/`save-completed`/`save-received` on the same seq, assert exactly one write wins across all three stores | No    |
+| 11 | A8/P3 | `intemporal.tests.store.mandatory-seq-test` | Assert `:workflow-started`/`:workflow-completed`/etc. carry a real `:seq`, and FDB `load-history` returns `:workflow-started` first | Yes    |
+| 12 | P1 | `intemporal.tests.store.claim-owner-cas-test` | N threads racing `claim-owner` on one unowned workflow, assert exactly one success (InMemory) | Yes    |
+| 13 | P2 | `intemporal.tests.store.signal-double-fire-test` | Two rapid signals at the same wait-seq on JDBC/FDB, assert only one `:signal-received` is recorded | Yes    |
+| 14 | E5 | `intemporal.tests.crash.signal-timeout-deadline-test` | Crash and resume mid `wait-for-signal-with-timeout`, assert the deadline doesn't extend on replay | Yes    |
+| 15 | E6 | `intemporal.tests.engine.cascade-cancel-wake-test` | Cascade-cancel a timer-sleeping child, assert it's driven immediately (not stuck until original `wake-at`) on JDBC/InMemory | No    |
+| 16 | P5 | `intemporal.tests.store.list-pending-phantom-test` | History-less row via `cancel-workflow`/`add-signal` upsert on JDBC, assert it's excluded from `list-pending` | No    |
+| 17 | E7/E8 | `intemporal.tests.engine.executor-wiring-test` | Assert `make-workflow-engine {:threads N}` bounds concurrency, and a saturated bounded executor applies backpressure instead of running on the caller thread (rejecting only on shutdown/submit-timeout) | Yes   |
+| 18 | A7 | `intemporal.tests.engine.determinism-check-test` | Reorder a signal wait and a timer in a resumed workflow body, assert a loud `NonDeterministicWorkflowError` instead of silent history overwrite | No    |
+| 19 | A1 | `intemporal.tests.engine.cljs-clj-parity-test` | Run the same workflow through both engines, assert identical persisted histories | No    |
+| 20 | A14 | `intemporal.tests.store.jdbc-schema-test` | Assert `intemporal_signals` has an index on `workflow_id`, and the poller query uses an index plan | No    |
+| 21 | A2 | `intemporal.tests.worker.wake-latency-test` | Signal a waiting workflow under worker mode, assert it's resumed near-instantly rather than on the next `poll-ms` tick | No    |
+| 22 | §3 | `intemporal.tests.store.value-fidelity-test` | Round-trip a keyword-valued activity result (`[:processed 5]`) through JDBC/FDB, assert it comes back as keywords, not strings | Yes    |
+| 23 | X9 | `intemporal.tests.signal.signal-id-idempotency-test` | Send two signals with the same `:signal-id`, assert only one is delivered | No    |
+| 24 | E10/E11 | `intemporal.tests.store.signal-lifecycle-test` | Send a signal to a workflow that goes terminal concurrently, assert it's rejected/cleared rather than orphaned | No    |
+| 25 | X10 | `intemporal.tests.error.exception-replay-test` | Throw a multi-level cause chain from an activity, resume, assert the replayed exception preserves `:type` and nested `:cause` | No    |
+| 26 | A12 | `intemporal.tests.observer.observer-isolation-test` | A throwing `on-workflow-completed`/`on-activity-completed` observer, assert it doesn't hang the parent, retry the activity, or starve other observers | No    |
+| 27 | A5/A6 | `intemporal.tests.engine.lifecycle-owner-test` | `shutdown-engine` while a worker is mid-drive, assert a graceful stop waits at least one max activity timeout | No    |
+| 28 | X8 | `intemporal.tests.crash.retry-durability-test` | Crash mid-retry, resume, assert the attempt counter (not just the activity) survives across resumes | No    |
+| 29 | A14 | `intemporal.tests.store.jdbc-ops-hardening-test` | Assert HikariCP pool options are explicit and migrations don't run under the runtime DB user | No    |
+| 30 | P1/P2/P4/P5/P6/P8/P10/E2/X1 | `intemporal.tests.store.conformance-suite` (expanded) | Claim exclusivity, `list-pending` ordering/wake-at, callback single-fire, signal FIFO, re-save idempotency, orphaned-owner recovery, run against InMemory/JDBC/FDB | No    |
 
 ---
 
