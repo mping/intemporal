@@ -1111,7 +1111,6 @@
 ;; Convenience Functions
 ;; ============================================================================
 
-(def ^:const default-executor-threads    4)
 (def ^:const default-scheduler-threads   2)
 (def ^:const default-activity-timeout-ms 30000)
 
@@ -1121,15 +1120,20 @@
 
    Options:
    - :store - instance of protocols/IStore
-   - :threads - Number of executor threads (default: 4)
+   - :threads - Cap on concurrently executing activities (default: unbounded,
+     i.e. one virtual thread per activity). When set, a saturated executor
+     applies backpressure: submits wait for a slot rather than running the
+     activity on the drive thread. Only a closing executor (or a wait longer
+     than :default-timeout-ms) rejects, and rejected activities are rescheduled
+     on a later pass. Ignored in ClojureScript.
+   - :queue-capacity - Wait-queue depth when :threads is set (default: 8x :threads)
    - :scheduler-threads - Number of scheduler threads (default: 2)
    - :default-timeout-ms - Default activity timeout (default: 30000)
    - :enable-logging - Enable logging observer (default: true)
    - :enable-telemetry - Enable OpenTelemetry tracing (default: true, JVM only)
    - :observer - Additional observer instance, composed on top of built-in observers"
-  [& {:keys [store threads scheduler-threads default-timeout-ms enable-logging enable-telemetry observer]
+  [& {:keys [store threads queue-capacity scheduler-threads default-timeout-ms enable-logging enable-telemetry observer]
       :or {store (store/create-store)
-           threads             default-executor-threads
            scheduler-threads   default-scheduler-threads
            default-timeout-ms  default-activity-timeout-ms
            enable-logging true
@@ -1139,8 +1143,12 @@
         logging-observer (when enable-logging (obs/make-logging-observer log-atom))
         composite-observer (obs/make-composite-observer [logging-observer observer])]
     {:store store
+     ;; E7: this used to pass :threads, which make-vthreads-executor does not
+     ;; destructure — the bound was silently dropped and every engine ran an
+     ;; unbounded executor. Pass the name the executor actually reads.
      :executor (runtime/make-vthreads-executor registry
-                                       :threads threads
+                                       :max-concurrent threads
+                                       :queue-capacity queue-capacity
                                        :default-timeout-ms default-timeout-ms)
      :scheduler (runtime/make-scheduler :threads scheduler-threads)
      :registry registry

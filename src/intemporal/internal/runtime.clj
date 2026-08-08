@@ -4,7 +4,7 @@
             [intemporal.internal.logging :as log]
             [intemporal.protocol :as p]
             [intemporal.tracing :as tracing])
-  (:import (java.util.concurrent ArrayBlockingQueue CancellationException ExecutorService Executors Future RejectedExecutionException ScheduledExecutorService ScheduledFuture ThreadPoolExecutor ThreadPoolExecutor$CallerRunsPolicy TimeUnit TimeoutException)))
+  (:import (java.util.concurrent ArrayBlockingQueue BlockingQueue CancellationException ExecutorService Executors Future RejectedExecutionException RejectedExecutionHandler ScheduledExecutorService ScheduledFuture ThreadPoolExecutor TimeUnit TimeoutException)))
 
 
 ;; ============================================================================
@@ -241,27 +241,86 @@
     ;; and wrongly finalizing the workflow as :failed during engine shutdown.
     (.isShutdown pool)))
 
+(defn backpressure-rejection-handler
+  "Rejection handler for the bounded executor: waits for a queue slot instead of
+   running the task on the calling thread.
+
+   E8: the previous `CallerRunsPolicy` ran a saturating activity INLINE on the
+   workflow drive thread and handed back an already-completed future, so the
+   `.get timeout` in `execute-activity` / `execute-activities-parallel` could
+   never fire — activity timeouts were silently unenforced and a hung activity
+   hung the whole drive loop. Blocking on the queue keeps every activity on a
+   pool thread (timeout enforced against real execution) and turns saturation
+   into ordinary backpressure.
+
+   Rejection is reserved for the two cases the engine can actually act on:
+   a closing pool, and a wait that exceeds `submit-timeout-ms`. Both surface as
+   `RejectedExecutionException`, which `attempt-once` / `execute-activities-parallel`
+   classify as `:rejected` so `stub` and `async` RESCHEDULE rather than replay a
+   durable failure. Keeping rejection rare matters: every reschedule costs a
+   replay iteration, and budget exhaustion still finalizes a workflow as
+   `:failed` (kimi.md X3)."
+  ^RejectedExecutionHandler [submit-timeout-ms]
+  (reify RejectedExecutionHandler
+    (rejectedExecution [_ task pool]
+      (let [^ThreadPoolExecutor pool pool]
+        (when (.isShutdown pool)
+          (throw (RejectedExecutionException.
+                   "Activity rejected: executor is shutting down")))
+        (let [^BlockingQueue queue (.getQueue pool)]
+          (when-not (try
+                      (.offer queue task (long submit-timeout-ms) TimeUnit/MILLISECONDS)
+                      (catch InterruptedException e
+                        ;; Preserve the flag: the engine's interrupt-error? guard
+                        ;; must still see that this drive was interrupted.
+                        (.interrupt (Thread/currentThread))
+                        (throw (RejectedExecutionException.
+                                 "Activity rejected: interrupted while waiting for a slot" e))))
+            (throw (RejectedExecutionException.
+                     (str "Activity rejected: no executor slot after " submit-timeout-ms "ms")))))))))
+
 (defn create-bounded-executor
-  "Creates a bounded ThreadPoolExecutor with virtual threads"
-  [max-concurrent queue-capacity]
-  (ThreadPoolExecutor.
-    max-concurrent                          ; core pool size
-    max-concurrent                          ; max pool size
-    0                                       ; keep alive time
-    TimeUnit/MILLISECONDS
-    (ArrayBlockingQueue. queue-capacity)
-    (.factory (Thread/ofVirtual))
-    (ThreadPoolExecutor$CallerRunsPolicy.)))
+  "Creates a bounded ThreadPoolExecutor with virtual threads.
+
+   `queue-capacity` is decoupled from `max-concurrent` so a fan-out modestly
+   larger than the concurrency bound queues instead of contending for the
+   backpressure timeout. `submit-timeout-ms` bounds how long a saturated submit
+   blocks the drive thread before degrading to `:rejected`."
+  ([max-concurrent queue-capacity]
+   (create-bounded-executor max-concurrent queue-capacity 30000))
+  ([max-concurrent queue-capacity submit-timeout-ms]
+   (ThreadPoolExecutor.
+     (int max-concurrent)                    ; core pool size
+     (int max-concurrent)                    ; max pool size
+     0                                       ; keep alive time
+     TimeUnit/MILLISECONDS
+     (ArrayBlockingQueue. (int queue-capacity))
+     (.factory (Thread/ofVirtual))
+     (backpressure-rejection-handler submit-timeout-ms))))
 
 (defn make-vthreads-executor
-  "Create an executor that runs activities in parallel using a thread pool"
-  [activity-registry-atom & {:keys [max-concurrent default-timeout-ms]
+  "Create an executor that runs activities in parallel using a thread pool.
+
+   Options:
+   - :max-concurrent (alias :threads) - cap on concurrently executing activities.
+     Defaults to nil = unbounded (one virtual thread per activity).
+   - :queue-capacity - depth of the wait queue when bounded (default: 8x the bound)
+   - :submit-timeout-ms - how long a saturated submit waits for a slot before
+     degrading to :rejected (default: default-timeout-ms)
+   - :default-timeout-ms - default per-activity timeout (default: 30000)"
+  [activity-registry-atom & {:keys [max-concurrent threads queue-capacity
+                                    submit-timeout-ms default-timeout-ms]
                              :or   {default-timeout-ms 30000}}]
-  (->ParallelActivityExecutor
-    (if max-concurrent
-      (create-bounded-executor max-concurrent max-concurrent)
-      (Executors/newVirtualThreadPerTaskExecutor))
-    activity-registry-atom
-    default-timeout-ms))
+  ;; `:threads` is the name the public `make-workflow-engine` option carries;
+  ;; accept both so neither call site can silently drop the bound again (E7).
+  (let [max-concurrent (or max-concurrent threads)]
+    (->ParallelActivityExecutor
+      (if max-concurrent
+        (create-bounded-executor max-concurrent
+                                 (or queue-capacity (* 8 max-concurrent))
+                                 (or submit-timeout-ms default-timeout-ms))
+        (Executors/newVirtualThreadPerTaskExecutor))
+      activity-registry-atom
+      default-timeout-ms)))
 
 

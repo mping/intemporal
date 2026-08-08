@@ -357,7 +357,7 @@ Three further points deserve emphasis:
 | 14 | `intemporal.tests.crash.signal-timeout-deadline-test` | Crash and resume mid `wait-for-signal-with-timeout`, assert the deadline doesn't extend on replay | Yes    |
 | 15 | `intemporal.tests.engine.cascade-cancel-wake-test` | Cascade-cancel a timer-sleeping child, assert it's driven immediately (not stuck until original `wake-at`) on JDBC/InMemory | No    |
 | 16 | `intemporal.tests.store.list-pending-phantom-test` | History-less row via `cancel-workflow`/`add-signal` upsert on JDBC, assert it's excluded from `list-pending` | No    |
-| 17 | `intemporal.tests.engine.executor-wiring-test` | Assert `make-workflow-engine {:threads N}` bounds concurrency, and a saturated bounded executor rejects instead of running on the caller thread | No    |
+| 17 | `intemporal.tests.engine.executor-wiring-test` | Assert `make-workflow-engine {:threads N}` bounds concurrency, and a saturated bounded executor applies backpressure instead of running on the caller thread (rejecting only on shutdown/submit-timeout) | Yes   |
 | 18 | `intemporal.tests.engine.determinism-check-test` | Reorder a signal wait and a timer in a resumed workflow body, assert a loud `NonDeterministicWorkflowError` instead of silent history overwrite | No    |
 | 19 | `intemporal.tests.engine.cljs-clj-parity-test` | Run the same workflow through both engines, assert identical persisted histories | No    |
 | 20 | `intemporal.tests.store.jdbc-schema-test` | Assert `intemporal_signals` has an index on `workflow_id`, and the poller query uses an index plan | No    |

@@ -213,10 +213,14 @@
   "Create an executor that runs activities using promises.
    Note: max-concurrent is ignored in ClojureScript - all activities
    run concurrently via the event loop (no true parallelism)."
-  [activity-registry-atom & {:keys [max-concurrent default-timeout-ms]
+  [activity-registry-atom & {:keys [max-concurrent threads default-timeout-ms]
                              :or   {default-timeout-ms 30000}}]
-  (when max-concurrent
-    (log/warn "max-concurrent is not supported in ClojureScript - all activities run concurrently via event loop"))
+  ;; Accept :threads too, mirroring the CLJ arity (the public :threads engine
+  ;; option maps onto :max-concurrent). Debug, not warn: there is nothing the
+  ;; caller can do about it, and make-workflow-engine forwards the option
+  ;; unconditionally, so warning here fires on every engine construction.
+  (when (or max-concurrent threads)
+    (log/debug "max-concurrent is not supported in ClojureScript - all activities run concurrently via event loop"))
   (->ParallelActivityExecutor
     activity-registry-atom
     default-timeout-ms))
