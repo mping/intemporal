@@ -18,7 +18,7 @@
   "Has the following keys:
 
     :history (atom history)
-    :history-index (delay {[event-type seq] event})   ;; see `history-event`
+    :history-index {[event-type seq] event}   ;; see `history-event`
     :workflow-id workflow-id
     :seq-counter (atom 0)
     :pending-events pending-events
@@ -159,7 +159,7 @@
    (history-event (current-context) event-type seq-num))
   ([ctx event-type seq-num]
    (if-let [idx (:history-index ctx)]
-     (get @idx [event-type seq-num])
+     (get idx [event-type seq-num])
      (find-event @(:history ctx) event-type seq-num))))
 
 (defn add-pending-event! [event]

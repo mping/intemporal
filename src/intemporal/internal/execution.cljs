@@ -380,8 +380,8 @@
   (cond-> {;; Write-once pass snapshot — never swap it: :history-index is derived
            ;; from this exact vector and would silently desync.
            :history (atom history)
-           ;; Lazy so a pass that never looks anything up pays nothing.
-           :history-index (delay (ctx/index-history history))
+           ;; Built once per pass — plain map, no deref at the call site.
+           :history-index (ctx/index-history history)
            :workflow-id workflow-id
            :seq-counter (atom 0)
            :pending-events (atom [])
