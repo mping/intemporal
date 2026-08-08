@@ -316,7 +316,11 @@
 (defn make-workflow-context
   "Create workflow execution context from history."
   [workflow-id history store registry observer]
-  {:history (atom history)
+  {;; Write-once pass snapshot — never swap it: :history-index is derived from
+   ;; this exact vector and would silently desync.
+   :history (atom history)
+   ;; Lazy so a pass that never looks anything up pays nothing.
+   :history-index (delay (ctx/index-history history))
    :workflow-id workflow-id
    :seq-counter (atom 0)
    :pending-events (atom [])
@@ -617,9 +621,7 @@
   [thunk]
   (ctx/check-cancelled!)
   (let [seq-num (ctx/next-seq!)
-        store (ctx/current-store)
-        workflow-id (ctx/current-workflow-id)
-        existing (p/find-event store workflow-id :run-once-completed seq-num)]
+        existing (ctx/history-event :run-once-completed seq-num)]
     (if existing
       ;; Replay: already executed, return cached result
       (:result existing)

@@ -18,6 +18,7 @@
   "Has the following keys:
 
     :history (atom history)
+    :history-index (delay {[event-type seq] event})   ;; see `history-event`
     :workflow-id workflow-id
     :seq-counter (atom 0)
     :pending-events pending-events
@@ -47,7 +48,7 @@
 (defn set-compensating! [v]
   (some-> (:compensating? (current-context)) (reset! v)))
 
-(declare find-event add-pending-event!)
+(declare find-event history-event add-pending-event!)
 
 (defn- seq-has-event?
   "True if history (or pending events) holds any event at sequence `s`. The
@@ -85,7 +86,7 @@
    - frontier (first un-cached op) -> record the marker, then throw."
   [ctx cur]
   (cond
-    (find-event @(:history ctx) :workflow-cancelling cur)
+    (history-event ctx :workflow-cancelling cur)
     (throw (error/workflow-cancelled-exception))
 
     (replaying?)
@@ -123,6 +124,43 @@
        (filter #(and (= (:event-type %) event-type)
                      (= (:seq %) seq-num)))
        first))
+
+(defn index-history
+  "Pass-local replay index: {[event-type seq] event}. FIRST occurrence wins,
+   exactly like `find-event`'s `first`.
+
+   History legitimately contains DUPLICATE (seq, event-type) entries —
+   :activity-scheduled is re-emitted on every pass that reaches it before
+   completion, and check-then-act writes double-write on InMemory/FDB (kimi.md
+   P4) — and replay must keep resolving each seq to the same, earliest one. A
+   plain (into {} ...) silently flips this to last-wins and makes replay depend
+   on append order."
+  [history]
+  (reduce (fn [m e]
+            (let [k [(:event-type e) (:seq e)]]
+              (if (contains? m k) m (assoc m k e))))
+          {}
+          history))
+
+(defn history-event
+  "Find the event of `event-type` at `seq-num` in the CURRENT PASS's history
+   snapshot — the vector run-workflow-internal loaded once, before the body
+   started replaying (`:history`, written once per iteration, never mutated).
+
+   Replay reads THIS, never the live store: an event written by another thread
+   while the pass is in flight (a signal/timer callback future, store.cljc)
+   belongs to the NEXT pass. Reading the store per op mixes two snapshots inside
+   one pass (kimi.md X9) and costs a round-trip per replayed step (A16).
+
+   Deliberately does NOT consult :pending-events — the store cannot see them
+   mid-pass either, so snapshot-only is an exact substitution for the store read.
+   `seq-has-event?` unions them on purpose; that is a different question."
+  ([event-type seq-num]
+   (history-event (current-context) event-type seq-num))
+  ([ctx event-type seq-num]
+   (if-let [idx (:history-index ctx)]
+     (get @idx [event-type seq-num])
+     (find-event @(:history ctx) event-type seq-num))))
 
 (defn add-pending-event! [event]
   (let [ctx (current-context)]

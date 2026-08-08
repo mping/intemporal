@@ -63,10 +63,9 @@
     (fn [& args]
       (let [seq-num (ctx/next-seq!)]            ;; next-seq! already checks cancellation
         (log/with-mdc {:activity activity-name :seqnum seq-num}
-          (let [store           (ctx/current-store)
-                workflow-id     (ctx/current-workflow-id)
-                existing        (p/find-event store workflow-id :activity-completed seq-num)
-                existing-failed (p/find-event store workflow-id :activity-failed seq-num)
+          (let [workflow-id     (ctx/current-workflow-id)
+                existing        (ctx/history-event :activity-completed seq-num)
+                existing-failed (ctx/history-event :activity-failed seq-num)
                 err             (some-> (:error existing-failed) (error/map->exception))
                 interrupted?    (boolean (some-> err (error/interruption?)))
                 rejected?       (boolean (some-> err (error/rejection?)))]
@@ -150,11 +149,9 @@
   (ctx/check-cancelled!)
   (let [ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
-        store (ctx/current-store)
-        workflow-id (ctx/current-workflow-id)
-        existing-completed (p/find-event store workflow-id :async-completed seq-num)
-        existing-failed (p/find-event store workflow-id :async-failed seq-num)
-        existing-started (p/find-event store workflow-id :async-started seq-num)
+        existing-completed (ctx/history-event :async-completed seq-num)
+        existing-failed (ctx/history-event :async-failed seq-num)
+        existing-started (ctx/history-event :async-started seq-num)
         runtime-failed?   (runtime-failure? existing-failed)]
     (cond
       ;; Already completed - advance seq past consumed numbers during replay
@@ -185,7 +182,7 @@
       (let [;; (inc seq-num) covers pre-:last-seq histories: thunks contain exactly
             ;; one stub call, so the activity seq is handle-seq + 1.
             activity-seq (or (:last-seq existing-started) (inc seq-num))
-            scheduled    (p/find-event store workflow-id :activity-scheduled activity-seq)
+            scheduled    (ctx/history-event :activity-scheduled activity-seq)
             ;; Re-invoke the thunk. Two things it produces cannot be recovered from
             ;; history: the activity must be REGISTERED in this process's registry
             ;; (`stub` does that, and the engine can only look activities up by
@@ -276,12 +273,9 @@
    Throws if the async operation failed."
   [handle]
   (ctx/check-cancelled!)
-  (let [ctx (ctx/current-context)
-        handle-seq (:seq-num handle)
-        store (ctx/current-store)
-        workflow-id (ctx/current-workflow-id)
-        completed (p/find-event store workflow-id :async-completed handle-seq)
-        failed (p/find-event store workflow-id :async-failed handle-seq)]
+  (let [handle-seq (:seq-num handle)
+        completed (ctx/history-event :async-completed handle-seq)
+        failed (ctx/history-event :async-failed handle-seq)]
     (cond
       completed
       (:result completed)
@@ -309,11 +303,8 @@
    Note: In deterministic replay, this will always return the same result."
   [handles]
   (ctx/check-cancelled!)
-  (let [ctx (ctx/current-context)
-        seq-num (ctx/next-seq!)
-        store (ctx/current-store)
-        workflow-id (ctx/current-workflow-id)
-        existing (p/find-event store workflow-id :join-any-completed seq-num)]
+  (let [seq-num (ctx/next-seq!)
+        existing (ctx/history-event :join-any-completed seq-num)]
     (if existing
       {:index (:index existing)
        :result (:result existing)}
@@ -321,7 +312,7 @@
       (let [completed-idx (first
                             (keep-indexed
                                (fn [idx handle]
-                                   (when (p/find-event store workflow-id :async-completed (:seq-num handle))
+                                   (when (ctx/history-event :async-completed (:seq-num handle))
                                        idx))
                                handles))]
         (cond
@@ -340,10 +331,10 @@
           ;; interrupt/rejection don't count — `async` re-enqueued those, so a
           ;; completion is still coming.
           (every? (fn [h]
-                    (let [failed (p/find-event store workflow-id :async-failed (:seq-num h))]
+                    (let [failed (ctx/history-event :async-failed (:seq-num h))]
                       (and failed (not (runtime-failure? failed)))))
                   handles)
-          (let [failed (p/find-event store workflow-id :async-failed (:seq-num (first handles)))]
+          (let [failed (ctx/history-event :async-failed (:seq-num (first handles)))]
             (throw (error/async-failed-exception (:seq-num (first handles)) (:error failed))))
 
           :else
@@ -364,11 +355,8 @@
   [signal-name]
   (ctx/check-cancelled!)
   (let [signal-name (str signal-name)
-        ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
-        store (ctx/current-store)
-        workflow-id (ctx/current-workflow-id)
-        existing (p/find-event store workflow-id :signal-received seq-num)]
+        existing (ctx/history-event :signal-received seq-num)]
     (if existing
       (:payload existing)
       (throw (error/make-suspension :wait-signal {:seq seq-num
@@ -382,11 +370,8 @@
   [signal-name timeout-ms]
   (ctx/check-cancelled!)
   (let [signal-name (str signal-name)
-        ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
-        store (ctx/current-store)
-        workflow-id (ctx/current-workflow-id)
-        existing (p/find-event store workflow-id :signal-wait-completed seq-num)]
+        existing (ctx/history-event :signal-wait-completed seq-num)]
     (if existing
       (if (:received existing)
         {:received true :payload (:payload existing)}
@@ -396,7 +381,7 @@
       ;; Recomputing (now + timeout-ms) on every replay would push the deadline
       ;; later on each resume/re-drive — a crash-resumed (or worker-repolled, E1)
       ;; wait could then never reliably time out.
-      (let [prior    (p/find-event store workflow-id :signal-wait-scheduled seq-num)
+      (let [prior    (ctx/history-event :signal-wait-scheduled seq-num)
             deadline (or (:deadline prior) (+ (utils/current-time-ms) timeout-ms))]
         (when-not prior
           (ctx/add-pending-event! {:event-type :signal-wait-scheduled
@@ -421,16 +406,14 @@
   (ctx/check-cancelled!)
   (let [ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
-        store (ctx/current-store)
-        workflow-id (ctx/current-workflow-id)
-        existing (p/find-event store workflow-id :timer-fired seq-num)]
+        existing (ctx/history-event :timer-fired seq-num)]
     (if existing
       nil
       ;; Reuse the fire-at from a prior :timer-scheduled event if one was already
       ;; persisted for this seq. Recomputing (now + ms) on every replay would push
       ;; the deadline later on each resume (drift) and make a crash-resumed sleep
       ;; never reliably fire. The fire time must be deterministic across replays.
-      (let [prior   (p/find-event store workflow-id :timer-scheduled seq-num)
+      (let [prior   (ctx/history-event :timer-scheduled seq-num)
             fire-at (or (:fire-at prior) (+ (utils/current-time-ms) ms))]
         (when-not prior
           (ctx/add-pending-event! {:event-type :timer-scheduled
@@ -453,10 +436,9 @@
   (let [ctx (ctx/current-context)
         seq-num (ctx/next-seq!)
         child-wf-id (or child-id (str (:workflow-id ctx) "/child-" seq-num))
-        store (ctx/current-store)
         workflow-id (ctx/current-workflow-id)
-        existing (p/find-event store workflow-id :child-workflow-completed seq-num)
-        existing-failed (p/find-event store workflow-id :child-workflow-failed seq-num)
+        existing (ctx/history-event :child-workflow-completed seq-num)
+        existing-failed (ctx/history-event :child-workflow-failed seq-num)
         runtime-failed?  (runtime-failure? existing-failed)]
     (cond
       existing
@@ -493,7 +475,9 @@
   [parent-id seq-num child-wf-id child-workflow-fn args policy]
   (let [store (ctx/current-store)]
     ;; If we already scheduled this child (replay), do nothing structural.
-    (when-not (p/find-event store parent-id :child-workflow-scheduled seq-num)
+    ;; `parent-id` is always the CURRENT workflow (both callers pass
+    ;; (:workflow-id ctx)), so the pass snapshot answers this guard.
+    (when-not (ctx/history-event :child-workflow-scheduled seq-num)
       (let [fn-name (wreg/register-workflow! child-workflow-fn)]
         ;; Seed the child's own history once (crash-safe: parent may re-run this
         ;; if it died before flushing the scheduled marker).
