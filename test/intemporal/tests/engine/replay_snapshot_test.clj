@@ -5,9 +5,9 @@
    `run-workflow-internal` already loads the whole history once per iteration
    into the workflow context (`execution.clj`, `(:history ctx)`), but the stub
    operations in `intemporal.core` ignore it: every replayed op issues its own
-   `p/find-event` against the STORE — 14 call sites (`core.cljc:68-69,155-157,
-   188,283-284,316,324,343,346,371,389,399,426,433,458-459`). Two problems fall
-   out of that:
+   `p/find-event` against the STORE — 20 call sites in `core.cljc` (68-69,
+   155-157, 188, 283-284, 316, 324, 343, 346, 371, 389, 399, 426, 433, 458-459,
+   496), plus `run-once` in each engine. Two problems fall out of that:
 
      A16 (cost) — a pass that replays k cached ops pays 2k store round-trips, so
        one drive of an n-step workflow is O(n^2) store reads. On JDBC that is a
@@ -43,6 +43,7 @@
    All three currently FAIL against the unfixed engine."
   (:require [clojure.test :refer [deftest is testing]]
             [intemporal.core :as intemporal]
+            [intemporal.internal.context :as ctx]
             [intemporal.protocol :as p]
             [intemporal.store :as store]
             [intemporal.utils :as utils]))
@@ -117,6 +118,33 @@
 (def exec-log (atom []))
 
 ;; ============================================================================
+;; The snapshot index must preserve find-event's first-wins resolution
+;; ============================================================================
+
+(deftest test-history-index-keeps-the-first-event-per-seq
+  (testing "duplicate (seq, event-type) entries resolve to the EARLIEST one"
+    ;; History legitimately holds duplicates: :activity-scheduled is re-emitted
+    ;; on every pass that reaches it before completion, and check-then-act writes
+    ;; double-write on InMemory/FDB (kimi.md P4). `find-event` returns the first
+    ;; match, so the index must too — a plain (into {} ...) keeps the LAST and
+    ;; silently makes replay resolution depend on append order.
+    (let [history [{:event-type :activity-completed :seq 0 :result :zero}
+                   {:event-type :activity-completed :seq 1 :result :first}
+                   {:event-type :activity-completed :seq 1 :result :second}
+                   {:event-type :activity-failed    :seq 1 :error  {}}]
+          idx     (ctx/index-history history)]
+      (is (= :first (:result (get idx [:activity-completed 1])))
+          "first-wins, not last-wins")
+      (is (= (ctx/find-event history :activity-completed 1)
+             (get idx [:activity-completed 1]))
+          "the index must agree with find-event on every key")
+      (is (= (ctx/find-event history :activity-failed 1)
+             (get idx [:activity-failed 1]))
+          "same seq, different event-type is a distinct key")
+      (is (nil? (get idx [:activity-completed 99]))
+          "absent keys are nil, like find-event"))))
+
+;; ============================================================================
 ;; A16 — replay must not round-trip to the store per operation
 ;; ============================================================================
 
@@ -174,6 +202,11 @@
 
 (def ^:private signal-wf-id "mid-pass-signal-wf")
 
+;; `wait-for-signal` / `send-signal` coerce the name with `str` at the API
+;; boundary, so a keyword name is stored as ":go", not "go". The injector below
+;; writes straight to the store and must use the same coerced form.
+(def ^:private signal-name (str :go))
+
 (defn signal-snapshot-workflow []
   (let [act (intemporal/stub #'step-activity)]
     (act 1)                                   ; seq 0
@@ -189,11 +222,12 @@
                      ;; client signal lands, and the :signal-received event for
                      ;; the wait at seq 1 is written.
                      (when (= 2 load-count)
-                       (p/add-signal inner signal-wf-id "go" {:id "real" :payload :real})
+                       (p/add-signal inner signal-wf-id signal-name
+                                     {:id "real" :payload :real})
                        (p/save-event inner signal-wf-id
                                      {:event-type  :signal-received
                                       :seq         1
-                                      :signal-name "go"
+                                      :signal-name signal-name
                                       :signal-id   "mid-pass"
                                       :payload     :mid-pass
                                       :timestamp   (utils/current-time-ms)})
@@ -224,7 +258,7 @@
       ;; Second observable: because the in-flight pass short-circuits on the
       ;; mid-pass event, it never suspends, so the engine never runs
       ;; `process-signal` and the REAL client signal is stranded in the store.
-      (is (empty? (get (p/get-pending-signals store signal-wf-id) "go"))
+      (is (empty? (get (p/get-pending-signals store signal-wf-id) signal-name))
           "the real pending signal must be consumed by the engine, not bypassed"))))
 
 (def ^:private ghost-wf-id "mid-pass-activity-wf")
