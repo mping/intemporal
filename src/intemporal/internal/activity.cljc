@@ -1,5 +1,7 @@
 (ns intemporal.internal.activity
-  #?(:cljs (:require [clojure.string :as str])))
+  (:require [intemporal.internal.error :as error]
+            [intemporal.utils :as utils]
+            #?(:cljs [clojure.string :as str])))
 
 ;; ============================================================================
 ;; Activity Registry
@@ -121,4 +123,70 @@
 (defn should-retry? [policy error attempt]
   (and (< attempt (:max-attempts policy))
        ((:retryable-fn policy) error)))
+
+;; ============================================================================
+;; Durable retry state (kimi.md X8)
+;; ============================================================================
+;;
+;; The retry loop runs entirely inside one drive, so a crash between two attempts
+;; used to lose the fact that ANY attempt had run: the resumed drive started over
+;; at attempt 1, and an activity with side effects could run `max-attempts` times
+;; PER DRIVE instead of `max-attempts` times in total.
+;;
+;; The engines close that by persisting one :activity-attempt-failed event per
+;; consumed attempt — before the backoff, which is the window the crash lands in
+;; — and by starting the loop from what history records (`stub` threads the
+;; recovered state into the activity suspension).
+;;
+;; The pure parts live here so the CLJ and CLJS engines cannot drift on the wire
+;; format or on the resume decision (kimi.md A1).
+
+(defn attempt-failed-event
+  "The durable record of one consumed attempt.
+
+   `attempts` is the RUNNING TOTAL across every drive, not the count within this
+   one, and `will-retry?` records whether the policy accepted a further attempt —
+   which is what makes an exhausted (or non-retryable) failure recognisable on
+   resume without re-running anything.
+
+   Emitted repeatedly at the same (seq, :activity-attempt-failed) — one per
+   attempt — and the stores disagree about that: JDBC upserts to the latest,
+   InMemory and FDB keep every copy. Carrying the running total (rather than a
+   per-attempt marker to be counted) is what makes the recovered value identical
+   on all three; see `intemporal.internal.context/attempt-state`."
+  [seq-num activity-name attempts error-map duration-ms will-retry?]
+  {:event-type    :activity-attempt-failed
+   :seq           seq-num
+   :activity-name activity-name
+   :attempts      attempts
+   :error         error-map
+   :duration-ms   duration-ms
+   :will-retry    will-retry?
+   :timestamp     (utils/current-time-ms)})
+
+(defn next-attempt
+  "The attempt number to run next given the recovered state — 1 when history
+   records none."
+  [attempt-state]
+  (inc (or (:attempts attempt-state) 0)))
+
+(defn retry-budget-spent?
+  "True when history already holds an attempt the policy declined to follow
+   (`:will-retry` false): the budget is exhausted, or the error was classified
+   non-retryable. The activity must NOT run again — the recorded error IS the
+   outcome, and re-running it would spend an attempt the policy never granted.
+   No recorded attempt (nil) is not spent."
+  [attempt-state]
+  (boolean (and attempt-state (not (:will-retry attempt-state)))))
+
+(defn infrastructure-failure?
+  "True for failures that are not the activity's own fault: an interrupt from a
+   worker stop / engine shutdown, or a rejection from a saturated pool. `stub`
+   and `async` re-execute these instead of replaying them as errors (kimi.md
+   X6/E4), so they must not consume the caller's retry budget either — an
+   infrastructure stop that burned attempts would shrink the budget every time a
+   pod restarted."
+  [e]
+  (boolean (and e (or (error/interruption? e)
+                      (error/rejection? e)))))
 

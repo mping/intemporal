@@ -162,6 +162,30 @@
      (get idx [event-type seq-num])
      (find-event @(:history ctx) event-type seq-num))))
 
+(defn attempt-state
+  "Durable retry state (kimi.md X8) for the activity at `seq-num`: the recorded
+   :activity-attempt-failed carrying the HIGHEST :attempts, or nil when no
+   attempt has been consumed yet. `stub` threads it into the activity suspension
+   so the engine's retry loop resumes where a crashed drive left off instead of
+   restarting at attempt 1.
+
+   Deliberately NOT `history-event`: attempt events legitimately repeat at one
+   (seq, event-type) — one per attempt — and the pass index is first-wins, so a
+   lookup there would keep answering \"attempt 1\" on the stores that retain every
+   copy. Max over the running total is the one reading that agrees across all
+   three stores (see `intemporal.internal.activity/attempt-failed-event`).
+
+   Scans the snapshot rather than the index, but only where an activity is about
+   to be SCHEDULED — at most once per pass, since scheduling throws — so this
+   does not reintroduce the per-op cost A16 removed."
+  ([seq-num] (attempt-state (current-context) seq-num))
+  ([ctx seq-num]
+   (let [matching (filterv #(and (= :activity-attempt-failed (:event-type %))
+                                 (= seq-num (:seq %)))
+                           @(:history ctx))]
+     (when (seq matching)
+       (apply max-key #(or (:attempts %) 0) matching)))))
+
 (defn add-pending-event! [event]
   (let [ctx (current-context)]
     (swap! (:pending-events ctx) conj event)))

@@ -42,7 +42,7 @@
    Supersedes the (dead, incomplete) `intemporal.internal.events` namespace.
    Unlike that one, this set is load-bearing — it is the `::event-type`
    predicate — so it cannot silently drift out of date."
-  #{:activity-scheduled :activity-completed :activity-failed
+  #{:activity-scheduled :activity-completed :activity-failed :activity-attempt-failed
     :async-started :async-completed :async-failed :join-any-completed
     :timer-scheduled :timer-fired
     :signal-wait-scheduled :signal-received :signal-wait-completed
@@ -87,6 +87,7 @@
 (s/def ::deadline          number?)
 (s/def ::wake-at-ms        (s/nilable number?))
 (s/def ::attempts          (s/nilable pos-int?))
+(s/def ::will-retry        boolean?)
 (s/def ::received          boolean?)
 
 (s/def ::activity-name     string?)
@@ -196,6 +197,14 @@
   ;; carries a nil :result key.
   (s/keys :req-un [::event-type ::seq ::activity-name ::error]
           :opt-un [::result ::duration-ms ::attempts ::timestamp]))
+
+(defmethod event-spec :activity-attempt-failed [_]
+  ;; Durable retry state (X8): one per consumed attempt, written before the
+  ;; backoff. :attempts is the running total across drives — not a per-attempt
+  ;; marker — and :will-retry records whether the policy granted another, which
+  ;; is what lets a resume tell an exhausted budget from an interrupted one.
+  (s/keys :req-un [::event-type ::seq ::activity-name ::attempts ::error ::will-retry]
+          :opt-un [::duration-ms ::timestamp]))
 
 ;; --- Async handle lifecycle ---
 

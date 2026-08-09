@@ -75,28 +75,64 @@
           (log/warnf e "Activity failed (attempt %d)" attempt)
           {:status :retryable-error :error error-map :exception e :duration duration})))))
 
+(defn- record-attempt!
+  "Persist one consumed retry attempt (kimi.md X8). Written BEFORE the backoff —
+   the window a crash lands in — so the count survives the drive that spent it."
+  [store workflow-id seq-num activity-name attempt error-map duration-ms will-retry?]
+  (log/debugf "Recording attempt %d (will-retry: %s)" attempt will-retry?)
+  (p/save-event store workflow-id
+                (a/attempt-failed-event seq-num activity-name attempt
+                                        error-map duration-ms will-retry?)))
+
 (defn execute-with-retry
-  "Execute an activity, retrying according to retry-policy (nil = no retry)."
-  [executor activity-name args timeout-ms retry-policy observer workflow-id seq-num]
-  (loop [attempt 1]
+  "Execute an activity, retrying according to retry-policy (nil = no retry).
+
+   Retry state is durable (kimi.md X8): the loop starts at the attempt after the
+   last one history records (`attempt-state`, recovered by `stub`), and
+   `record-attempt!` persists each consumed attempt before backing off. Without
+   both halves the counter silently restarts at 1 on resume and an activity with
+   side effects runs max-attempts times per drive rather than in total."
+  [executor activity-name args timeout-ms retry-policy observer workflow-id seq-num
+   attempt-state record-attempt!]
+  (loop [attempt (a/next-attempt attempt-state)]
     (let [result (attempt-once executor activity-name args timeout-ms observer workflow-id seq-num attempt)]
       (case (:status result)
         :success        result
         :rejected       (assoc result :status :failed)
         :retryable-error
-        (if (and retry-policy (a/should-retry? retry-policy (:exception result) attempt))
-          (let [backoff (a/calculate-backoff retry-policy attempt)]
-            (log/debugf "Activity sleeping %dms before retrying (attempt %d)" backoff attempt)
-            (Thread/sleep backoff)
-            (recur (inc attempt)))
-          (-> result (assoc :status :failed) (dissoc :exception)))))))
+        (let [retry? (boolean (and retry-policy
+                                   (a/should-retry? retry-policy (:exception result) attempt)))]
+          ;; Infrastructure failures are re-executed rather than replayed, so
+          ;; they must not spend the budget (see a/infrastructure-failure?).
+          (when-not (a/infrastructure-failure? (:exception result))
+            (record-attempt! attempt (:error result) (:duration result) retry?))
+          (if retry?
+            (let [backoff (a/calculate-backoff retry-policy attempt)]
+              (log/debugf "Activity sleeping %dms before retrying (attempt %d)" backoff attempt)
+              (Thread/sleep backoff)
+              (recur (inc attempt)))
+            (-> result (assoc :status :failed :attempts attempt) (dissoc :exception))))))))
 
 (defn process-pending-activity [store executor workflow-id
-                                {:keys [seq activity-name args timeout-ms retry-policy] :as suspension-data}
+                                {:keys [seq activity-name args timeout-ms retry-policy attempt-state]
+                                 :as suspension-data}
                                 pending-events observer]
   (log/with-mdc {:activity activity-name :seqnum seq}
-    (let [exec-result (execute-with-retry executor activity-name args timeout-ms
-                                          retry-policy observer workflow-id seq)]
+    (let [exec-result (if (a/retry-budget-spent? attempt-state)
+                        ;; A previous drive spent the last attempt the policy
+                        ;; allowed and crashed before recording the outcome.
+                        ;; Running the activity again here would exceed
+                        ;; :max-attempts, so finalize from the recorded error.
+                        (do
+                          (log/infof "Retry budget already spent after %d attempt(s); failing from recorded attempt"
+                                     (:attempts attempt-state))
+                          {:status   :failed
+                           :error    (:error attempt-state)
+                           :attempts (:attempts attempt-state)})
+                        (execute-with-retry executor activity-name args timeout-ms
+                                            retry-policy observer workflow-id seq
+                                            attempt-state
+                                            (partial record-attempt! store workflow-id seq activity-name)))]
       ;; Save all pending events first
       (p/save-events store workflow-id pending-events)
       ;; Then save the completion or failure

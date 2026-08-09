@@ -27,8 +27,13 @@
 (defn- schedule-activity!
   "Emit an :activity-scheduled pending event and throw the suspension that hands
    control back to the engine. Called from stub when an activity needs to run
-   (first execution or re-execution after interruption/rejection)."
-  [ctx activity-name seq-num args effective-timeout effective-retry]
+   (first execution or re-execution after interruption/rejection).
+
+   `attempt-state` is what history records this activity has already spent
+   (kimi.md X8) — nil on a first execution. The engine's retry loop resumes from
+   it, so a crash mid-retry costs the workflow no more attempts than the policy
+   granted in the first place."
+  [ctx activity-name seq-num args effective-timeout effective-retry attempt-state]
   (let [scheduled-event {:event-type    :activity-scheduled
                          :seq           seq-num
                          :activity-name activity-name
@@ -46,7 +51,8 @@
                                              :activity-name activity-name
                                              :args          (vec args)
                                              :timeout-ms    effective-timeout
-                                             :retry-policy  effective-retry}))))
+                                             :retry-policy  effective-retry
+                                             :attempt-state attempt-state}))))
 
 (defn stub
   "Create a stubbed version of an activity function for use in workflows.
@@ -104,9 +110,14 @@
               (do
                 (when interrupted? (log/infof "Activity was interrupted: rescheduling"))
                 (when rejected?    (log/infof "Activity execution was rejected: rescheduling"))
+                ;; Recover what earlier drives already spent on this activity, so
+                ;; the engine continues the retry sequence instead of restarting
+                ;; it (X8). Interruptions and rejections record no attempt, so a
+                ;; reschedule for those carries the budget across untouched.
                 (schedule-activity! (ctx/current-context)
                                     activity-name seq-num args
-                                    effective-timeout effective-retry)))))))))
+                                    effective-timeout effective-retry
+                                    (ctx/attempt-state seq-num))))))))))
 
 ;; ============================================================================
 ;; Async Support

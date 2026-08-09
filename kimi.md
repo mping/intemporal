@@ -368,7 +368,7 @@ Three further points deserve emphasis:
 | 25 | X10 | `intemporal.tests.error.exception-replay-test` | Throw a multi-level cause chain from an activity, resume, assert the replayed exception preserves `:type` and nested `:cause` | No    |
 | 26 | A12 | `intemporal.tests.observer.observer-isolation-test` | A throwing `on-workflow-completed`/`on-activity-completed` observer, assert it doesn't hang the parent, retry the activity, or starve other observers | No    |
 | 27 | A5/A6 | `intemporal.tests.engine.lifecycle-owner-test` | `shutdown-engine` while a worker is mid-drive, assert a graceful stop waits at least one max activity timeout | No    |
-| 28 | X8 | `intemporal.tests.crash.retry-durability-test` | Crash mid-retry, resume, assert the attempt counter (not just the activity) survives across resumes | No    |
+| 28 | X8 | `intemporal.tests.crash.retry-durability-test` | Crash mid-retry, resume, assert the attempt counter (not just the activity) survives across resumes | Yes (sequential path; async batches and the drive-thread backoff still open) |
 | 29 | A14 | `intemporal.tests.store.jdbc-ops-hardening-test` | Assert HikariCP pool options are explicit and migrations don't run under the runtime DB user | No    |
 | 30 | P1/P2/P4/P5/P6/P8/P10/E2/X1 | `intemporal.tests.store.conformance-suite` (expanded) | Claim exclusivity, `list-pending` ordering/wake-at, callback single-fire, signal FIFO, re-save idempotency, orphaned-owner recovery, run against InMemory/JDBC/FDB | No    |
 
