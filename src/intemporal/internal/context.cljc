@@ -48,77 +48,6 @@
 (defn set-compensating! [v]
   (some-> (:compensating? (current-context)) (reset! v)))
 
-(declare find-event history-event add-pending-event!)
-
-(defn- seq-has-event?
-  "True if history (or pending events) holds any event at sequence `s`. The
-   pending-events scan is load-bearing: it lets a :workflow-cancelling marker
-   added earlier in the *current* pass count as present, so the frontier op does
-   not record a second marker / throw twice at the same seq within one pass."
-  [ctx s]
-  (or (some #(= (:seq %) s) @(:history ctx))
-      (some #(= (:seq %) s) @(:pending-events ctx))))
-
-(defn replaying?
-  "True when the operation about to run at the current sequence position already
-   has recorded history (it is being replayed, not executed for the first time).
-   Used to defer the cancellation check to the frontier - the first un-cached
-   operation - so that a saga's compensation registrations (which re-run during
-   replay) are rebuilt before cancellation surfaces into the user's catch.
-   Per-seq equality (not max-seq) so that compensation events, which take higher
-   seq numbers, don't make a not-yet-reached forward op look replayed."
-  []
-  (seq-has-event? (current-context) @(:seq-counter (current-context))))
-
-(defn- surface-cancellation!
-  "Decide where a cancellation surfaces into the workflow body, then throw.
-
-   Cancellation must surface deterministically so that a saga's compensations
-   (registered as the body re-runs) are rebuilt before the user's catch runs, and
-   so the compensation seq space stays stable across crashes/resumes. We anchor it
-   to a single frontier sequence number, recorded once as a :workflow-cancelling
-   marker and re-thrown at that same seq on every later pass (like a recorded
-   :activity-failed):
-
-   - marker already at `cur`  -> re-throw (deterministic replay frontier);
-   - still replaying cached steps -> return nil so the body advances toward the
-     frontier (re-registering compensations along the way);
-   - frontier (first un-cached op) -> record the marker, then throw."
-  [ctx cur]
-  (cond
-    (history-event ctx :workflow-cancelling cur)
-    (throw (error/workflow-cancelled-exception))
-
-    (replaying?)
-    nil
-
-    :else
-    (do
-      (add-pending-event! {:event-type :workflow-cancelling :seq cur})
-      (throw (error/workflow-cancelled-exception)))))
-
-(defn check-cancelled! []
-  (let [ctx (current-context)]
-    ;; Suppress while compensating: the cancel exception was already caught by
-    ;; the user and the compensating activities must run.
-    (when (and (not (compensating?))
-               (p/is-cancelled? (:store ctx) (:workflow-id ctx)))
-      (surface-cancellation! ctx @(:seq-counter ctx)))))
-
-(defn next-seq! []
-  (check-cancelled!)
-  (let [ctx (current-context)
-        seq @(:seq-counter ctx)]
-    (swap! (:seq-counter ctx) inc)
-    seq))
-
-(defn update-seq! [event]
-  (when-let [last-seq (:last-seq event)]
-    (let [current-seq (dec @(:seq-counter (current-context)))]
-      (when (> last-seq current-seq)
-        (dotimes [_ (- last-seq current-seq)]
-          (next-seq!))))))
-
 (defn find-event [history event-type seq-num]
   (->> history
        (filter #(and (= (:event-type %) event-type)
@@ -190,6 +119,75 @@
 (defn add-pending-event! [event]
   (let [ctx (current-context)]
     (swap! (:pending-events ctx) conj event)))
+
+(defn- seq-has-event?
+  "True if history (or pending events) holds any event at sequence `s`. The
+   pending-events scan is load-bearing: it lets a :workflow-cancelling marker
+   added earlier in the *current* pass count as present, so the frontier op does
+   not record a second marker / throw twice at the same seq within one pass."
+  [ctx s]
+  (or (some #(= (:seq %) s) @(:history ctx))
+      (some #(= (:seq %) s) @(:pending-events ctx))))
+
+(defn replaying?
+  "True when the operation about to run at the current sequence position already
+   has recorded history (it is being replayed, not executed for the first time).
+   Used to defer the cancellation check to the frontier - the first un-cached
+   operation - so that a saga's compensation registrations (which re-run during
+   replay) are rebuilt before cancellation surfaces into the user's catch.
+   Per-seq equality (not max-seq) so that compensation events, which take higher
+   seq numbers, don't make a not-yet-reached forward op look replayed."
+  []
+  (seq-has-event? (current-context) @(:seq-counter (current-context))))
+
+(defn- surface-cancellation!
+  "Decide where a cancellation surfaces into the workflow body, then throw.
+
+   Cancellation must surface deterministically so that a saga's compensations
+   (registered as the body re-runs) are rebuilt before the user's catch runs, and
+   so the compensation seq space stays stable across crashes/resumes. We anchor it
+   to a single frontier sequence number, recorded once as a :workflow-cancelling
+   marker and re-thrown at that same seq on every later pass (like a recorded
+   :activity-failed):
+
+   - marker already at `cur`  -> re-throw (deterministic replay frontier);
+   - still replaying cached steps -> return nil so the body advances toward the
+     frontier (re-registering compensations along the way);
+   - frontier (first un-cached op) -> record the marker, then throw."
+  [ctx cur]
+  (cond
+    (history-event ctx :workflow-cancelling cur)
+    (throw (error/workflow-cancelled-exception))
+
+    (replaying?)
+    nil
+
+    :else
+    (do
+      (add-pending-event! {:event-type :workflow-cancelling :seq cur})
+      (throw (error/workflow-cancelled-exception)))))
+
+(defn check-cancelled! []
+  (let [ctx (current-context)]
+    ;; Suppress while compensating: the cancel exception was already caught by
+    ;; the user and the compensating activities must run.
+    (when (and (not (compensating?))
+               (p/is-cancelled? (:store ctx) (:workflow-id ctx)))
+      (surface-cancellation! ctx @(:seq-counter ctx)))))
+
+(defn next-seq! []
+  (check-cancelled!)
+  (let [ctx (current-context)
+        seq @(:seq-counter ctx)]
+    (swap! (:seq-counter ctx) inc)
+    seq))
+
+(defn update-seq! [event]
+  (when-let [last-seq (:last-seq event)]
+    (let [current-seq (dec @(:seq-counter (current-context)))]
+      (when (> last-seq current-seq)
+        (dotimes [_ (- last-seq current-seq)]
+          (next-seq!))))))
 
 (defn add-pending-async! [async-info]
   (let [ctx (current-context)]

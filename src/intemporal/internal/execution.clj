@@ -243,7 +243,7 @@
                 (:retry-at (:attempt-state %))))
        (reduce (fn [a b] (if a (min a b) b)) nil)))
 
-(defn with-async-retry-deadline
+(defn- with-async-retry-deadline
   "Give a bare `:wait-async` action the deadline of the soonest backing-off async.
 
    `:wait-async` normally means \"eligible whenever\" (wake-at nil), which is right
@@ -539,8 +539,6 @@
 ;; Tier 2: independent child workflows — parent/child lifecycle linkage
 ;; ============================================================================
 
-(declare finalize-failed)
-
 (def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
 
 (defn- next-terminal-seq
@@ -745,102 +743,6 @@
     ;; :continue should not reach here
     nil))
 
-(declare process-child-workflow)
-
-(defn handle-suspension
-  "Dispatch suspension to appropriate handler based on type.
-   Returns `:continue`, a `:wait-*` keyword, or a `{:action :wake-at}` map for a
-   wait whose deadline only the handler knows.
-
-   The engine's `:inline-retry-backoff?` marks a drive that cannot be woken (an
-   inline sync-child drive), for which a retry backoff is waited out rather than
-   parked on."
-  [engine workflow-id suspension-type suspension-data pending-asyncs pending-events wake-fn observer]
-  (let [{:keys [store executor scheduler inline-retry-backoff?]} engine
-        pending-asyncs-list pending-asyncs
-        pending-events-list pending-events]
-    (-notify p/on-workflow-suspended observer workflow-id suspension-type)
-
-    ;; Flush the pending async batch BEFORE any suspension dispatch: the batch
-    ;; must run regardless of what the workflow suspended on (a timer/signal/child
-    ;; suspension used to drop it, orphaning the async's activity forever).
-    ;; Returns :continue so the loop re-runs the pass and the original suspension
-    ;; re-arises with an empty batch.
-    ;;
-    ;; Only the asyncs that are actually DUE count as a batch: one still serving a
-    ;; retry backoff must not be run early, and must not make this look like work
-    ;; either — returning :continue with nothing to run would spin the pass (and
-    ;; the replay budget) until its deadline. With nothing due we arm the timers
-    ;; and fall through to the real suspension, so an unrelated activity in the
-    ;; same pass still gets to run instead of parking behind the backoff.
-    (arm-async-retry-timers! scheduler workflow-id pending-asyncs-list wake-fn)
-    (if (seq (due-asyncs pending-asyncs-list))
-      (do
-        (process-pending-asyncs-parallel store executor workflow-id
-                                         pending-asyncs-list
-                                         pending-events-list
-                                         observer)
-        :continue)
-      (with-async-retry-deadline pending-asyncs-list
-        (case suspension-type
-        :activity
-        (process-pending-activity store scheduler executor workflow-id
-                                  suspension-data
-                                  pending-events-list
-                                  wake-fn
-                                  observer
-                                  inline-retry-backoff?)
-
-        :timer
-        (process-timer store scheduler workflow-id
-                       suspension-data
-                       pending-events-list
-                       wake-fn
-                       observer)
-
-        :wait-signal
-        (process-signal store workflow-id
-                        suspension-data
-                        pending-events-list
-                        wake-fn
-                        observer)
-
-        :wait-signal-timeout
-        (process-signal-with-timeout store scheduler workflow-id
-                                     suspension-data
-                                     pending-events-list
-                                     wake-fn
-                                     observer)
-
-        :join-pending
-        (process-join-pending store workflow-id
-                              suspension-data
-                              pending-events-list
-                              observer)
-
-        :join-any-pending
-        ;; No batch asyncs to run: the handles are pending independent child
-        ;; workflows. Re-enter (:continue) only when join-any can actually
-        ;; resolve — some handle completed, or all failed — otherwise WAIT for a
-        ;; child's notify-parent-terminal wake instead of hot-spinning the loop
-        ;; through the replay budget.
-        (do
-          (when (seq pending-events-list)
-            (p/save-events store workflow-id pending-events-list))
-          (let [{:keys [handle-seqs]} suspension-data]
-            (if (or (some #(p/find-event store workflow-id :async-completed %) handle-seqs)
-                    (every? #(p/find-event store workflow-id :async-failed %) handle-seqs))
-              :continue
-              :wait-async)))
-
-        :child-workflow
-        (process-child-workflow engine
-                                workflow-id
-                                suspension-data
-                                pending-events-list
-                                observer))))))
-
-
 (defn run-once
   "Internal: Execute a side-effect thunk only once (not on replay).
    Uses a special event marker to track execution.
@@ -876,180 +778,276 @@
   [{:keys [store executor scheduler registry] :as engine} workflow-id workflow-fn args
    {:keys [observer max-iterations wake-fn]
     :or {max-iterations 1000}}]
-  (loop [iteration 0]
-    (if (>= iteration max-iterations)
-      ;; Replay budget exhausted (e.g. a non-terminating workflow loop). Persist a
-      ;; terminal :workflow-failed event so the workflow becomes resolvable instead
-      ;; of staying "running" forever with an un-recorded exception thrown out of
-      ;; the loop.
-      (do
-        (log/warnf "Workflow %s exceeded replay budget of %d iterations" workflow-id max-iterations)
-        (finalize-failed store workflow-id []
-                         (ex-info "Replay budget exceeded"
-                                  {:workflow-id workflow-id :iterations iteration})
-                         observer))
-      (do
-        (log/debugf "Internal loop %d of %d" iteration max-iterations)
+  ;; handle-suspension and process-child-workflow are mutually recursive
+  ;; (handle-suspension -> process-child-workflow -> run-workflow-internal ->
+  ;; handle-suspension), so they are nested here rather than defined at the top
+  ;; level, where no linear ordering could satisfy both call directions.
+  (letfn [(process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
+                                    suspension-data pending-events observer]
+            (let [{:keys [seq child-workflow-id workflow-fn args]} suspension-data
+                  ;; Child span nested under the parent's current span (the child runs
+                  ;; inline on this thread, so (octx/current) is the parent root span).
+                  ;; Registered + ended at each exit below with the child's terminal status.
+                  child-ctx (when (:enable-telemetry engine)
+                              (tracing/ensure-workflow-span! child-workflow-id
+                                                             (str "child " child-workflow-id)
+                                                             (octx/current)))]
+              (p/save-events store workflow-id pending-events)
+              ;; Execute child workflow synchronously for now
+              ;; In a real implementation, this could be async
+              (try
+                (let [result (octx/with-context! (or child-ctx (octx/current))
+                               ;; This drive is inline and has no wake-fn, so a retry that
+                               ;; parked would strand the child — and the backstop below
+                               ;; would durably fail it for "cannot suspend". Flag it on the
+                               ;; engine (which is already threaded everywhere, and so
+                               ;; carries the flag to grandchildren too) to wait instead.
+                               (run-workflow-internal (assoc engine :inline-retry-backoff? true)
+                                                      child-workflow-id workflow-fn args
+                                                      {:observer observer
+                                                       :max-iterations 1000}))]
+                  (if (= :completed (:status result))
+                    (do
+                      (p/save-event store workflow-id {:event-type        :child-workflow-completed
+                                                       :seq               seq
+                                                       :child-workflow-id child-workflow-id
+                                                       :result            (:result result)
+                                                       :timestamp         (utils/current-time-ms)})
+                      (log/infof "Child workflow with id %s completed" child-workflow-id)
+                      (tracing/finish-workflow-span! child-workflow-id nil)
+                      :continue)
+                    ;; ELSE
+                    (let [child-error (or (:error result)
+                                          {:status (:status result)
+                                           :message (str "Child workflow ended with status: " (:status result))})]
+                      ;; A sync child that SUSPENDED (waiting on a signal/timer/async) is
+                      ;; unsupported — it is recorded as failed in the parent. Also write a
+                      ;; terminal event to the CHILD's own history: without it the child
+                      ;; lingers as a non-terminal row with no :workflow-started event,
+                      ;; which the ownership scan lists (and fails to resume) forever.
+                      (when (#{:waiting-signal :waiting-signal-timeout :waiting-timer :waiting-async}
+                             (:status result))
+                        (p/save-event store child-workflow-id
+                                      {:event-type  :workflow-failed
+                                       :seq         (next-terminal-seq store child-workflow-id)
+                                       :workflow-id child-workflow-id
+                                       :error       {:type    "clojure.lang.ExceptionInfo"
+                                                     :message (str "Synchronous child workflows cannot suspend (" (:status result) "); use run-child-workflow-async")
+                                                     :data    {:child-workflow-id child-workflow-id
+                                                               :status            (:status result)}}
+                                       :timestamp   (utils/current-time-ms)}))
+                      (p/save-event store workflow-id {:event-type        :child-workflow-failed
+                                                       :seq               seq
+                                                       :child-workflow-id child-workflow-id
+                                                       :error             child-error
+                                                       :timestamp         (utils/current-time-ms)})
+                      (log/infof "Child workflow with id %s failed, status: %s, error: %s" child-workflow-id (:status result) (:error result))
+                      (tracing/finish-workflow-span! child-workflow-id child-error)
+                      :continue)))
+                (catch Exception e
+                  (p/save-event store workflow-id {:event-type        :child-workflow-failed
+                                                   :seq               seq
+                                                   :child-workflow-id child-workflow-id
+                                                   :error             (error/throwable->map e)
+                                                   :timestamp         (utils/current-time-ms)})
+                  (log/warnf e "Error while executing child workflow with id %s" child-workflow-id)
+                  (tracing/finish-workflow-span! child-workflow-id e)
+                  :continue))))
 
-        ;; Check if executor is shutting down - stop processing to avoid endless rejections
-        (if (p/shutdown? executor)
-          (do
-            (log/infof "Executor shutting down, suspending workflow")
-            {:status :suspended
-             :workflow-id workflow-id})
+          (handle-suspension
+            ;; Dispatch suspension to appropriate handler based on type.
+            ;; Returns `:continue`, a `:wait-*` keyword, or a `{:action :wake-at}` map for a
+            ;; wait whose deadline only the handler knows.
+            ;;
+            ;; The engine's `:inline-retry-backoff?` marks a drive that cannot be woken (an
+            ;; inline sync-child drive), for which a retry backoff is waited out rather than
+            ;; parked on.
+            [engine workflow-id suspension-type suspension-data pending-asyncs pending-events wake-fn observer]
+            (let [{:keys [store executor scheduler inline-retry-backoff?]} engine
+                  pending-asyncs-list pending-asyncs
+                  pending-events-list pending-events]
+              (-notify p/on-workflow-suspended observer workflow-id suspension-type)
 
-          (let [history     (p/load-history store workflow-id)
-                ctx         (make-workflow-context workflow-id history store registry observer)
-                exec-result (binding [ctx/*workflow-context* ctx]
-                              (log/debugf "Executing workflow function %s..." workflow-fn)
-                              (execute-workflow-fn workflow-fn args))]
-
-              (log/debugf "Workflow function executed, got: %s" (:status exec-result))
-              (case (:status exec-result)
-                :completed
-                (finalize-completed store executor workflow-id
-                                    (:pending-asyncs exec-result)
-                                    (:pending-events exec-result)
-                                    (:result exec-result)
-                                    observer)
-
-                :cancelled
-                ;; Cancellation surfaced from the body (a stub's check-cancelled!).
-                ;; Any saga rollback already ran inside the user's catch before the
-                ;; cancel exception was rethrown, so just finalize.
-                (finalize-cancelled store workflow-id
-                                    (:pending-events exec-result)
-                                    observer)
-
-                :suspended
+              ;; Flush the pending async batch BEFORE any suspension dispatch: the batch
+              ;; must run regardless of what the workflow suspended on (a timer/signal/child
+              ;; suspension used to drop it, orphaning the async's activity forever).
+              ;; Returns :continue so the loop re-runs the pass and the original suspension
+              ;; re-arises with an empty batch.
+              ;;
+              ;; Only the asyncs that are actually DUE count as a batch: one still serving a
+              ;; retry backoff must not be run early, and must not make this look like work
+              ;; either — returning :continue with nothing to run would spin the pass (and
+              ;; the replay budget) until its deadline. With nothing due we arm the timers
+              ;; and fall through to the real suspension, so an unrelated activity in the
+              ;; same pass still gets to run instead of parking behind the backoff.
+              (arm-async-retry-timers! scheduler workflow-id pending-asyncs-list wake-fn)
+              (if (seq (due-asyncs pending-asyncs-list))
                 (do
-                  ;; Arm the generic wake callback BEFORE the suspension handler
-                  ;; runs its eligibility checks: a completion/wake landing between
-                  ;; a handler's check and a post-hoc registration would be dropped
-                  ;; (X5, the async/child-join lost-wake window — same TOCTOU class
-                  ;; as bug 2.1 for signals). Anything that completed before this
-                  ;; registration is observed by the handler's own checks; anything
-                  ;; completing after fires this callback. An external actor (e.g.
-                  ;; cancel-workflow) can thus always force this workflow to
-                  ;; re-enter its loop. Re-registration each pass simply overwrites.
-                  (when wake-fn
-                    (p/register-wake-callback store workflow-id wake-fn))
-                  (let [outcome (handle-suspension engine
-                                                   workflow-id
-                                                   (:suspension-type exec-result)
-                                                   (:suspension-data exec-result)
-                                                   (:pending-asyncs exec-result)
-                                                   (:pending-events exec-result)
-                                                   wake-fn
+                  (process-pending-asyncs-parallel store executor workflow-id
+                                                   pending-asyncs-list
+                                                   pending-events-list
                                                    observer)
-                        ;; A handler returns a bare action keyword, or a
-                        ;; {:action :wake-at} map when the deadline it waited on
-                        ;; is one only the handler knows (a retry backoff is
-                        ;; computed while running the attempt, so it is not in the
-                        ;; suspension the body threw).
-                        action  (if (map? outcome) (:action outcome) outcome)]
-                    (when (and observer (= action :continue))
-                      (p/on-workflow-resumed observer workflow-id))
+                  :continue)
+                (with-async-retry-deadline pending-asyncs-list
+                  (case suspension-type
+                    :activity
+                    (process-pending-activity store scheduler executor workflow-id
+                                              suspension-data
+                                              pending-events-list
+                                              wake-fn
+                                              observer
+                                              inline-retry-backoff?)
 
-                    (if (= action :continue)
-                      (recur (inc iteration))
-                      (do
-                        ;; C2: record when this workflow next needs attention so the
-                        ;; ownership scan can skip it until due. Timer waits carry a
-                        ;; clock deadline; signal/async waits are always eligible (nil).
-                        (let [sd (:suspension-data exec-result)
-                              wake-at (if (map? outcome)
-                                        (:wake-at outcome)
-                                        (case action
-                                          :wait-timer          (:fire-at sd)
-                                          :wait-signal-timeout (:deadline sd)
-                                          nil))]
-                          (p/set-wake-at store workflow-id wake-at))
-                        (action->result action workflow-id)))))
+                    :timer
+                    (process-timer store scheduler workflow-id
+                                   suspension-data
+                                   pending-events-list
+                                   wake-fn
+                                   observer)
 
-                :failed
-                ;; Interrupt-driven "failures" (worker stop / engine shutdown
-                ;; interrupting a store read inside the body) are infrastructure
-                ;; conditions, not workflow outcomes: leave the workflow
-                ;; suspended for a later resume instead of durably failing it.
-                (if (interrupt-error? (:error exec-result))
+                    :wait-signal
+                    (process-signal store workflow-id
+                                    suspension-data
+                                    pending-events-list
+                                    wake-fn
+                                    observer)
+
+                    :wait-signal-timeout
+                    (process-signal-with-timeout store scheduler workflow-id
+                                                 suspension-data
+                                                 pending-events-list
+                                                 wake-fn
+                                                 observer)
+
+                    :join-pending
+                    (process-join-pending store workflow-id
+                                          suspension-data
+                                          pending-events-list
+                                          observer)
+
+                    :join-any-pending
+                    ;; No batch asyncs to run: the handles are pending independent child
+                    ;; workflows. Re-enter (:continue) only when join-any can actually
+                    ;; resolve — some handle completed, or all failed — otherwise WAIT for a
+                    ;; child's notify-parent-terminal wake instead of hot-spinning the loop
+                    ;; through the replay budget.
+                    (do
+                      (when (seq pending-events-list)
+                        (p/save-events store workflow-id pending-events-list))
+                      (let [{:keys [handle-seqs]} suspension-data]
+                        (if (or (some #(p/find-event store workflow-id :async-completed %) handle-seqs)
+                                (every? #(p/find-event store workflow-id :async-failed %) handle-seqs))
+                          :continue
+                          :wait-async)))
+
+                    :child-workflow
+                    (process-child-workflow engine
+                                            workflow-id
+                                            suspension-data
+                                            pending-events-list
+                                            observer))))))]
+    (loop [iteration 0]
+      (if (>= iteration max-iterations)
+        ;; Replay budget exhausted (e.g. a non-terminating workflow loop). Persist a
+        ;; terminal :workflow-failed event so the workflow becomes resolvable instead
+        ;; of staying "running" forever with an un-recorded exception thrown out of
+        ;; the loop.
+        (do
+          (log/warnf "Workflow %s exceeded replay budget of %d iterations" workflow-id max-iterations)
+          (finalize-failed store workflow-id []
+                           (ex-info "Replay budget exceeded"
+                                    {:workflow-id workflow-id :iterations iteration})
+                           observer))
+        (do
+          (log/debugf "Internal loop %d of %d" iteration max-iterations)
+
+          ;; Check if executor is shutting down - stop processing to avoid endless rejections
+          (if (p/shutdown? executor)
+            (do
+              (log/infof "Executor shutting down, suspending workflow")
+              {:status :suspended
+               :workflow-id workflow-id})
+
+            (let [history     (p/load-history store workflow-id)
+                  ctx         (make-workflow-context workflow-id history store registry observer)
+                  exec-result (binding [ctx/*workflow-context* ctx]
+                                (log/debugf "Executing workflow function %s..." workflow-fn)
+                                (execute-workflow-fn workflow-fn args))]
+
+                (log/debugf "Workflow function executed, got: %s" (:status exec-result))
+                (case (:status exec-result)
+                  :completed
+                  (finalize-completed store executor workflow-id
+                                      (:pending-asyncs exec-result)
+                                      (:pending-events exec-result)
+                                      (:result exec-result)
+                                      observer)
+
+                  :cancelled
+                  ;; Cancellation surfaced from the body (a stub's check-cancelled!).
+                  ;; Any saga rollback already ran inside the user's catch before the
+                  ;; cancel exception was rethrown, so just finalize.
+                  (finalize-cancelled store workflow-id
+                                      (:pending-events exec-result)
+                                      observer)
+
+                  :suspended
                   (do
-                    (log/infof "Workflow drive interrupted; suspending without finalizing")
-                    {:status :suspended
-                     :workflow-id workflow-id})
-                  (finalize-failed store workflow-id
-                                   (:pending-events exec-result)
-                                   (:error exec-result)
-                                   observer)))))))))
+                    ;; Arm the generic wake callback BEFORE the suspension handler
+                    ;; runs its eligibility checks: a completion/wake landing between
+                    ;; a handler's check and a post-hoc registration would be dropped
+                    ;; (X5, the async/child-join lost-wake window — same TOCTOU class
+                    ;; as bug 2.1 for signals). Anything that completed before this
+                    ;; registration is observed by the handler's own checks; anything
+                    ;; completing after fires this callback. An external actor (e.g.
+                    ;; cancel-workflow) can thus always force this workflow to
+                    ;; re-enter its loop. Re-registration each pass simply overwrites.
+                    (when wake-fn
+                      (p/register-wake-callback store workflow-id wake-fn))
+                    (let [outcome (handle-suspension engine
+                                                     workflow-id
+                                                     (:suspension-type exec-result)
+                                                     (:suspension-data exec-result)
+                                                     (:pending-asyncs exec-result)
+                                                     (:pending-events exec-result)
+                                                     wake-fn
+                                                     observer)
+                          ;; A handler returns a bare action keyword, or a
+                          ;; {:action :wake-at} map when the deadline it waited on
+                          ;; is one only the handler knows (a retry backoff is
+                          ;; computed while running the attempt, so it is not in the
+                          ;; suspension the body threw).
+                          action  (if (map? outcome) (:action outcome) outcome)]
+                      (when (and observer (= action :continue))
+                        (p/on-workflow-resumed observer workflow-id))
 
-(defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
-                               suspension-data pending-events observer]
-  (let [{:keys [seq child-workflow-id workflow-fn args]} suspension-data
-        ;; Child span nested under the parent's current span (the child runs
-        ;; inline on this thread, so (octx/current) is the parent root span).
-        ;; Registered + ended at each exit below with the child's terminal status.
-        child-ctx (when (:enable-telemetry engine)
-                    (tracing/ensure-workflow-span! child-workflow-id
-                                                   (str "child " child-workflow-id)
-                                                   (octx/current)))]
-    (p/save-events store workflow-id pending-events)
-    ;; Execute child workflow synchronously for now
-    ;; In a real implementation, this could be async
-    (try
-      (let [result (octx/with-context! (or child-ctx (octx/current))
-                     ;; This drive is inline and has no wake-fn, so a retry that
-                     ;; parked would strand the child — and the backstop below
-                     ;; would durably fail it for "cannot suspend". Flag it on the
-                     ;; engine (which is already threaded everywhere, and so
-                     ;; carries the flag to grandchildren too) to wait instead.
-                     (run-workflow-internal (assoc engine :inline-retry-backoff? true)
-                                            child-workflow-id workflow-fn args
-                                            {:observer observer
-                                             :max-iterations 1000}))]
-        (if (= :completed (:status result))
-          (do
-            (p/save-event store workflow-id {:event-type        :child-workflow-completed
-                                             :seq               seq
-                                             :child-workflow-id child-workflow-id
-                                             :result            (:result result)
-                                             :timestamp         (utils/current-time-ms)})
-            (log/infof "Child workflow with id %s completed" child-workflow-id)
-            (tracing/finish-workflow-span! child-workflow-id nil)
-            :continue)
-          ;; ELSE
-          (let [child-error (or (:error result)
-                                {:status (:status result)
-                                 :message (str "Child workflow ended with status: " (:status result))})]
-            ;; A sync child that SUSPENDED (waiting on a signal/timer/async) is
-            ;; unsupported — it is recorded as failed in the parent. Also write a
-            ;; terminal event to the CHILD's own history: without it the child
-            ;; lingers as a non-terminal row with no :workflow-started event,
-            ;; which the ownership scan lists (and fails to resume) forever.
-            (when (#{:waiting-signal :waiting-signal-timeout :waiting-timer :waiting-async}
-                   (:status result))
-              (p/save-event store child-workflow-id
-                            {:event-type  :workflow-failed
-                             :seq         (next-terminal-seq store child-workflow-id)
-                             :workflow-id child-workflow-id
-                             :error       {:type    "clojure.lang.ExceptionInfo"
-                                           :message (str "Synchronous child workflows cannot suspend (" (:status result) "); use run-child-workflow-async")
-                                           :data    {:child-workflow-id child-workflow-id
-                                                     :status            (:status result)}}
-                             :timestamp   (utils/current-time-ms)}))
-            (p/save-event store workflow-id {:event-type        :child-workflow-failed
-                                             :seq               seq
-                                             :child-workflow-id child-workflow-id
-                                             :error             child-error
-                                             :timestamp         (utils/current-time-ms)})
-            (log/infof "Child workflow with id %s failed, status: %s, error: %s" child-workflow-id (:status result) (:error result))
-            (tracing/finish-workflow-span! child-workflow-id child-error)
-            :continue)))
-      (catch Exception e
-        (p/save-event store workflow-id {:event-type        :child-workflow-failed
-                                         :seq               seq
-                                         :child-workflow-id child-workflow-id
-                                         :error             (error/throwable->map e)
-                                         :timestamp         (utils/current-time-ms)})
-        (log/warnf e "Error while executing child workflow with id %s" child-workflow-id)
-        (tracing/finish-workflow-span! child-workflow-id e)
-        :continue))))
+                      (if (= action :continue)
+                        (recur (inc iteration))
+                        (do
+                          ;; C2: record when this workflow next needs attention so the
+                          ;; ownership scan can skip it until due. Timer waits carry a
+                          ;; clock deadline; signal/async waits are always eligible (nil).
+                          (let [sd (:suspension-data exec-result)
+                                wake-at (if (map? outcome)
+                                          (:wake-at outcome)
+                                          (case action
+                                            :wait-timer          (:fire-at sd)
+                                            :wait-signal-timeout (:deadline sd)
+                                            nil))]
+                            (p/set-wake-at store workflow-id wake-at))
+                          (action->result action workflow-id)))))
+
+                  :failed
+                  ;; Interrupt-driven "failures" (worker stop / engine shutdown
+                  ;; interrupting a store read inside the body) are infrastructure
+                  ;; conditions, not workflow outcomes: leave the workflow
+                  ;; suspended for a later resume instead of durably failing it.
+                  (if (interrupt-error? (:error exec-result))
+                    (do
+                      (log/infof "Workflow drive interrupted; suspending without finalizing")
+                      {:status :suspended
+                       :workflow-id workflow-id})
+                    (finalize-failed store workflow-id
+                                     (:pending-events exec-result)
+                                     (:error exec-result)
+                                     observer))))))))))

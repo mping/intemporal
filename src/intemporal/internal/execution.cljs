@@ -278,7 +278,7 @@
                 (:retry-at (:attempt-state %))))
        (reduce (fn [a b] (if a (min a b) b)) nil)))
 
-(defn with-async-retry-deadline
+(defn- with-async-retry-deadline
   "Give a bare `:wait-async` action the deadline of the soonest backing-off async.
 
    `:wait-async` normally means \"eligible whenever\" (wake-at nil), which is right
@@ -580,8 +580,6 @@
 ;; (mirrors execution.clj; store ops on InMemoryStore are synchronous in CLJS)
 ;; ============================================================================
 
-(declare finalize-failed)
-
 (def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
 
 (defn- next-terminal-seq
@@ -742,109 +740,6 @@
     ;; :continue should not reach here
     nil))
 
-(declare process-child-workflow)
-
-(defn handle-suspension
-  "Dispatch suspension to appropriate handler based on type.
-   Returns a promise of `:continue`, a `:wait-*` keyword, or a
-   `{:action :wake-at}` map for a wait whose deadline only the handler knows.
-
-   The engine's `:inline-retry-backoff?` marks a drive that cannot be woken (an
-   inline sync-child drive), for which a retry backoff is waited out rather than
-   parked on."
-  [engine workflow-id suspension-type suspension-data pending-asyncs pending-events wake-fn observer]
-  (let [{:keys [store executor scheduler inline-retry-backoff?]} engine
-        pending-asyncs-list pending-asyncs
-        pending-events-list pending-events]
-    (-notify p/on-workflow-suspended observer workflow-id suspension-type)
-
-    ;; Flush the pending async batch BEFORE any suspension dispatch: the batch
-    ;; must run regardless of what the workflow suspended on (a timer/signal/child
-    ;; suspension used to drop it, orphaning the async's activity forever).
-    ;; Returns :continue so the loop re-runs the pass and the original suspension
-    ;; re-arises with an empty batch. (Mirrors execution.clj.)
-    ;;
-    ;; Only the asyncs that are actually DUE count as a batch: one still serving a
-    ;; retry backoff must not be run early, and must not make this look like work
-    ;; either — returning :continue with nothing to run would spin the pass (and
-    ;; the replay budget) until its deadline. With nothing due we fall through to
-    ;; the real suspension, so an unrelated activity in the same pass still gets
-    ;; to run instead of parking behind the backoff.
-    (arm-async-retry-timers! scheduler workflow-id pending-asyncs-list wake-fn)
-    (if (seq (due-asyncs pending-asyncs-list))
-      (blet [_ (process-pending-asyncs-parallel store executor workflow-id
-                                                pending-asyncs-list
-                                                pending-events-list
-                                                observer)]
-        :continue)
-      ;; prom/resolved flattens a thenable, so this handles both the branches
-      ;; that return a promise and the ones that return a bare keyword.
-      (bthen
-        (prom/resolved
-          (case suspension-type
-        :activity
-        (process-pending-activity store scheduler executor workflow-id
-                                  suspension-data
-                                  pending-events-list
-                                  wake-fn
-                                  observer
-                                  inline-retry-backoff?)
-
-        :timer
-        (prom/resolved
-          (process-timer store scheduler workflow-id
-                         suspension-data
-                         pending-events-list
-                         wake-fn
-                         observer))
-
-        :wait-signal
-        (prom/resolved
-          (process-signal store workflow-id
-                          suspension-data
-                          pending-events-list
-                          wake-fn
-                          observer))
-
-        :wait-signal-timeout
-        (prom/resolved
-          (process-signal-with-timeout store scheduler workflow-id
-                                       suspension-data
-                                       pending-events-list
-                                       wake-fn
-                                       observer))
-
-        :join-pending
-        (process-join-pending store workflow-id
-                              suspension-data
-                              pending-events-list
-                              observer)
-
-        :join-any-pending
-        ;; No batch asyncs to run: the handles are pending independent child
-        ;; workflows. Re-enter (:continue) only when join-any can actually
-        ;; resolve — some handle completed, or all failed — otherwise WAIT for a
-        ;; child's notify-parent-terminal wake instead of hot-spinning the loop
-        ;; through the replay budget. (Mirrors execution.clj.)
-        (do
-          (when (seq pending-events-list)
-            (p/save-events store workflow-id pending-events-list))
-          (let [{:keys [handle-seqs]} suspension-data]
-            (prom/resolved
-              (if (or (some #(p/find-event store workflow-id :async-completed %) handle-seqs)
-                      (every? #(p/find-event store workflow-id :async-failed %) handle-seqs))
-                :continue
-                :wait-async))))
-
-        :child-workflow
-        (process-child-workflow engine
-                                workflow-id
-                                suspension-data
-                                pending-events-list
-                                observer)))
-        (fn [action] (with-async-retry-deadline pending-asyncs-list action))))))
-
-
 (defn run-once
   "Internal: Execute a side-effect thunk only once (not on replay).
    Uses a special event marker to track execution.
@@ -880,162 +775,266 @@
   [{:keys [store executor scheduler registry] :as engine} workflow-id workflow-fn args
    {:keys [observer max-iterations wake-fn]
     :or {max-iterations 1000}}]
-  #_{:clj-kondo/ignore [:loop-without-recur]}
-  (prom/loop [iteration 0]
-    (if (>= iteration max-iterations)
-      ;; Replay budget exhausted (e.g. a non-terminating workflow loop). Persist a
-      ;; terminal :workflow-failed event so the workflow becomes resolvable instead
-      ;; of staying "running" forever with an un-recorded exception thrown out of
-      ;; the loop.
-      (do
-        (log/warnf "Workflow %s exceeded replay budget of %d iterations" workflow-id max-iterations)
-        (finalize-failed store workflow-id []
-                         (ex-info "Replay budget exceeded"
-                                  {:workflow-id workflow-id :iterations iteration})
-                         observer))
-      (do
-        (log/debugf "Internal loop %d of %d" iteration max-iterations)
+  ;; handle-suspension and process-child-workflow are mutually recursive
+  ;; (handle-suspension -> process-child-workflow -> run-workflow-internal ->
+  ;; handle-suspension), so they are nested here rather than defined at the top
+  ;; level, where no linear ordering could satisfy both call directions.
+  (letfn [(process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
+                                    suspension-data pending-events observer]
+            (let [{:keys [seq child-workflow-id workflow-fn args]} suspension-data]
+              (p/save-events store workflow-id pending-events)
+              ;; This drive is inline and has no wake-fn, so a retry that parked would
+              ;; strand the child — and the backstop below would durably fail it for
+              ;; "cannot suspend". Flag it on the engine (already threaded everywhere, so
+              ;; it reaches grandchildren too) to wait instead. (Mirrors execution.clj.)
+              (-> (run-workflow-internal (assoc engine :inline-retry-backoff? true)
+                                         child-workflow-id workflow-fn args
+                                         {:observer observer :max-iterations 1000})
+                  (bthen
+                    (fn [result]
+                      (if (= :completed (:status result))
+                        (do
+                          (p/save-event store workflow-id {:event-type        :child-workflow-completed
+                                                           :seq               seq
+                                                           :child-workflow-id child-workflow-id
+                                                           :result            (:result result)
+                                                           :timestamp         (utils/current-time-ms)})
+                          (log/infof "Child workflow with id %s completed" child-workflow-id)
+                          :continue)
+                        (do
+                          ;; A sync child that SUSPENDED is unsupported — recorded as failed
+                          ;; in the parent. Also terminalize the CHILD's own history so it
+                          ;; doesn't linger as a non-terminal, unresumable row for the
+                          ;; ownership scan. (Mirrors execution.clj.)
+                          (when (#{:waiting-signal :waiting-signal-timeout :waiting-timer :waiting-async}
+                                 (:status result))
+                            (p/save-event store child-workflow-id
+                                          {:event-type  :workflow-failed
+                                           :seq         (next-terminal-seq store child-workflow-id)
+                                           :workflow-id child-workflow-id
+                                           :error       {:type    "ExceptionInfo"
+                                                         :message (str "Synchronous child workflows cannot suspend (" (:status result) "); use run-child-workflow-async")
+                                                         :data    {:child-workflow-id child-workflow-id
+                                                                   :status            (:status result)}}
+                                           :timestamp   (utils/current-time-ms)}))
+                          (p/save-event store workflow-id {:event-type        :child-workflow-failed
+                                                           :seq               seq
+                                                           :child-workflow-id child-workflow-id
+                                                           :error             (or (:error result)
+                                                                                  {:status (:status result)
+                                                                                   :message (str "Child workflow ended with status: " (:status result))})
+                                                           :timestamp         (utils/current-time-ms)})
+                          (log/infof "Child workflow with id %s failed, status: %s, error: %s" child-workflow-id (:status result) (:error result))
+                          :continue))))
+                  (prom/catch js/Error
+                    (fn [e]
+                      (p/save-event store workflow-id {:event-type        :child-workflow-failed
+                                                       :seq               seq
+                                                       :child-workflow-id child-workflow-id
+                                                       :error             (error/throwable->map e)
+                                                       :timestamp         (utils/current-time-ms)})
+                      (log/warnf e "Error while executing child workflow with id %s" child-workflow-id)
+                      :continue)))))
 
-        ;; Check if executor is shutting down - stop processing to avoid endless rejections
-        (if (p/shutdown? executor)
-          (do
-            (log/infof "Executor shutting down, suspending workflow")
-            {:status :suspended
-             :workflow-id workflow-id})
+          (handle-suspension
+            ;; Dispatch suspension to appropriate handler based on type.
+            ;; Returns a promise of `:continue`, a `:wait-*` keyword, or a
+            ;; `{:action :wake-at}` map for a wait whose deadline only the handler knows.
+            ;;
+            ;; The engine's `:inline-retry-backoff?` marks a drive that cannot be woken (an
+            ;; inline sync-child drive), for which a retry backoff is waited out rather than
+            ;; parked on.
+            [engine workflow-id suspension-type suspension-data pending-asyncs pending-events wake-fn observer]
+            (let [{:keys [store executor scheduler inline-retry-backoff?]} engine
+                  pending-asyncs-list pending-asyncs
+                  pending-events-list pending-events]
+              (-notify p/on-workflow-suspended observer workflow-id suspension-type)
 
-          (let [history     (p/load-history store workflow-id)
-                ctx         (make-workflow-context workflow-id history store registry observer
-                                                   :protocols (:protocols engine))
-                exec-result (binding [ctx/*workflow-context* ctx]
-                              (log/debugf "Executing workflow function %s..." workflow-fn)
-                              (execute-workflow-fn workflow-fn args))
-                  dispatch (fn [exec-result]
-                             (log/debugf "Workflow function executed, got: %s" (:status exec-result))
-                             (case (:status exec-result)
-                               :completed
-                               (finalize-completed store executor workflow-id
-                                                   (:pending-asyncs exec-result)
-                                                   (:pending-events exec-result)
-                                                   (:result exec-result)
-                                                   observer)
+              ;; Flush the pending async batch BEFORE any suspension dispatch: the batch
+              ;; must run regardless of what the workflow suspended on (a timer/signal/child
+              ;; suspension used to drop it, orphaning the async's activity forever).
+              ;; Returns :continue so the loop re-runs the pass and the original suspension
+              ;; re-arises with an empty batch. (Mirrors execution.clj.)
+              ;;
+              ;; Only the asyncs that are actually DUE count as a batch: one still serving a
+              ;; retry backoff must not be run early, and must not make this look like work
+              ;; either — returning :continue with nothing to run would spin the pass (and
+              ;; the replay budget) until its deadline. With nothing due we fall through to
+              ;; the real suspension, so an unrelated activity in the same pass still gets
+              ;; to run instead of parking behind the backoff.
+              (arm-async-retry-timers! scheduler workflow-id pending-asyncs-list wake-fn)
+              (if (seq (due-asyncs pending-asyncs-list))
+                (blet [_ (process-pending-asyncs-parallel store executor workflow-id
+                                                          pending-asyncs-list
+                                                          pending-events-list
+                                                          observer)]
+                  :continue)
+                ;; prom/resolved flattens a thenable, so this handles both the branches
+                ;; that return a promise and the ones that return a bare keyword.
+                (bthen
+                  (prom/resolved
+                    (case suspension-type
+                      :activity
+                      (process-pending-activity store scheduler executor workflow-id
+                                                suspension-data
+                                                pending-events-list
+                                                wake-fn
+                                                observer
+                                                inline-retry-backoff?)
 
-                               :cancelled
-                               ;; Cancellation surfaced from the body (a stub's
-                               ;; check-cancelled!). Any saga rollback already ran
-                               ;; inside the user's catch before the cancel exception
-                               ;; was rethrown, so just finalize.
-                               (finalize-cancelled store workflow-id
-                                                   (:pending-events exec-result)
-                                                   observer)
+                      :timer
+                      (prom/resolved
+                        (process-timer store scheduler workflow-id
+                                       suspension-data
+                                       pending-events-list
+                                       wake-fn
+                                       observer))
 
-                               :suspended
-                               (do
-                                 ;; Arm the generic wake callback BEFORE the suspension
-                                 ;; handler runs its eligibility checks: a completion/wake
-                                 ;; landing between a handler's check and a post-hoc
-                                 ;; registration would be dropped (X5, the async/child-join
-                                 ;; lost-wake window — same TOCTOU class as bug 2.1 for
-                                 ;; signals). Anything that completed before this
-                                 ;; registration is observed by the handler's own checks;
-                                 ;; anything completing after fires this callback.
-                                 ;; Re-registration each pass simply overwrites.
-                                 ;; (Mirrors execution.clj.)
-                                 (when wake-fn
-                                   (p/register-wake-callback store workflow-id wake-fn))
-                                 (blet [outcome (handle-suspension engine
-                                                                   workflow-id
-                                                                   (:suspension-type exec-result)
-                                                                   (:suspension-data exec-result)
-                                                                   (:pending-asyncs exec-result)
-                                                                   (:pending-events exec-result)
-                                                                   wake-fn
-                                                                   observer)]
-                                   ;; A handler returns a bare action keyword, or a
-                                   ;; {:action :wake-at} map when the deadline it waited
-                                   ;; on is one only the handler knows (a retry backoff is
-                                   ;; computed while running the attempt, so it is not in
-                                   ;; the suspension the body threw). (Mirrors execution.clj.)
-                                   (let [action (if (map? outcome) (:action outcome) outcome)]
-                                     (when (and observer (= action :continue))
-                                       (p/on-workflow-resumed observer workflow-id))
+                      :wait-signal
+                      (prom/resolved
+                        (process-signal store workflow-id
+                                        suspension-data
+                                        pending-events-list
+                                        wake-fn
+                                        observer))
 
-                                     (if (= action :continue)
-                                       (prom/recur (inc iteration))
-                                       (do
-                                         ;; C2: record when this workflow next needs attention.
-                                         (let [sd (:suspension-data exec-result)
-                                               wake-at (if (map? outcome)
-                                                         (:wake-at outcome)
-                                                         (case action
-                                                           :wait-timer          (:fire-at sd)
-                                                           :wait-signal-timeout (:deadline sd)
-                                                           nil))]
-                                           (p/set-wake-at store workflow-id wake-at))
-                                         (action->result action workflow-id))))))
+                      :wait-signal-timeout
+                      (prom/resolved
+                        (process-signal-with-timeout store scheduler workflow-id
+                                                     suspension-data
+                                                     pending-events-list
+                                                     wake-fn
+                                                     observer))
 
-                               :failed
-                               (finalize-failed store workflow-id
-                                                (:pending-events exec-result)
-                                                (:error exec-result)
-                                                observer)))]
-              ;; exec-result may be a Promise if workflow-fn returned a Promise (e.g. from p/let)
-              (if (prom/promise? exec-result)
-                (bthen exec-result dispatch)
-                (dispatch exec-result)))))))) ; close inner (if shutdown? let), outer (do) and budget (if)
+                      :join-pending
+                      (process-join-pending store workflow-id
+                                            suspension-data
+                                            pending-events-list
+                                            observer)
 
-(defn process-child-workflow [{:keys [store executor scheduler registry] :as engine} workflow-id
-                               suspension-data pending-events observer]
-  (let [{:keys [seq child-workflow-id workflow-fn args]} suspension-data]
-    (p/save-events store workflow-id pending-events)
-    ;; This drive is inline and has no wake-fn, so a retry that parked would
-    ;; strand the child — and the backstop below would durably fail it for
-    ;; "cannot suspend". Flag it on the engine (already threaded everywhere, so
-    ;; it reaches grandchildren too) to wait instead. (Mirrors execution.clj.)
-    (-> (run-workflow-internal (assoc engine :inline-retry-backoff? true)
-                               child-workflow-id workflow-fn args
-                               {:observer observer :max-iterations 1000})
-        (bthen
-          (fn [result]
-            (if (= :completed (:status result))
-              (do
-                (p/save-event store workflow-id {:event-type        :child-workflow-completed
-                                                 :seq               seq
-                                                 :child-workflow-id child-workflow-id
-                                                 :result            (:result result)
-                                                 :timestamp         (utils/current-time-ms)})
-                (log/infof "Child workflow with id %s completed" child-workflow-id)
-                :continue)
-              (do
-                ;; A sync child that SUSPENDED is unsupported — recorded as failed
-                ;; in the parent. Also terminalize the CHILD's own history so it
-                ;; doesn't linger as a non-terminal, unresumable row for the
-                ;; ownership scan. (Mirrors execution.clj.)
-                (when (#{:waiting-signal :waiting-signal-timeout :waiting-timer :waiting-async}
-                       (:status result))
-                  (p/save-event store child-workflow-id
-                                {:event-type  :workflow-failed
-                                 :seq         (next-terminal-seq store child-workflow-id)
-                                 :workflow-id child-workflow-id
-                                 :error       {:type    "ExceptionInfo"
-                                               :message (str "Synchronous child workflows cannot suspend (" (:status result) "); use run-child-workflow-async")
-                                               :data    {:child-workflow-id child-workflow-id
-                                                         :status            (:status result)}}
-                                 :timestamp   (utils/current-time-ms)}))
-                (p/save-event store workflow-id {:event-type        :child-workflow-failed
-                                                 :seq               seq
-                                                 :child-workflow-id child-workflow-id
-                                                 :error             (or (:error result)
-                                                                        {:status (:status result)
-                                                                         :message (str "Child workflow ended with status: " (:status result))})
-                                                 :timestamp         (utils/current-time-ms)})
-                (log/infof "Child workflow with id %s failed, status: %s, error: %s" child-workflow-id (:status result) (:error result))
-                :continue))))
-        (prom/catch js/Error
-          (fn [e]
-            (p/save-event store workflow-id {:event-type        :child-workflow-failed
-                                             :seq               seq
-                                             :child-workflow-id child-workflow-id
-                                             :error             (error/throwable->map e)
-                                             :timestamp         (utils/current-time-ms)})
-            (log/warnf e "Error while executing child workflow with id %s" child-workflow-id)
-            :continue)))))
+                      :join-any-pending
+                      ;; No batch asyncs to run: the handles are pending independent child
+                      ;; workflows. Re-enter (:continue) only when join-any can actually
+                      ;; resolve — some handle completed, or all failed — otherwise WAIT for a
+                      ;; child's notify-parent-terminal wake instead of hot-spinning the loop
+                      ;; through the replay budget. (Mirrors execution.clj.)
+                      (do
+                        (when (seq pending-events-list)
+                          (p/save-events store workflow-id pending-events-list))
+                        (let [{:keys [handle-seqs]} suspension-data]
+                          (prom/resolved
+                            (if (or (some #(p/find-event store workflow-id :async-completed %) handle-seqs)
+                                    (every? #(p/find-event store workflow-id :async-failed %) handle-seqs))
+                              :continue
+                              :wait-async))))
+
+                      :child-workflow
+                      (process-child-workflow engine
+                                              workflow-id
+                                              suspension-data
+                                              pending-events-list
+                                              observer)))
+                  ;; then
+                  (fn [action] (with-async-retry-deadline pending-asyncs-list action))))))]
+    #_{:clj-kondo/ignore [:loop-without-recur]}
+    (prom/loop [iteration 0]
+      (if (>= iteration max-iterations)
+        ;; Replay budget exhausted (e.g. a non-terminating workflow loop). Persist a
+        ;; terminal :workflow-failed event so the workflow becomes resolvable instead
+        ;; of staying "running" forever with an un-recorded exception thrown out of
+        ;; the loop.
+        (do
+          (log/warnf "Workflow %s exceeded replay budget of %d iterations" workflow-id max-iterations)
+          (finalize-failed store workflow-id []
+                           (ex-info "Replay budget exceeded"
+                                    {:workflow-id workflow-id :iterations iteration})
+                           observer))
+        (do
+          (log/debugf "Internal loop %d of %d" iteration max-iterations)
+
+          ;; Check if executor is shutting down - stop processing to avoid endless rejections
+          (if (p/shutdown? executor)
+            (do
+              (log/infof "Executor shutting down, suspending workflow")
+              {:status :suspended
+               :workflow-id workflow-id})
+
+            (let [history     (p/load-history store workflow-id)
+                  ctx         (make-workflow-context workflow-id history store registry observer
+                                                     :protocols (:protocols engine))
+                  exec-result (binding [ctx/*workflow-context* ctx]
+                                (log/debugf "Executing workflow function %s..." workflow-fn)
+                                (execute-workflow-fn workflow-fn args))
+                    dispatch (fn [exec-result]
+                               (log/debugf "Workflow function executed, got: %s" (:status exec-result))
+                               (case (:status exec-result)
+                                 :completed
+                                 (finalize-completed store executor workflow-id
+                                                     (:pending-asyncs exec-result)
+                                                     (:pending-events exec-result)
+                                                     (:result exec-result)
+                                                     observer)
+
+                                 :cancelled
+                                 ;; Cancellation surfaced from the body (a stub's
+                                 ;; check-cancelled!). Any saga rollback already ran
+                                 ;; inside the user's catch before the cancel exception
+                                 ;; was rethrown, so just finalize.
+                                 (finalize-cancelled store workflow-id
+                                                     (:pending-events exec-result)
+                                                     observer)
+
+                                 :suspended
+                                 (do
+                                   ;; Arm the generic wake callback BEFORE the suspension
+                                   ;; handler runs its eligibility checks: a completion/wake
+                                   ;; landing between a handler's check and a post-hoc
+                                   ;; registration would be dropped (X5, the async/child-join
+                                   ;; lost-wake window — same TOCTOU class as bug 2.1 for
+                                   ;; signals). Anything that completed before this
+                                   ;; registration is observed by the handler's own checks;
+                                   ;; anything completing after fires this callback.
+                                   ;; Re-registration each pass simply overwrites.
+                                   ;; (Mirrors execution.clj.)
+                                   (when wake-fn
+                                     (p/register-wake-callback store workflow-id wake-fn))
+                                   (blet [outcome (handle-suspension engine
+                                                                     workflow-id
+                                                                     (:suspension-type exec-result)
+                                                                     (:suspension-data exec-result)
+                                                                     (:pending-asyncs exec-result)
+                                                                     (:pending-events exec-result)
+                                                                     wake-fn
+                                                                     observer)]
+                                     ;; A handler returns a bare action keyword, or a
+                                     ;; {:action :wake-at} map when the deadline it waited
+                                     ;; on is one only the handler knows (a retry backoff is
+                                     ;; computed while running the attempt, so it is not in
+                                     ;; the suspension the body threw). (Mirrors execution.clj.)
+                                     (let [action (if (map? outcome) (:action outcome) outcome)]
+                                       (when (and observer (= action :continue))
+                                         (p/on-workflow-resumed observer workflow-id))
+
+                                       (if (= action :continue)
+                                         (prom/recur (inc iteration))
+                                         (do
+                                           ;; C2: record when this workflow next needs attention.
+                                           (let [sd (:suspension-data exec-result)
+                                                 wake-at (if (map? outcome)
+                                                           (:wake-at outcome)
+                                                           (case action
+                                                             :wait-timer          (:fire-at sd)
+                                                             :wait-signal-timeout (:deadline sd)
+                                                             nil))]
+                                             (p/set-wake-at store workflow-id wake-at))
+                                           (action->result action workflow-id))))))
+
+                                 :failed
+                                 (finalize-failed store workflow-id
+                                                  (:pending-events exec-result)
+                                                  (:error exec-result)
+                                                  observer)))]
+                ;; exec-result may be a Promise if workflow-fn returned a Promise (e.g. from p/let)
+                (if (prom/promise? exec-result)
+                  (bthen exec-result dispatch)
+                  (dispatch exec-result))))))))) ; close inner (if shutdown? let), outer (do), budget (if) and letfn

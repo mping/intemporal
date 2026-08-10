@@ -112,73 +112,6 @@
 (defonce app-state (atom {:engine nil :state init-state}))
 (defonce pending-resolve (atom nil))
 
-(declare render-all! render-tables! save-history!)
-
-(defn apply-transition [rules current-state]
-  (swap! app-state assoc :state current-state)
-  (render-all!)
-  (js/setTimeout
-    (fn []
-      (when-let [engine (:engine @app-state)]
-        (save-history! engine)
-        (render-tables! engine)))
-    0)
-  (js/Promise. (fn [resolve _]
-                 (reset! pending-resolve resolve))))
-
-;;;;
-;; Workflow
-;;
-;; I/O stubs are created once and called inside the bloop. Each returns
-;; {:event <keyword> & data}; the event drives fsm/transit and the data merges
-;; into ctx so downstream activities receive ids from upstream ones.
-;; No try/catch here — error handling lives inside each activity function.
-
-(defn-workflow run-fsm-workflow [rules init-state]
-  (let [get-next-event (intemporal/stub #'apply-transition)
-        provision-vm   (intemporal/stub #'provision-vm!)
-        attach-vol     (intemporal/stub #'attach-volume!)
-        boot-vm        (intemporal/stub #'boot-vm!)
-        halt-vm        (intemporal/stub #'halt-vm!)
-        detach-vol     (intemporal/stub #'detach-volume!)
-        deprovision    (intemporal/stub #'deprovision!)]
-    (bloop [current init-state ctx {}]
-      (let [transitions (get rules current)]
-        (if (empty? transitions)
-          current
-          (let [[evt ctx']
-                (case current
-                  :state/provisioning
-                  (let [r (provision-vm)]
-                    [(:event r) (merge ctx (dissoc r :event))])
-
-                  :state/attaching
-                  (let [r (attach-vol (:instance-id ctx))]
-                    [(:event r) (merge ctx (dissoc r :event))])
-
-                  :state/booting
-                  (let [r (boot-vm (:instance-id ctx) (:volume-id ctx))]
-                    [(:event r) ctx])
-
-                  :state/halting
-                  (let [r (halt-vm (:instance-id ctx))]
-                    [(:event r) ctx])
-
-                  :state/detaching
-                  (let [r (detach-vol (:volume-id ctx))]
-                    [(:event r) ctx])
-
-                  :state/deprovisioning
-                  (let [r (deprovision (:instance-id ctx))]
-                    [(:event r) ctx])
-
-                  ;; :state/init and :state/running: user picks via button
-                  [(get-next-event rules current) ctx])]
-
-            (p/recur (-> (fsm/transit {::fsm/rules rules ::fsm/state current} evt)
-                         ::fsm/state)
-                     ctx')))))))
-
 ;;;;
 ;; localStorage persistence
 
@@ -298,6 +231,74 @@
   (let [{:keys [state]} @app-state]
     (render-diagram! provision-rules state)
     (render-controls! provision-rules state)))
+
+;;;;
+;; User-input activity, continued
+
+(defn apply-transition [rules current-state]
+  (swap! app-state assoc :state current-state)
+  (render-all!)
+  (js/setTimeout
+    (fn []
+      (when-let [engine (:engine @app-state)]
+        (save-history! engine)
+        (render-tables! engine)))
+    0)
+  (js/Promise. (fn [resolve _]
+                 (reset! pending-resolve resolve))))
+
+;;;;
+;; Workflow
+;;
+;; I/O stubs are created once and called inside the bloop. Each returns
+;; {:event <keyword> & data}; the event drives fsm/transit and the data merges
+;; into ctx so downstream activities receive ids from upstream ones.
+;; No try/catch here — error handling lives inside each activity function.
+
+(defn-workflow run-fsm-workflow [rules init-state]
+  (let [get-next-event (intemporal/stub #'apply-transition)
+        provision-vm   (intemporal/stub #'provision-vm!)
+        attach-vol     (intemporal/stub #'attach-volume!)
+        boot-vm        (intemporal/stub #'boot-vm!)
+        halt-vm        (intemporal/stub #'halt-vm!)
+        detach-vol     (intemporal/stub #'detach-volume!)
+        deprovision    (intemporal/stub #'deprovision!)]
+    (bloop [current init-state ctx {}]
+      (let [transitions (get rules current)]
+        (if (empty? transitions)
+          current
+          (let [[evt ctx']
+                (case current
+                  :state/provisioning
+                  (let [r (provision-vm)]
+                    [(:event r) (merge ctx (dissoc r :event))])
+
+                  :state/attaching
+                  (let [r (attach-vol (:instance-id ctx))]
+                    [(:event r) (merge ctx (dissoc r :event))])
+
+                  :state/booting
+                  (let [r (boot-vm (:instance-id ctx) (:volume-id ctx))]
+                    [(:event r) ctx])
+
+                  :state/halting
+                  (let [r (halt-vm (:instance-id ctx))]
+                    [(:event r) ctx])
+
+                  :state/detaching
+                  (let [r (detach-vol (:volume-id ctx))]
+                    [(:event r) ctx])
+
+                  :state/deprovisioning
+                  (let [r (deprovision (:instance-id ctx))]
+                    [(:event r) ctx])
+
+                  ;; :state/init and :state/running: user picks via button
+                  [(get-next-event rules current) ctx])]
+
+            (p/recur (-> (fsm/transit {::fsm/rules rules ::fsm/state current} evt)
+                         ::fsm/state)
+                     ctx')))))))
 
 ;;;;
 ;; Fulfilling user-input Promises
