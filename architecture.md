@@ -82,7 +82,7 @@ Workflows transition through the following states, which are derived from databa
 
 ### Internal Suspension Wait States
 When a workflow is in the `:running` status, it may be suspended waiting for external input. The engine tracks these sub-states to determine if a worker needs to wake the workflow:
-* **Timer Wait (`:waiting-timer`)**: Waiting for the clock to reach `fire-at` (timer expiry).
+* **Timer Wait (`:waiting-timer`)**: Waiting for the clock to reach `fire-at` (timer expiry), or an activity's `:retry-at` — a retry backoff is a suspension, not a sleep on the drive thread, so the attempt counter and the remaining delay both survive a crash and a worker on any pod can take the workflow over when it comes due.
 * **Signal Wait (`:waiting-signal`)**: Blocked waiting for a specific signal name to be delivered.
 * **Signal Timeout Wait (`:waiting-signal-timeout`)**: Waiting for a signal name, or a clock deadline if the signal doesn't arrive.
 * **Async/Join Wait (`:waiting-async`)**: Blocked waiting for parallel async handles to finish execution.
@@ -195,9 +195,11 @@ flowchart TD
 
     Status -->|":suspended"| Dispatch{"suspension-type?"}
 
-    Dispatch -->|":activity"| HasAsync{"pending-asyncs?"}
-    HasAsync -->|Yes| Parallel["execute all asyncs in parallel\nVirtual Thread pool\nsave :activity-completed/failed"] --> AC[":continue"]
-    HasAsync -->|No| Single["execute-with-retry\nVirtual Thread\nsave :activity-completed/failed"] --> AC
+    Dispatch -->|":activity"| HasAsync{"due pending-asyncs?"}
+    HasAsync -->|Yes| Parallel["run each due async ONCE in parallel\nVirtual Thread pool\nsave :activity-completed/failed\nor :activity-attempt-failed (retry)"] --> AC[":continue"]
+    HasAsync -->|No| Single["run-attempt: ONE attempt\nVirtual Thread\nsave :activity-completed/failed\nor :activity-attempt-failed (retry)"] --> Retry{"retry scheduled?"}
+    Retry -->|No| AC
+    Retry -->|"Yes: park until :retry-at"| Wait
 
     Dispatch -->|":timer\n:wait-signal\n:wait-signal-timeout\n:child-workflow\n:join-*"| Other["schedule timer / register signal callback\nor run child workflow"] --> OtherAction{"action?"}
 

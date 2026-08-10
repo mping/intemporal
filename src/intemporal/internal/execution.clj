@@ -76,128 +76,297 @@
           {:status :retryable-error :error error-map :exception e :duration duration})))))
 
 (defn- record-attempt!
-  "Persist one consumed retry attempt (kimi.md X8). Written BEFORE the backoff —
-   the window a crash lands in — so the count survives the drive that spent it."
-  [store workflow-id seq-num activity-name attempt error-map duration-ms will-retry?]
-  (log/debugf "Recording attempt %d (will-retry: %s)" attempt will-retry?)
+  "Persist one consumed retry attempt (kimi.md X8). Written BEFORE anything waits
+   on the backoff — the window a crash lands in — so both the count and the
+   deadline survive the drive that spent them."
+  [store workflow-id seq-num activity-name attempt error-map duration-ms will-retry? retry-at]
+  (log/debugf "Recording attempt %d (will-retry: %s, retry-at: %s)" attempt will-retry? retry-at)
   (p/save-event store workflow-id
                 (a/attempt-failed-event seq-num activity-name attempt
-                                        error-map duration-ms will-retry?)))
+                                        error-map duration-ms will-retry? retry-at)))
 
-(defn execute-with-retry
-  "Execute an activity, retrying according to retry-policy (nil = no retry).
+(defn run-attempt
+  "Run ONE attempt of an activity and record its outcome. The retry LOOP is the
+   drive loop's job now, not this function's (kimi.md X8): a backoff is a durable
+   suspension, so nothing here ever sleeps.
 
-   Retry state is durable (kimi.md X8): the loop starts at the attempt after the
-   last one history records (`attempt-state`, recovered by `stub`), and
-   `record-attempt!` persists each consumed attempt before backing off. Without
-   both halves the counter silently restarts at 1 on resume and an activity with
-   side effects runs max-attempts times per drive rather than in total."
+   Starts at the attempt after the last one history records (`attempt-state`,
+   recovered by `stub`) and returns one of:
+     {:status :success ...}          -> caller writes :activity-completed
+     {:status :failed ...}           -> caller writes :activity-failed (terminal)
+     {:status :retry-scheduled ...}  -> nothing terminal; the recorded :retry-at
+                                        is when the body may try again"
   [executor activity-name args timeout-ms retry-policy observer workflow-id seq-num
    attempt-state record-attempt!]
-  (loop [attempt (a/next-attempt attempt-state)]
-    (let [result (attempt-once executor activity-name args timeout-ms observer workflow-id seq-num attempt)]
-      (case (:status result)
-        :success        result
-        :rejected       (assoc result :status :failed)
-        :retryable-error
-        (let [retry? (boolean (and retry-policy
-                                   (a/should-retry? retry-policy (:exception result) attempt)))]
-          ;; Infrastructure failures are re-executed rather than replayed, so
-          ;; they must not spend the budget (see a/infrastructure-failure?).
-          (when-not (a/infrastructure-failure? (:exception result))
-            (record-attempt! attempt (:error result) (:duration result) retry?))
-          (if retry?
-            (let [backoff (a/calculate-backoff retry-policy attempt)]
-              (log/debugf "Activity sleeping %dms before retrying (attempt %d)" backoff attempt)
-              (Thread/sleep backoff)
-              (recur (inc attempt)))
-            (-> result (assoc :status :failed :attempts attempt) (dissoc :exception))))))))
+  (let [attempt (a/next-attempt attempt-state)
+        result  (attempt-once executor activity-name args timeout-ms observer workflow-id seq-num attempt)]
+    (case (:status result)
+      :success        result
+      :rejected       (assoc result :status :failed)
+      :retryable-error
+      (let [infra?   (a/infrastructure-failure? (:exception result))
+            retry?   (boolean (and retry-policy (not infra?)
+                                   (a/should-retry? retry-policy (:exception result) attempt)))
+            retry-at (a/retry-at retry-policy attempt retry?)]
+        ;; Infrastructure failures are re-executed rather than replayed, so they
+        ;; must not spend the budget (see a/infrastructure-failure?) — they fall
+        ;; through to a terminal :activity-failed carrying the infra kind, which
+        ;; is what makes `stub` reschedule instead of replaying the error.
+        (when-not infra?
+          (record-attempt! attempt (:error result) (:duration result) retry? retry-at))
+        (if retry?
+          {:status :retry-scheduled :retry-at retry-at :attempts attempt}
+          (-> result (assoc :status :failed :attempts attempt) (dissoc :exception)))))))
 
-(defn process-pending-activity [store executor workflow-id
-                                {:keys [seq activity-name args timeout-ms retry-policy attempt-state]
-                                 :as suspension-data}
-                                pending-events observer]
+(defn park-until-retry!
+  "Park the workflow until a recorded retry comes due, instead of sleeping the
+   backoff away on the drive thread. Returns the `{:action :wake-at}` shape so
+   the drive loop persists the deadline: `wake-at` is what lets a worker on ANY
+   pod pick the workflow up when it is due, and skip it until then.
+
+   The timer is only for the in-process driver, which parks on a wake queue and
+   has no poll to fall back on — a drive with no `wake-fn` (a worker resume)
+   relies entirely on `wake-at`, so arming there would just leak a dead entry
+   into the scheduler for the length of every backoff.
+
+   Deliberately NOT `process-timer`: that writes a :timer-fired event, and this
+   seq belongs to the activity, not to a timer. The callback only wakes."
+  [scheduler workflow-id seq retry-at wake-fn observer]
+  (log/infof "Activity retry at seq %s due in %dms; suspending"
+             seq (max 0 (- retry-at (utils/current-time-ms))))
+  (when wake-fn
+    (-notify p/on-timer-scheduled observer workflow-id seq retry-at)
+    (p/schedule-timer scheduler workflow-id seq retry-at (fn [] (wake-fn))))
+  {:action :wait-retry :wake-at retry-at})
+
+(defn process-pending-activity
+  "Run (at most) one attempt of the suspended activity and record its outcome.
+
+   Whether an attempt may run at all is decided HERE rather than in the workflow
+   body: `stub` always schedules, and the engine owns the retry clock. That keeps
+   the body's suspension shape stable for `async`, which re-derives an incomplete
+   async from it, and it means any re-drive — a worker poll, an unrelated signal,
+   a cancel — re-parks instead of running the attempt early."
+  [store scheduler executor workflow-id
+   {:keys [seq activity-name args timeout-ms retry-policy attempt-state]
+    :as suspension-data}
+   pending-events wake-fn observer inline-retry-backoff?]
   (log/with-mdc {:activity activity-name :seqnum seq}
-    (let [exec-result (if (a/retry-budget-spent? attempt-state)
-                        ;; A previous drive spent the last attempt the policy
-                        ;; allowed and crashed before recording the outcome.
-                        ;; Running the activity again here would exceed
-                        ;; :max-attempts, so finalize from the recorded error.
-                        (do
-                          (log/infof "Retry budget already spent after %d attempt(s); failing from recorded attempt"
-                                     (:attempts attempt-state))
-                          {:status   :failed
-                           :error    (:error attempt-state)
-                           :attempts (:attempts attempt-state)})
-                        (execute-with-retry executor activity-name args timeout-ms
-                                            retry-policy observer workflow-id seq
-                                            attempt-state
-                                            (partial record-attempt! store workflow-id seq activity-name)))]
-      ;; Save all pending events first
-      (p/save-events store workflow-id pending-events)
-      ;; Then save the completion or failure
-      (let [success? (= :success (:status exec-result))
-            event    (cond-> {:event-type    (if success? :activity-completed :activity-failed)
-                              :seq           seq
-                              :activity-name activity-name
-                              :result        (:result exec-result)
-                              :duration-ms   (:duration exec-result)
-                              :attempts      (:attempts exec-result)
-                              :timestamp     (utils/current-time-ms)}
+    ;; Save pending events on EVERY path, including the parking ones: `stub` will
+    ;; re-emit :activity-scheduled next pass, but the async re-enqueue reads it
+    ;; back out of history, so it must be durable before we park.
+    (p/save-events store workflow-id pending-events)
+    (loop [state attempt-state]
+      (if (a/retry-pending? state)
+        (if inline-retry-backoff?
+          ;; This drive cannot be woken (an inline sync-child drive has no
+          ;; wake-fn and no ownership row), so parking would strand it. Wait here
+          ;; instead — the pre-X8 behaviour, kept only for that case. Waits to the
+          ;; PERSISTED deadline, never a freshly computed backoff, so a resumed
+          ;; child serves out the remainder rather than starting over.
+          (do
+            (Thread/sleep (max 0 (- (:retry-at state) (utils/current-time-ms))))
+            (recur (dissoc state :retry-at)))
+          (park-until-retry! scheduler workflow-id seq (:retry-at state) wake-fn observer))
+        (let [exec-result (if (a/retry-budget-spent? state)
+                            ;; A previous drive spent the last attempt the policy
+                            ;; allowed and crashed before recording the outcome.
+                            ;; Running the activity again here would exceed
+                            ;; :max-attempts, so finalize from the recorded error.
+                            (do
+                              (log/infof "Retry budget already spent after %d attempt(s); failing from recorded attempt"
+                                         (:attempts state))
+                              {:status   :failed
+                               :error    (:error state)
+                               :attempts (:attempts state)})
+                            (run-attempt executor activity-name args timeout-ms
+                                         retry-policy observer workflow-id seq
+                                         state
+                                         (partial record-attempt! store workflow-id seq activity-name)))]
+          (if (= :retry-scheduled (:status exec-result))
+            ;; A scheduled retry is not an outcome: writing :activity-failed here
+            ;; would make `stub` replay it as a durable failure on the next pass.
+            ;; The recorded attempt carries everything the retry needs, so park on
+            ;; it directly rather than burning a replay pass to rediscover it.
+            (recur {:attempts   (:attempts exec-result)
+                    :will-retry true
+                    :retry-at   (:retry-at exec-result)})
+            (let [success? (= :success (:status exec-result))
+                  event    (cond-> {:event-type    (if success? :activity-completed :activity-failed)
+                                    :seq           seq
+                                    :activity-name activity-name
+                                    :result        (:result exec-result)
+                                    :duration-ms   (:duration exec-result)
+                                    :attempts      (:attempts exec-result)
+                                    :timestamp     (utils/current-time-ms)}
                              success? (assoc :result (:result exec-result))
                              (not success?) (assoc :error (:error exec-result)))]
-        (p/save-event store workflow-id event)
-        :continue))))
+              (p/save-event store workflow-id event)
+              :continue)))))))
+
+;; ============================================================================
+;; Async batches: the ENGINE owns the retry loop (kimi.md X8)
+;; ============================================================================
+;;
+;; The executor used to retry internally, on a pool thread that has no store, no
+;; workflow-id and no seq — so an async retry could never be recorded and every
+;; crash restarted its count at 1. Now the executor runs each activity exactly
+;; once and everything below decides whether to retry, exactly as the sequential
+;; path does, using the same `intemporal.internal.activity` helpers.
+
+(defn due-asyncs
+  "The pending asyncs whose activity may run right now: everything except the
+   ones still serving a recorded retry backoff."
+  [pending-asyncs]
+  (remove #(a/retry-pending? (:attempt-state %)) pending-asyncs))
+
+(defn arm-async-retry-timers!
+  "Wake this workflow when each backing-off async comes due. Without this the
+   in-process driver would park on `:wait-async` forever: `process-join-pending`
+   arms nothing, and a retry deadline has no other waker. Timers are keyed
+   [wf, activity-seq] and `schedule-timer` is idempotent, so re-arming on every
+   pass is free. Only for drives that HAVE a `wake-fn` — a worker resume has none
+   and is woken by `wake-at` instead, so arming there would leak a dead entry
+   into the scheduler for the length of every backoff."
+  [scheduler workflow-id pending-asyncs wake-fn]
+  (when wake-fn
+    (doseq [{:keys [activity-seq attempt-state]} pending-asyncs
+            :when (a/retry-pending? attempt-state)]
+      (p/schedule-timer scheduler workflow-id activity-seq (:retry-at attempt-state)
+                        (fn [] (wake-fn))))))
+
+(defn earliest-async-retry
+  "The soonest instant any backing-off async becomes due, or nil if none is."
+  [pending-asyncs]
+  (->> pending-asyncs
+       (keep #(when (a/retry-pending? (:attempt-state %))
+                (:retry-at (:attempt-state %))))
+       (reduce (fn [a b] (if a (min a b) b)) nil)))
+
+(defn with-async-retry-deadline
+  "Give a bare `:wait-async` action the deadline of the soonest backing-off async.
+
+   `:wait-async` normally means \"eligible whenever\" (wake-at nil), which is right
+   for a handle waiting on a running activity but wrong for one waiting on a
+   clock: a worker would re-drive — and fully replay — the workflow on every poll
+   for the whole backoff, crowding out other work in the same `list-pending`
+   window. Anything that already carries its own deadline is passed through."
+  [pending-asyncs action]
+  (if (= :wait-async action)
+    (if-let [due (earliest-async-retry pending-asyncs)]
+      {:action :wait-async :wake-at due}
+      action)
+    action))
+
+(defn- async-terminal-failure-events
+  "The events that resolve an async handle as failed."
+  [{:keys [activity-name activity-seq handle-seq]} error attempt now workflow-id observer]
+  (-notify p/on-async-failed observer workflow-id handle-seq error)
+  (log/tracef "Got completion event: activity failed, error: %s" error)
+  [{:event-type    :activity-failed
+    :seq           activity-seq
+    :activity-name activity-name
+    :error         error
+    :attempts      attempt
+    :timestamp     now}
+   {:event-type :async-failed
+    :seq        handle-seq
+    :last-seq   activity-seq
+    :error      error
+    :timestamp  now}])
+
+(defn- async-completion-events
+  "History for one finished async attempt. A retry that is merely SCHEDULED
+   writes only the attempt record: no :async-completed / :async-failed, so the
+   handle stays pending and `join` keeps parking until the retries resolve."
+  [{:keys [activity-name activity-seq handle-seq retry-policy attempt-state] :as async-info}
+   result now workflow-id observer drain?]
+  (log/with-mdc {:activity activity-name :seqnum activity-seq}
+    (if (= :success (:status result))
+      (do
+        (-notify p/on-async-completed observer workflow-id handle-seq (:result result))
+        (log/tracef "Got completion event: activity succeeded, result: %s" result)
+        [{:event-type    :activity-completed
+          :seq           activity-seq
+          :activity-name activity-name
+          :result        (:result result)
+          :duration-ms   (:duration result)
+          :attempts      (a/next-attempt attempt-state)
+          :timestamp     now}
+         {:event-type :async-completed
+          :seq        handle-seq
+          :last-seq   activity-seq
+          :result     (:result result)
+          :timestamp  now}])
+      (let [attempt  (a/next-attempt attempt-state)
+            error    (:error result)
+            ;; Classify from the LIVE exception the executor hands back, not from
+            ;; the serialized map: a user :retryable-fn is written against an
+            ;; exception (`#(instance? SQLException %)`) and would silently answer
+            ;; false for a map, so async activities would never retry.
+            exception (:exception result)
+            infra?   (a/infrastructure-failure? exception)
+            retry?   (boolean (and retry-policy (not infra?) (not drain?)
+                                   (a/should-retry? retry-policy exception attempt)))
+            retry-at (a/retry-at retry-policy attempt retry?)]
+        (cond
+          retry?
+          (do
+            (log/infof "Async activity failed (attempt %d); retrying at %s" attempt retry-at)
+            [(a/attempt-failed-event activity-seq activity-name attempt
+                                     error (:duration result) true retry-at)])
+
+          ;; Infrastructure failures consume no budget: `async` re-enqueues them
+          ;; from the :activity-failed kind (X6/E4/X4), so record no attempt.
+          infra?
+          (async-terminal-failure-events async-info error attempt now workflow-id observer)
+
+          :else
+          (into [(a/attempt-failed-event activity-seq activity-name attempt
+                                         error (:duration result) false nil)]
+                (async-terminal-failure-events async-info error attempt now workflow-id observer)))))))
+
+(defn- spent-budget-events
+  "Resolve an async whose recorded attempt was granted no retry but whose outcome
+   never got written (a crash in between). Re-running it would spend an attempt
+   the policy never granted — the same guard the sequential path applies."
+  [{:keys [attempt-state] :as async-info} now workflow-id observer]
+  (log/infof "Async retry budget already spent after %d attempt(s); failing from recorded attempt"
+             (:attempts attempt-state))
+  (async-terminal-failure-events async-info (:error attempt-state) (:attempts attempt-state)
+                                 now workflow-id observer))
 
 (defn process-pending-asyncs-parallel
-  "Process all pending async operations in parallel"
-  [store executor workflow-id pending-asyncs pending-events observer]
-  (when (seq pending-asyncs)
-    ;; Save all pending events first
-    (p/save-events store workflow-id pending-events)
+  "Run the DUE pending asyncs and record their outcomes. Asyncs still serving a
+   retry backoff are skipped; arming their timers is the caller's job.
 
-    ;; Execute all activities in parallel
-    ;; Pass complete async-info including retry-policy, activity-seq, handle-seq
-    (log/infof "Executing %d activities in parallel via executor %s" (count pending-asyncs) executor)
-    (let [results (p/execute-activities-parallel executor pending-asyncs)
-          now (utils/current-time-ms)
+   `drain?` is the finalization path: the workflow body has already completed, so
+   these handles are un-joined and their results discarded. Waiting out a backoff
+   would only stall completion, so everything runs now and nothing is retried."
+  ([store executor workflow-id pending-asyncs pending-events observer]
+   (process-pending-asyncs-parallel store executor workflow-id pending-asyncs pending-events
+                                    observer false))
+  ([store executor workflow-id pending-asyncs pending-events observer drain?]
+   (when (seq pending-asyncs)
+     ;; Save all pending events first
+     (p/save-events store workflow-id pending-events)
 
-          ;; Create completion events for both activities and async handles
-          completion-events (mapcat (fn [{:keys [activity-name activity-seq] :as async-info} result]
-                                      (log/with-mdc {:activity activity-name :seqnum activity-seq}
-                                        (if (= :success (:status result))
-                                          (do
-                                            (-notify p/on-async-completed observer workflow-id (:handle-seq async-info) (:result result))
-                                            (log/tracef "Got completion event: activity succeeded, result: %s" result))
-                                          (do
-                                            (-notify p/on-async-failed observer workflow-id (:handle-seq async-info) (:error result))
-                                            (log/tracef "Got completion event: activity failed, error: %s" (:error result))))
-                                        (if (= :success (:status result))
-                                          [{:event-type    :activity-completed
-                                            :seq           (:activity-seq async-info)
-                                            :activity-name (:activity-name async-info)
-                                            :result        (:result result)
-                                            :duration-ms   (:duration result)
-                                            :timestamp     now}
-                                           {:event-type :async-completed
-                                            :seq        (:handle-seq async-info)
-                                            :last-seq   (:activity-seq async-info)
-                                            :result     (:result result)
-                                            :timestamp  now}]
-                                          ;; else
-                                          [{:event-type    :activity-failed
-                                            :seq           (:activity-seq async-info)
-                                            :activity-name (:activity-name async-info)
-                                            :error         (:error result)
-                                            :timestamp     now}
-                                           {:event-type :async-failed
-                                            :seq        (:handle-seq async-info)
-                                            :last-seq   (:activity-seq async-info)
-                                            :error      (:error result)
-                                            :timestamp  now}])))
-                                    pending-asyncs results)]
-      (p/save-events store workflow-id completion-events)))
-  :continue)
+     (let [{spent true eligible false} (group-by #(a/retry-budget-spent? (:attempt-state %))
+                                                 pending-asyncs)
+           runnable (vec (if drain? eligible (due-asyncs eligible)))
+           now      (utils/current-time-ms)
+           events   (when (seq runnable)
+                      ;; One attempt each: whether to retry is decided here, from
+                      ;; the durable attempt record, never inside the executor.
+                      (log/infof "Executing %d activities in parallel via executor %s"
+                                 (count runnable) executor)
+                      (let [results (p/execute-activities-parallel executor runnable)]
+                        (mapcat #(async-completion-events %1 %2 now workflow-id observer drain?)
+                                runnable results)))]
+       (when-let [all (seq (concat (mapcat #(spent-budget-events % now workflow-id observer) spent)
+                                   events))]
+         (p/save-events store workflow-id all))))
+   :continue))
 
 (defn process-timer [store scheduler workflow-id suspension-data pending-events
                       wake-fn observer]
@@ -472,12 +641,16 @@
 (defn finalize-completed
   "Save completion events and return result."
   [store executor workflow-id pending-asyncs pending-events result observer]
-  ;; Process any remaining pending asyncs before completing
+  ;; Process any remaining pending asyncs before completing. Drain mode: these
+  ;; are un-joined (their results are discarded), so a retry backoff must not be
+  ;; waited out — and skipping them would abandon the work entirely, since this
+  ;; is the last time anything looks at them.
   (when (seq pending-asyncs)
     (process-pending-asyncs-parallel store executor workflow-id
                                      pending-asyncs
                                      pending-events
-                                     observer))
+                                     observer
+                                     true))
   (when (and (empty? pending-asyncs)
              (seq pending-events))
     (p/save-events store workflow-id pending-events))
@@ -561,6 +734,12 @@
                           :workflow-id workflow-id}
     :wait-timer {:status :waiting-timer
                  :workflow-id workflow-id}
+    ;; A retry backoff IS a clock wait, so it reports the existing
+    ;; :waiting-timer status rather than inventing one: every consumer of the
+    ;; waiting statuses (both drivers, the sync-child backstop) already handles
+    ;; it correctly, and a new status would have to be added to each by hand.
+    :wait-retry {:status :waiting-timer
+                 :workflow-id workflow-id}
     :wait-async {:status :waiting-async
                  :workflow-id workflow-id}
     ;; :continue should not reach here
@@ -570,9 +749,14 @@
 
 (defn handle-suspension
   "Dispatch suspension to appropriate handler based on type.
-   Returns action keyword: :continue or :wait-*"
+   Returns `:continue`, a `:wait-*` keyword, or a `{:action :wake-at}` map for a
+   wait whose deadline only the handler knows.
+
+   The engine's `:inline-retry-backoff?` marks a drive that cannot be woken (an
+   inline sync-child drive), for which a retry backoff is waited out rather than
+   parked on."
   [engine workflow-id suspension-type suspension-data pending-asyncs pending-events wake-fn observer]
-  (let [{:keys [store executor scheduler]} engine
+  (let [{:keys [store executor scheduler inline-retry-backoff?]} engine
         pending-asyncs-list pending-asyncs
         pending-events-list pending-events]
     (-notify p/on-workflow-suspended observer workflow-id suspension-type)
@@ -582,19 +766,30 @@
     ;; suspension used to drop it, orphaning the async's activity forever).
     ;; Returns :continue so the loop re-runs the pass and the original suspension
     ;; re-arises with an empty batch.
-    (if (seq pending-asyncs-list)
+    ;;
+    ;; Only the asyncs that are actually DUE count as a batch: one still serving a
+    ;; retry backoff must not be run early, and must not make this look like work
+    ;; either — returning :continue with nothing to run would spin the pass (and
+    ;; the replay budget) until its deadline. With nothing due we arm the timers
+    ;; and fall through to the real suspension, so an unrelated activity in the
+    ;; same pass still gets to run instead of parking behind the backoff.
+    (arm-async-retry-timers! scheduler workflow-id pending-asyncs-list wake-fn)
+    (if (seq (due-asyncs pending-asyncs-list))
       (do
         (process-pending-asyncs-parallel store executor workflow-id
                                          pending-asyncs-list
                                          pending-events-list
                                          observer)
         :continue)
-      (case suspension-type
+      (with-async-retry-deadline pending-asyncs-list
+        (case suspension-type
         :activity
-        (process-pending-activity store executor workflow-id
+        (process-pending-activity store scheduler executor workflow-id
                                   suspension-data
                                   pending-events-list
-                                  observer)
+                                  wake-fn
+                                  observer
+                                  inline-retry-backoff?)
 
         :timer
         (process-timer store scheduler workflow-id
@@ -643,7 +838,7 @@
                                 workflow-id
                                 suspension-data
                                 pending-events-list
-                                observer)))))
+                                observer))))))
 
 
 (defn run-once
@@ -739,14 +934,20 @@
                   ;; re-enter its loop. Re-registration each pass simply overwrites.
                   (when wake-fn
                     (p/register-wake-callback store workflow-id wake-fn))
-                  (let [action (handle-suspension engine
-                                                  workflow-id
-                                                  (:suspension-type exec-result)
-                                                  (:suspension-data exec-result)
-                                                  (:pending-asyncs exec-result)
-                                                  (:pending-events exec-result)
-                                                  wake-fn
-                                                  observer)]
+                  (let [outcome (handle-suspension engine
+                                                   workflow-id
+                                                   (:suspension-type exec-result)
+                                                   (:suspension-data exec-result)
+                                                   (:pending-asyncs exec-result)
+                                                   (:pending-events exec-result)
+                                                   wake-fn
+                                                   observer)
+                        ;; A handler returns a bare action keyword, or a
+                        ;; {:action :wake-at} map when the deadline it waited on
+                        ;; is one only the handler knows (a retry backoff is
+                        ;; computed while running the attempt, so it is not in the
+                        ;; suspension the body threw).
+                        action  (if (map? outcome) (:action outcome) outcome)]
                     (when (and observer (= action :continue))
                       (p/on-workflow-resumed observer workflow-id))
 
@@ -757,10 +958,12 @@
                         ;; ownership scan can skip it until due. Timer waits carry a
                         ;; clock deadline; signal/async waits are always eligible (nil).
                         (let [sd (:suspension-data exec-result)
-                              wake-at (case action
-                                        :wait-timer          (:fire-at sd)
-                                        :wait-signal-timeout (:deadline sd)
-                                        nil)]
+                              wake-at (if (map? outcome)
+                                        (:wake-at outcome)
+                                        (case action
+                                          :wait-timer          (:fire-at sd)
+                                          :wait-signal-timeout (:deadline sd)
+                                          nil))]
                           (p/set-wake-at store workflow-id wake-at))
                         (action->result action workflow-id)))))
 
@@ -794,7 +997,12 @@
     ;; In a real implementation, this could be async
     (try
       (let [result (octx/with-context! (or child-ctx (octx/current))
-                     (run-workflow-internal engine
+                     ;; This drive is inline and has no wake-fn, so a retry that
+                     ;; parked would strand the child — and the backstop below
+                     ;; would durably fail it for "cannot suspend". Flag it on the
+                     ;; engine (which is already threaded everywhere, and so
+                     ;; carries the flag to grandchildren too) to wait instead.
+                     (run-workflow-internal (assoc engine :inline-retry-backoff? true)
                                             child-workflow-id workflow-fn args
                                             {:observer observer
                                              :max-iterations 1000}))]

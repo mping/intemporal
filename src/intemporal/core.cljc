@@ -114,6 +114,13 @@
                 ;; the engine continues the retry sequence instead of restarting
                 ;; it (X8). Interruptions and rejections record no attempt, so a
                 ;; reschedule for those carries the budget across untouched.
+                ;;
+                ;; Scheduling here is unconditional even mid-backoff: whether the
+                ;; next attempt is DUE is the engine's call, not the body's. The
+                ;; body must keep throwing the same `:activity` suspension shape
+                ;; on every pass, because `async` re-derives an incomplete async
+                ;; from exactly this suspension (core.cljc `existing-started`) —
+                ;; a different one there would enqueue an activity with no name.
                 (schedule-activity! (ctx/current-context)
                                     activity-name seq-num args
                                     effective-timeout effective-retry
@@ -225,7 +232,13 @@
                                      :activity-seq  (or (:seq live) activity-seq)
                                      :args          (:args src)
                                      :timeout-ms    (:timeout-ms src)
-                                     :retry-policy  (:retry-policy src)}))
+                                     :retry-policy  (:retry-policy src)
+                                     ;; Read straight from history rather than
+                                     ;; from `src`: `scheduled` is an
+                                     ;; :activity-scheduled event, which has
+                                     ;; never carried the attempt state (X8).
+                                     :attempt-state (ctx/attempt-state
+                                                      (or (:seq live) activity-seq))}))
           (log/warnf "Async started at seq %s but no :activity-scheduled found; waiting" seq-num))
         (->AsyncHandle seq-num))
 
@@ -271,7 +284,12 @@
                                          :activity-seq  activity-seq
                                          :args          (:args suspension-info)
                                          :timeout-ms    (:timeout-ms suspension-info)
-                                         :retry-policy  (:retry-policy suspension-info)})
+                                         :retry-policy  (:retry-policy suspension-info)
+                                         ;; What earlier drives already spent on
+                                         ;; this activity, so the engine resumes
+                                         ;; the retry sequence rather than
+                                         ;; restarting it (X8).
+                                         :attempt-state (ctx/attempt-state activity-seq)})
                 ;; Return handle - we'll batch execute later
                 (->AsyncHandle start-seq))
               ;; else

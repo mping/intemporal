@@ -171,9 +171,10 @@
 
    Deliberately NOT `history-event`: attempt events legitimately repeat at one
    (seq, event-type) — one per attempt — and the pass index is first-wins, so a
-   lookup there would keep answering \"attempt 1\" on the stores that retain every
-   copy. Max over the running total is the one reading that agrees across all
-   three stores (see `intemporal.internal.activity/attempt-failed-event`).
+   lookup there would keep answering \"attempt 1\" on InMemory, which appends every
+   copy (JDBC and FDB keep only the latest). Max over the running total is the one
+   reading that agrees across all three stores (see
+   `intemporal.internal.activity/attempt-failed-event`).
 
    Scans the snapshot rather than the index, but only where an activity is about
    to be SCHEDULED — at most once per pass, since scheduling throws — so this

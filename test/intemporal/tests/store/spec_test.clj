@@ -72,7 +72,8 @@
 
    :activity-attempt-failed
    {:event-type :activity-attempt-failed :seq 0 :activity-name "user/charge"
-    :attempts 1 :error an-error :duration-ms 12 :will-retry true :timestamp ts}
+    :attempts 1 :error an-error :duration-ms 12 :will-retry true
+    :retry-at (+ ts 1000) :timestamp ts}
 
    :async-started
    {:event-type :async-started :seq 5 :timestamp ts}

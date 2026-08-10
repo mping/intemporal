@@ -88,6 +88,8 @@
 (s/def ::wake-at-ms        (s/nilable number?))
 (s/def ::attempts          (s/nilable pos-int?))
 (s/def ::will-retry        boolean?)
+;; number?, not int?, for the same reason as ::fire-at: CLJS clocks are doubles.
+(s/def ::retry-at          (s/nilable number?))
 (s/def ::received          boolean?)
 
 (s/def ::activity-name     string?)
@@ -188,7 +190,6 @@
           :opt-un [::args ::timeout-ms ::retry-policy ::timestamp]))
 
 (defmethod event-spec :activity-completed [_]
-  ;; The parallel-async variant omits :attempts.
   (s/keys :req-un [::event-type ::seq ::activity-name]
           :opt-un [::result ::duration-ms ::attempts ::timestamp]))
 
@@ -203,8 +204,9 @@
   ;; backoff. :attempts is the running total across drives — not a per-attempt
   ;; marker — and :will-retry records whether the policy granted another, which
   ;; is what lets a resume tell an exhausted budget from an interrupted one.
+  ;; :retry-at is the durable backoff deadline — present iff :will-retry.
   (s/keys :req-un [::event-type ::seq ::activity-name ::attempts ::error ::will-retry]
-          :opt-un [::duration-ms ::timestamp]))
+          :opt-un [::duration-ms ::retry-at ::timestamp]))
 
 ;; --- Async handle lifecycle ---
 

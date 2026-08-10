@@ -57,11 +57,21 @@
      every child linked to `parent-id`. Empty if the workflow has no children."))
 
 (defprotocol IActivityExecutor
-  "Protocol for executing activities"
+  "Protocol for executing activities.
+
+   An executor runs an activity ONCE per call; retrying is the engine's concern,
+   not an implementation's. The engine owns it because only the engine can record
+   an attempt (an executor has no store, workflow-id or seq), and an unrecorded
+   attempt is one that a crash silently gives back — see kimi.md X8. This is also
+   why `timeout-ms` bounds a single attempt rather than a retry sequence."
   (execute-activity [executor activity-name args timeout-ms]
     "Execute an activity with given args and timeout")
   (execute-activities-parallel [executor activities]
-    "Execute multiple activities in parallel, returns seq of results in same order")
+    "Execute multiple activities in parallel, returns seq of results in same order.
+     Each result is {:status :success :result … :duration …} or
+     {:status :failed :error <serialized map> :exception <live exception>} — the
+     engine decides retries from the live exception, since a user :retryable-fn is
+     written against an exception and would silently reject a map.")
   (shutdown-executor [executor grace-period-secs]
     "Shutdown the executor and release resources")
   (shutdown? [executor]
@@ -70,7 +80,10 @@
 (defprotocol IScheduler
   "Protocol for scheduling timers"
   (schedule-timer [scheduler workflow-id seq-num fire-at callback]
-    "Schedule a timer to fire at given time, calls callback when ready")
+    "Schedule a timer to fire at given time, calls callback when ready.
+     Timers are identified by [workflow-id seq-num] and scheduling is idempotent.
+     A seq is only ever one kind of operation, so sleeps, signal timeouts and
+     activity retry backoffs share this keyspace without colliding.")
   (cancel-timer [scheduler workflow-id seq-num]
     "Cancel a scheduled timer")
   (shutdown-scheduler [scheduler grace-period-secs]

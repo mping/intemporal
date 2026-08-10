@@ -1,6 +1,5 @@
 (ns intemporal.internal.runtime
   (:require [intemporal.internal.error :as error]
-            [intemporal.internal.activity :as activity]
             [intemporal.internal.logging :as log]
             [intemporal.protocol :as p]
             [intemporal.utils :as utils])
@@ -30,13 +29,6 @@
                     (when-let [id @timer-id] (js/clearTimeout id))
                     (throw err)))))
     promise-fn))
-
-(defn- async-sleep
-  "Promise-based sleep for retry backoff"
-  [ms]
-  (js/Promise.
-    (fn [resolve _reject]
-      (js/setTimeout resolve ms))))
 
 ;; ============================================================================
 ;; Default Scheduler Implementation
@@ -86,47 +78,35 @@
 ;; Activity Execution with Retry
 ;; ============================================================================
 
-(defn- execute-activity-with-retry
-  "Execute activity function with optional retry policy.
-   Returns a promise that resolves with {:result ... :duration ... :attempts ...}"
-  [activity-fn args timeout-ms retry-policy activity-name]
-  (letfn [(attempt [attempt-num start-time]
-            (-> (promise-with-timeout
-                  (js/Promise.
-                    (fn [resolve reject]
-                      (try
-                        (let [result (apply activity-fn args)]
-                          ;; Handle both sync and async (promise-returning) activities
-                          (if (instance? js/Promise result)
-                            (.then result resolve reject)
-                            (resolve result)))
-                        (catch js/Error e
-                          (reject e)))))
-                  timeout-ms)
-                (.then
-                  (fn [result]
-                    (if (::timeout result)
-                      (throw (error/activity-timeout-exception
-                               activity-name timeout-ms))
-                      {:result result
-                       :duration (- (utils/current-time-ms) start-time)
-                       :attempts attempt-num})))
-                (.catch
-                  (fn [e]
-                    ;; Check if should retry
-                    (if (and retry-policy
-                             (activity/should-retry? retry-policy e attempt-num))
-                      ;; Retry after backoff
-                      (let [backoff-ms (activity/calculate-backoff
-                                         retry-policy attempt-num)]
-                        (log/infof "Activity %s failed, retrying after %dms (attempt %d)"
-                                   activity-name backoff-ms attempt-num)
-                        (-> (async-sleep backoff-ms)
-                            (.then (fn [_] (attempt (inc attempt-num) start-time)))))
-                      ;; No retry - fail
-                      (throw e))))))]
-    (let [start-time (utils/current-time-ms)]
-      (attempt 1 start-time))))
+(defn- execute-activity-once
+  "Execute an activity function exactly once. Returns a promise resolving to
+   {:result ... :duration ...}.
+
+   Retrying used to live here, invisibly to the engine: this code has no store,
+   workflow-id or seq in scope, so nothing about an attempt could be recorded and
+   every crash restarted the count at 1 (kimi.md X8). The engine owns the retry
+   loop now."
+  [activity-fn args timeout-ms activity-name]
+  (let [start-time (utils/current-time-ms)]
+    (-> (promise-with-timeout
+          (js/Promise.
+            (fn [resolve reject]
+              (try
+                (let [result (apply activity-fn args)]
+                  ;; Handle both sync and async (promise-returning) activities
+                  (if (instance? js/Promise result)
+                    (.then result resolve reject)
+                    (resolve result)))
+                (catch js/Error e
+                  (reject e)))))
+          timeout-ms)
+        (.then
+          (fn [result]
+            (if (::timeout result)
+              (throw (error/activity-timeout-exception
+                       activity-name timeout-ms))
+              {:result result
+               :duration (- (utils/current-time-ms) start-time)}))))))
 
 ;; ============================================================================
 ;; Parallel Activity Executor
@@ -168,19 +148,16 @@
       (let [;; Create promise for each activity
             promises
             (mapv
-              (fn [{:keys [activity-name args timeout-ms retry-policy]}]
+              (fn [{:keys [activity-name args timeout-ms]}]
                 (let [act (get @registry-atom activity-name)
                       timeout (or timeout-ms default-timeout-ms)]
                   (if (nil? act)
                     (js/Promise.reject
-                      (ex-info (str "Activity xxx not found " (keys @registry-atom)) {:activity-name activity-name :known-activities (keys @registry-atom)}))
-                    ;; Execute with optional retry
-                    (execute-activity-with-retry
-                      (:fn act)
-                      args
-                      timeout
-                      retry-policy
-                      activity-name))))
+                      (ex-info (str "Activity not found: " activity-name)
+                               {:activity-name activity-name
+                                :known-activities (keys @registry-atom)}))
+                    ;; Exactly one attempt; the engine decides about retries.
+                    (execute-activity-once (:fn act) args timeout activity-name))))
               activities)]
         ;; Wait for all promises to settle
         (-> (js/Promise.allSettled (to-array promises))
@@ -193,8 +170,14 @@
                       {:status :success
                        :result (:result (.-value result))
                        :duration (:duration (.-value result))}
+                      ;; Carry BOTH the serialized :error (what gets persisted)
+                      ;; and the live :exception: the engine decides retries from
+                      ;; this result, and a user :retryable-fn is written against
+                      ;; an exception, so handing it a map would silently answer
+                      ;; false and no async activity would ever retry.
                       {:status :failed
-                       :error (error/throwable->map (.-reason result))}))
+                       :error (error/throwable->map (.-reason result))
+                       :exception (.-reason result)}))
                   results)))))))
 
   (shutdown-executor [_ grace-period-secs]

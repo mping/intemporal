@@ -138,6 +138,12 @@
 ;; — and by starting the loop from what history records (`stub` threads the
 ;; recovered state into the activity suspension).
 ;;
+;; The event also carries the BACKOFF DEADLINE (`:retry-at`), which makes the
+;; wait itself durable: an engine no longer sleeps on the drive thread between
+;; attempts, it suspends until that instant. The deadline is stamped once, when
+;; the attempt fails, and reused verbatim on every later pass — recomputing it
+;; per replay is exactly the drift that made signal timeouts never fire (E5).
+;;
 ;; The pure parts live here so the CLJ and CLJS engines cannot drift on the wire
 ;; format or on the resume decision (kimi.md A1).
 
@@ -147,14 +153,16 @@
    `attempts` is the RUNNING TOTAL across every drive, not the count within this
    one, and `will-retry?` records whether the policy accepted a further attempt —
    which is what makes an exhausted (or non-retryable) failure recognisable on
-   resume without re-running anything.
+   resume without re-running anything. `retry-at` is the instant the next attempt
+   becomes due (nil when no retry was granted).
 
    Emitted repeatedly at the same (seq, :activity-attempt-failed) — one per
-   attempt — and the stores disagree about that: JDBC upserts to the latest,
-   InMemory and FDB keep every copy. Carrying the running total (rather than a
-   per-attempt marker to be counted) is what makes the recovered value identical
-   on all three; see `intemporal.internal.context/attempt-state`."
-  [seq-num activity-name attempts error-map duration-ms will-retry?]
+   attempt — and the stores disagree about that: JDBC and FDB key on
+   (seq, event-type) and so keep only the latest, while InMemory appends every
+   copy. Carrying the running TOTAL (rather than a per-attempt marker to be
+   counted) is what makes the recovered value identical on all three; see
+   `intemporal.internal.context/attempt-state`."
+  [seq-num activity-name attempts error-map duration-ms will-retry? retry-at]
   {:event-type    :activity-attempt-failed
    :seq           seq-num
    :activity-name activity-name
@@ -162,7 +170,28 @@
    :error         error-map
    :duration-ms   duration-ms
    :will-retry    will-retry?
+   :retry-at      retry-at
    :timestamp     (utils/current-time-ms)})
+
+(defn retry-at
+  "The instant the attempt after `attempt` becomes due, or nil when the policy
+   granted no further attempt. Stamped ONCE by the engine that ran the failing
+   attempt; never recomputed on replay (see the E5 drift note above)."
+  [retry-policy attempt will-retry?]
+  (when (and will-retry? retry-policy)
+    (+ (utils/current-time-ms) (calculate-backoff retry-policy attempt))))
+
+(defn retry-pending?
+  "True when the recovered state grants another attempt that is NOT yet due, i.e.
+   the activity is mid-backoff. The workflow body consults this to refuse an
+   early attempt: a worker poll (or any other wake) can re-drive a workflow at
+   any moment, and only the body can decline to run before the deadline."
+  ([attempt-state] (retry-pending? attempt-state (utils/current-time-ms)))
+  ([attempt-state now]
+   (boolean (and attempt-state
+                 (:will-retry attempt-state)
+                 (when-let [due (:retry-at attempt-state)]
+                   (> due now))))))
 
 (defn next-attempt
   "The attempt number to run next given the recovered state — 1 when history
