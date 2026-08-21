@@ -644,7 +644,12 @@
     (doseq [{:keys [child-id status policy]} (p/list-children store workflow-id)]
       (when-not (terminal-status? status)
         (case policy
+          ;; set-wake-at nil mirrors cancel-workflow: a child parked on a timer
+          ;; has wake-at pinned to that timer's fire-at, which would otherwise
+          ;; leave it excluded from list-pending (worker resumes carry no
+          ;; wake-fn) until the ORIGINAL deadline, not this cancellation.
           :cascade-cancel (do (p/mark-cancelled store child-id)
+                              (p/set-wake-at store child-id nil)
                               (p/wake-workflow store child-id)
                               (enforce-close-policies! store child-id))
           :terminate      (do (p/save-event store child-id

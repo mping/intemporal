@@ -621,7 +621,12 @@
           ;; The child's status flips to :cancelled/:terminated here (flag/event)
           ;; and it may never be driven through its own finalizer, so end its
           ;; live span now (idempotent if a driven finalizer also ends it).
+          ;; set-wake-at nil mirrors cancel-workflow: a child parked on a timer
+          ;; has wake-at pinned to that timer's fire-at, which would otherwise
+          ;; leave it excluded from list-pending (worker resumes carry no
+          ;; wake-fn) until the ORIGINAL deadline, not this cancellation.
           :cascade-cancel (do (p/mark-cancelled store child-id)
+                              (p/set-wake-at store child-id nil)
                               (p/wake-workflow store child-id)
                               (tracing/finish-workflow-span! child-id {:message "cancelled (parent closed)"})
                               (enforce-close-policies! store child-id))

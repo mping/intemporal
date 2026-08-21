@@ -120,25 +120,43 @@
   (let [ctx (current-context)]
     (swap! (:pending-events ctx) conj event)))
 
-(defn- seq-has-event?
-  "True if history (or pending events) holds any event at sequence `s`. The
-   pending-events scan is load-bearing: it lets a :workflow-cancelling marker
+(def ^:private pending-wait-marker?
+  "Event types that RECORD a wait without resolving the op that threw it. `sleep`
+   persists :timer-scheduled up front so its deadline can't drift across resumes,
+   and `wait-for-signal-with-timeout` persists :signal-wait-scheduled for the same
+   reason; each op only resolves when :timer-fired / :signal-wait-completed lands
+   at the same seq."
+  #{:timer-scheduled :signal-wait-scheduled})
+
+(defn- seq-resolved?
+  "True if history (or pending events) holds an event at sequence `s` that
+   RESOLVES the op there, so replay returns its recorded value and moves on.
+
+   The pending-events scan is load-bearing: it lets a :workflow-cancelling marker
    added earlier in the *current* pass count as present, so the frontier op does
-   not record a second marker / throw twice at the same seq within one pass."
+   not record a second marker / throw twice at the same seq within one pass.
+
+   A bare `pending-wait-marker?` does NOT count. Treating one as resolved made
+   cancellation permanently undeliverable to a workflow parked on `sleep`: its own
+   :timer-scheduled deferred the check at that seq on every later re-drive, and
+   with no op after the sleep there was no further frontier to reach, so a
+   cascade-cancelled sleeper only ever unblocked when its original timer fired."
   [ctx s]
-  (or (some #(= (:seq %) s) @(:history ctx))
-      (some #(= (:seq %) s) @(:pending-events ctx))))
+  (letfn [(resolves? [e] (and (= (:seq e) s)
+                              (not (pending-wait-marker? (:event-type e)))))]
+    (or (some resolves? @(:history ctx))
+        (some resolves? @(:pending-events ctx)))))
 
 (defn replaying?
-  "True when the operation about to run at the current sequence position already
-   has recorded history (it is being replayed, not executed for the first time).
-   Used to defer the cancellation check to the frontier - the first un-cached
-   operation - so that a saga's compensation registrations (which re-run during
-   replay) are rebuilt before cancellation surfaces into the user's catch.
-   Per-seq equality (not max-seq) so that compensation events, which take higher
-   seq numbers, don't make a not-yet-reached forward op look replayed."
+  "True when the operation about to run at the current sequence position is
+   already resolved by history (it is being replayed, not executed for the first
+   time). Used to defer the cancellation check to the frontier - the first
+   un-resolved operation - so that a saga's compensation registrations (which
+   re-run during replay) are rebuilt before cancellation surfaces into the user's
+   catch. Per-seq equality (not max-seq) so that compensation events, which take
+   higher seq numbers, don't make a not-yet-reached forward op look replayed."
   []
-  (seq-has-event? (current-context) @(:seq-counter (current-context))))
+  (seq-resolved? (current-context) @(:seq-counter (current-context))))
 
 (defn- surface-cancellation!
   "Decide where a cancellation surfaces into the workflow body, then throw.
