@@ -1,12 +1,14 @@
-(ns ^:crash intemporal.tests.crash.signal-wait-crash-test
+(ns intemporal.tests.crash.signal-wait-crash-test
   "Crash recovery test demonstrating workflow persistence across process restart.
    Tests that a simple workflow can be resumed after simulated crash,
    demonstrating that completed activities are not re-executed."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.store :as store]
-            [intemporal.protocol :as p]
-            [clojure.pprint :as pprint]
-            [clojure.test :refer [deftest is testing]]))
+  {:crash true}
+  (:require
+   [clojure.pprint :as pprint]
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]))
 
 ;; ============================================================================
 ;; Test Infrastructure
@@ -104,9 +106,7 @@
           ;; Resume workflow - should complete now that signal is available
           (let [result-2 (intemporal/resume-workflow
                            engine-2
-                           workflow-id
-                           simple-workflow
-                           [workflow-id num-activities crash-point])]
+                           workflow-id)]
 
             ;; Verify: Workflow completed successfully
             (is (= :completed (:status result-2))

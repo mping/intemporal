@@ -1,12 +1,14 @@
 (ns intemporal.tests.cancellation-test
-  (:require [intemporal.core :as intemporal]
-            [intemporal.tests.utils :refer [with-result]]
-            [cljs.test :as t :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-            [matcher-combinators.matchers :as m]
-            [promesa.core :as p])
-  (:require-macros [intemporal.tests.utils :refer [with-result]]
-                   [intemporal.internal.context :refer [bthen]]))
+  (:require-macros
+   [intemporal.internal.context :refer [bthen]]
+   [intemporal.tests.utils :refer [with-result]])
+  (:require
+   [cljs.test :as t :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.tests.utils :refer [with-result]]
+   [matcher-combinators.matchers :as m]
+   [matcher-combinators.test :refer [match?]]
+   [promesa.core :as p]))
 
 (defn slow-activity [x]
   (bthen (p/delay 100) (fn [_] (* x 2))))

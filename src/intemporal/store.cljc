@@ -1,12 +1,71 @@
 (ns intemporal.store
-  (:require [intemporal.protocol :as p]
-            [intemporal.store.checked :as checked]
-            [intemporal.utils :as utils]
-            [intemporal.internal.logging :as log])
-  ;; logging fns (warnf, …) are macros — load them as macros for CLJS too
-  #?(:cljs (:require-macros [intemporal.internal.logging :as log])))
+  (:require
+   [intemporal.protocol :as p]
+   [intemporal.store.checked :as checked]))
 
 (def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
+
+(defn- terminal-status-in
+  [events]
+  (some #(case (:event-type %)
+           :workflow-completed  :completed
+           :workflow-failed     :failed
+           :workflow-cancelled  :cancelled
+           :workflow-terminated :terminated
+           nil)
+        events))
+
+(defn- normalize-workflow
+  "Keep terminal scheduling fields aligned with terminal public status."
+  [wf]
+  (when wf
+    (cond-> wf
+      (terminal-status? (:status wf))
+      (assoc :run-state :terminal :next-run-at nil))))
+
+(defn- append-workflow-events
+  [wf events]
+  (let [wf   (or (normalize-workflow wf)
+                 {:history [] :status :running :run-state :runnable
+                  :next-run-at nil :wake-version 0})
+        wf'  (update wf :history (fnil into []) events)
+        term (terminal-status-in events)]
+    (if term
+      (assoc wf' :status term :run-state :terminal :next-run-at nil)
+      wf')))
+
+(defn- wake-workflow-state
+  [wf]
+  (let [wf (normalize-workflow wf)]
+    (if (or (nil? wf) (terminal-status? (:status wf)))
+      wf
+      (cond-> (update wf :wake-version (fnil inc 0))
+        (= :waiting (:run-state wf))
+        (assoc :run-state :runnable :next-run-at nil)))))
+
+(defn- runnable-or-due?
+  [wf now-ms]
+  (or (= :runnable (:run-state wf))
+      (and (= :waiting (:run-state wf))
+           (some? (:next-run-at wf))
+           (<= (:next-run-at wf) now-ms))))
+
+(defn- claimable-ids
+  [workflows owner-id limit now-ms]
+  (->> workflows
+       (keep (fn [[workflow-id raw-wf]]
+               (let [wf (normalize-workflow raw-wf)]
+                 (when (and (seq (:history wf))
+                            (not (terminal-status? (:status wf)))
+                            (runnable-or-due? wf now-ms)
+                            (or (nil? (:owner wf)) (= owner-id (:owner wf))))
+                   [workflow-id wf]))))
+       (sort-by (fn [[_ wf]]
+                  (or (:next-run-at wf)
+                      (:timestamp (first (:history wf)))
+                      0)))
+       (take limit)
+       vec))
 
 ;; ============================================================================
 ;; In-Memory Store Implementation
@@ -17,35 +76,25 @@
   (load-history [_ workflow-id]
     (get-in @state [:workflows workflow-id :history] []))
 
-  (save-event [_ workflow-id event]
-    (swap! state
-           (fn [s]
-             (let [s (update-in s [:workflows workflow-id :history] (fnil conj []) event)]
-               (case (:event-type event)
-                 :workflow-completed  (assoc-in s [:workflows workflow-id :status] :completed)
-                 :workflow-failed     (assoc-in s [:workflows workflow-id :status] :failed)
-                 :workflow-cancelled  (assoc-in s [:workflows workflow-id :status] :cancelled)
-                 :workflow-terminated (assoc-in s [:workflows workflow-id :status] :terminated)
-                 s))))
+  (save-event [this workflow-id event]
+    (p/save-events this workflow-id [event])
     event)
 
   (save-events [_ workflow-id events]
     (when (seq events)
-      (swap! state
-             (fn [s]
-               (let [s    (update-in s [:workflows workflow-id :history] (fnil into []) events)
-                     ;; Phase B2: cache terminal status for O(1) reads.
-                     term (some #(case (:event-type %)
-                                   :workflow-completed  :completed
-                                   :workflow-failed     :failed
-                                   :workflow-cancelled  :cancelled
-                                   :workflow-terminated :terminated
-                                   nil)
-                                events)]
-                 (if term
-                   (assoc-in s [:workflows workflow-id :status] term)
-                   s)))))
+      (swap! state update-in [:workflows workflow-id]
+             append-workflow-events events))
     events)
+
+  (save-events-and-wake! [_ workflow-id events]
+    (let [path    [:workflows workflow-id]
+          [old _] (swap-vals! state update-in path
+                              (fn [wf]
+                                (-> (append-workflow-events wf events)
+                                    wake-workflow-state)))
+          wf      (normalize-workflow (get-in old path))
+          active? (boolean (and wf (not (terminal-status? (:status wf)))))]
+      active?))
 
   (find-event [this workflow-id event-type seq-num]
     (->> (p/load-history this workflow-id)
@@ -65,22 +114,13 @@
     (get-in @state [:workflows workflow-id :signals] {}))
 
   (add-signal [_ workflow-id signal-name signal-data]
-    (swap! state update-in [:workflows workflow-id :signals signal-name]
-           (fnil conj []) signal-data)
-    ;; Atomically remove the callback before firing it so rapid successive signals
-    ;; for the same name don't re-fire the same callback multiple times, which
-    ;; would consume later signals at the wrong seq-num.
-    (let [[old-state] (swap-vals! state update-in [:workflows workflow-id :signal-callbacks] dissoc signal-name)]
-      (when-let [callback (get-in old-state [:workflows workflow-id :signal-callbacks signal-name])]
-        #?(:clj (future
-                  (try (callback)
-                       (catch Throwable t
-                         (log/warnf t "Signal callback threw for workflow %s signal %s" workflow-id signal-name))))
-           :cljs (js/setTimeout (fn []
-                                  (try (callback)
-                                       (catch js/Error e
-                                         (log/warnf e "Signal callback threw for workflow %s signal %s" workflow-id signal-name))))
-                                0))))
+    ;; Signal persistence and the durable wake are one state transition.
+    (swap! state
+           (fn [s]
+             (-> s
+                 (update-in [:workflows workflow-id :signals signal-name]
+                            (fnil conj []) signal-data)
+                 (update-in [:workflows workflow-id] wake-workflow-state))))
     signal-data)
 
   (consume-signal [_ workflow-id signal-name]
@@ -96,90 +136,117 @@
                                   s)))]
       (first (get-in old path))))
 
-  (register-signal-callback [_ workflow-id signal-name callback]
-    (swap! state assoc-in [:workflows workflow-id :signal-callbacks signal-name] callback))
-
-  (unregister-signal-callback [_ workflow-id signal-name]
-    (swap! state update-in [:workflows workflow-id :signal-callbacks] dissoc signal-name))
-
-  (register-wake-callback [_ workflow-id callback]
-    (swap! state assoc-in [:workflows workflow-id :wake-callback] callback))
-
   (wake-workflow [_ workflow-id]
-    (when-let [callback (get-in @state [:workflows workflow-id :wake-callback])]
-      #?(:clj (future
-                (try (callback)
-                     (catch Throwable t
-                       (log/warnf t "Wake callback threw for workflow %s" workflow-id))))
-         :cljs (js/setTimeout (fn []
-                                (try (callback)
-                                     (catch js/Error e
-                                       (log/warnf e "Wake callback threw for workflow %s" workflow-id))))
-                              0))))
+    (let [path    [:workflows workflow-id]
+          [old _] (swap-vals! state update-in path wake-workflow-state)
+          wf      (normalize-workflow (get-in old path))
+          active? (boolean (and wf (not (terminal-status? (:status wf)))))]
+      active?))
 
   (is-cancelled? [_ workflow-id]
     (get-in @state [:workflows workflow-id :cancelled] false))
 
   (mark-cancelled [_ workflow-id]
-    (swap! state assoc-in [:workflows workflow-id :cancelled] true))
+    (swap! state update-in [:workflows workflow-id]
+           (fn [wf]
+             (-> (or wf {:history [] :status :running :run-state :runnable
+                         :next-run-at nil :wake-version 0})
+                 (assoc :cancelled true)
+                 wake-workflow-state)))
+    nil)
 
   (get-workflow-status [_ workflow-id]
     (let [wf (get-in @state [:workflows workflow-id])]
       (cond
-        ;; Check terminal status first: a late mark-cancelled must not override
-        ;; a workflow that already completed or failed.
-        (terminal-status? (:status wf)) (:status wf)   ; Phase B2 O(1) fast path
+        (nil? wf) :not-found
+        (terminal-status? (:status wf)) (:status wf)
         (:cancelled wf) :cancelled
         (empty? (:history wf)) :not-found
-        :else (let [last-event (last (:history wf))]
-                (case (:event-type last-event)
-                  :workflow-completed :completed
-                  :workflow-failed :failed
-                  :workflow-cancelled :cancelled
-                  :workflow-terminated :terminated
-                  :running)))))
+        :else :running)))
 
-  ;; --- Phase C: ownership-based recovery ---
-  (claim-owner [_ workflow-id owner-id]
-    ;; swap-vals! applies the (pure, retry-safe) update atomically and returns
-    ;; [old new]; derive the outcome from `old`. A side-effect atom inside the
-    ;; swap fn would re-fire on CAS retries: a losing claimant could still see
-    ;; its `ok` flag set by an earlier, rolled-back attempt — double ownership
-    ;; (same failure mode as consume-signal, deepseek code §5).
-    (let [path     [:workflows workflow-id]
-          [old _]  (swap-vals! state
-                               (fn [s]
-                                 (let [wf  (get-in s path)
-                                       cur (:owner wf)]
-                                   ;; Never claim a terminal workflow (mirrors the JDBC store's
-                                   ;; status predicate): a claim racing a finalization must lose.
-                                   (if (and (not (terminal-status? (:status wf)))
-                                            (or (nil? cur) (= cur owner-id)))
-                                     (assoc-in s [:workflows workflow-id :owner] owner-id)
-                                     s))))
-          wf       (get-in old path)
-          cur      (:owner wf)]
-      (boolean (and (not (terminal-status? (:status wf)))
-                    (or (nil? cur) (= cur owner-id))))))
+  ;; --- Durable scheduling + ownership-based recovery ---
+  (claim-runnable! [_ owner-id limit now-ms]
+    (let [[old _]
+          (swap-vals!
+            state
+            (fn [s]
+              (reduce (fn [s [workflow-id wf]]
+                        (assoc-in s [:workflows workflow-id]
+                                  (assoc wf
+                                         :owner owner-id
+                                         :run-state :running
+                                         :next-run-at nil)))
+                      s
+                      (claimable-ids (:workflows s) owner-id limit now-ms))))]
+      (mapv (fn [[workflow-id wf]]
+              {:workflow-id workflow-id
+               :wake-version (:wake-version wf)})
+            (claimable-ids (:workflows old) owner-id limit now-ms))))
 
-  ;; A4: cancelled-but-not-finalized workflows MUST stay listed so a worker can
-  ;; re-drive them (body observes the cancel flag, saga compensation runs, the
-  ;; terminal :workflow-cancelled event is written — which then excludes them).
-  (list-pending [_ owner-id limit]
-    (let [now (utils/current-time-ms)]
-      (->> (:workflows @state)
-           (filter (fn [[_ wf]]
-                     (and (seq (:history wf))
-                          (not (terminal-status? (:status wf)))
-                          ;; C2: skip workflows not yet due to wake
-                          (let [wa (:wake-at wf)] (or (nil? wa) (<= wa now)))
-                          (let [o (:owner wf)] (or (nil? o) (= o owner-id))))))
-           ;; Sort by wake-at ascending (nil = always eligible = priority 0)
-           ;; so the earliest-due workflows are scheduled first; prevents starvation.
-           (sort-by (fn [[_ wf]] (or (:wake-at wf) 0)))
-           (map first)
-           (take limit)
-           vec)))
+  (park-workflow! [_ workflow-id expected-wake-version events next-run-at-ms]
+    (let [path    [:workflows workflow-id]
+          [old _] (swap-vals!
+                    state
+                    (fn [s]
+                      (let [before (normalize-workflow (get-in s path))
+                            terminal-event? (terminal-status-in events)]
+                        (assoc-in s path
+                                  (cond
+                                    (terminal-status? (:status before)) before
+                                    terminal-event? (append-workflow-events before events)
+                                    (not= :running (:run-state before)) before
+                                    (not= expected-wake-version (:wake-version before))
+                                    before
+                                    :else
+                                    (assoc (append-workflow-events before events)
+                                           :run-state :waiting
+                                           :next-run-at next-run-at-ms))))))
+          before  (normalize-workflow (get-in old path))]
+      (cond
+        (terminal-status? (:status before)) {:park-status :terminal}
+        (terminal-status-in events) {:park-status :terminal}
+        (not= :running (:run-state before)) {:park-status :not-running}
+        (not= expected-wake-version (:wake-version before))
+        {:park-status :wake-raced :wake-version (:wake-version before)}
+        :else {:park-status :parked})))
+
+  (requeue-running! [_ workflow-id]
+    (let [path    [:workflows workflow-id]
+          [old _] (swap-vals! state update-in path
+                              (fn [raw-wf]
+                                (let [wf (normalize-workflow raw-wf)]
+                                  (if (and wf
+                                           (not (terminal-status? (:status wf)))
+                                           (= :running (:run-state wf)))
+                                    (assoc wf :run-state :runnable :next-run-at nil)
+                                    wf))))
+          wf      (normalize-workflow (get-in old path))]
+      (boolean (and wf
+                    (not (terminal-status? (:status wf)))
+                    (= :running (:run-state wf))))))
+
+  (recover-running! [_ owner-id]
+    (let [recover? (fn [raw-wf]
+                     (let [wf (normalize-workflow raw-wf)]
+                       (and (= :running (:run-state wf))
+                            (not (terminal-status? (:status wf)))
+                            (= owner-id (:owner wf)))))
+          [old _] (swap-vals!
+                    state
+                    (fn [s]
+                      (update s :workflows
+                              (fn [workflows]
+                                (reduce-kv
+                                  (fn [acc workflow-id raw-wf]
+                                    (assoc acc workflow-id
+                                           (if (recover? raw-wf)
+                                             (assoc (normalize-workflow raw-wf)
+                                                    :run-state :runnable
+                                                    :next-run-at nil)
+                                             raw-wf)))
+                                  {}
+                                  workflows)))))]
+      (count (filter recover? (vals (:workflows old))))))
 
   (release-owner [_ owner-id]
     (swap! state
@@ -187,14 +254,13 @@
              (reduce (fn [s [wid wf]]
                        (if (and (= owner-id (:owner wf))
                                 (not (terminal-status? (:status wf))))
-                         (update-in s [:workflows wid] dissoc :owner)
+                         (assoc-in s [:workflows wid]
+                                   (cond-> (dissoc (normalize-workflow wf) :owner)
+                                     (= :running (:run-state (normalize-workflow wf)))
+                                     (assoc :run-state :runnable :next-run-at nil)))
                          s))
                      s
                      (:workflows s))))
-    nil)
-
-  (set-wake-at [_ workflow-id wake-at-ms]
-    (swap! state assoc-in [:workflows workflow-id :wake-at] wake-at-ms)
     nil)
 
   ;; --- Tier 2: independent child workflows ---

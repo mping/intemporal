@@ -4,11 +4,12 @@
    When the parent closes, an in-flight :cascade-cancel child is requested to
    cancel (graceful; ends :cancelled). Modelled as an order whose fulfilment child
    is mid-flight (charged, awaiting packing) when the parent order workflow closes."
-  (:require [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.tests.child-workflow-util :as u]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.tests.child-workflow-util :as u]
+   [matcher-combinators.test :refer [match?]]))
 
 ;; ── activities ──────────────────────────────────────────────────────────────────
 

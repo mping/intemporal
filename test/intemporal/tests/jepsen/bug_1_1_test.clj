@@ -1,26 +1,22 @@
 (ns intemporal.tests.jepsen.bug-1-1-test
   "Bug 1.1 — Wake on signal across pods.  REGRESSION GUARD.
 
-  Root cause (improvements.md §1.1) — now FIXED (Phase C):
-    Wake callbacks lived in a process-local atom on the store record, so a signal
-    delivered through a DIFFERENT store instance (another pod) never woke the
-    workflow — it was persisted but orphaned.
-
-    The fix: add-signal writes a durable runnable marker (C3); a worker (C4) on
-    any pod claims the marker, leases the workflow (C1), and resumes it by id
-    (B3). The wake no longer depends on the process that started the workflow.
+  add-signal atomically persists the signal and changes WAITING to RUNNABLE. A
+  worker using any store instance over the same backing can claim it; waking no
+  longer depends on process-local state.
 
   These tests assert the FIXED behaviour: a signal written through a SEPARATE
   store instance, with a worker running, resumes the workflow to completion.
   InMemory models a shared store by having both instances share one state atom;
   JDBC and FDB use two store objects over the same backing."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.store :as mem]
-            [intemporal.store.jdbc :as jdbc-store]
-            [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as mem]
+   [intemporal.store.fdb :as fdb-store]
+   [intemporal.store.jdbc :as jdbc-store]
+   [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (defn sig-act [x] (* x 2))
 

@@ -1,8 +1,10 @@
 (ns intemporal.internal.logging
-  (:require [clojure.string :as str]
-            [taoensso.telemere :as t]
-            #?(:cljs [goog.string :as gstring])
-            #?(:cljs [goog.string.format])))
+  (:require
+   [clojure.string :as str]
+   [taoensso.telemere :as t]
+   #?@(:cljs
+       [[goog.string :as gstring]
+        [goog.string.format]])))
 
 (defmacro with-mdc
   "Evaluates body with given map merged into telemere's signal context."
@@ -50,4 +52,3 @@
 (defmacro warnf  [& args] `(expand-logf :warn  ~@args))
 (defmacro errorf [& args] `(expand-logf :error ~@args))
 (defmacro fatalf [& args] `(expand-logf :fatal ~@args))
-

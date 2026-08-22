@@ -1,54 +1,45 @@
 (ns intemporal.tests.store.signal-double-fire-test
-  "Bug #13 — JdbcStore/FDBStore add-signal fired the registered signal callback
-  WITHOUT removing it first (InMemoryStore already removed it atomically).
-  With two rapid signals at the same wait point, both futures fire the
-  still-registered callback; each consumes one signal and both write a
-  :signal-received event at the same seq — one signal silently vanishes.
-  REGRESSION GUARD: two rapid signals → the callback fires exactly once, one
-  signal is consumed, and the second stays pending for the next wait."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.protocol :as p]
-            [intemporal.store :as store]
-            [intemporal.store.jdbc :as jdbc-store]
-            [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]
-            [next.jdbc :as jdbc]))
+  "Rapid signals are durable queue entries and produce one schedulable workflow,
+  without any process-local callback state."
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [intemporal.store.fdb :as fdb-store]
+   [intemporal.store.jdbc :as jdbc-store]
+   [me.vedang.clj-fdb.FDB :as cfdb]
+   [next.jdbc :as jdbc]))
 
-(defn check-callback-fires-once
-  "Store-agnostic repro: register an engine-like callback (consumes one pending
-  signal per invocation), then add two signals rapidly at the same wait point.
-  The store must remove the callback atomically BEFORE firing it, so the second
-  add-signal finds no registered callback."
+(defn check-signals-queue-durably
+  "Two signals wake one parked workflow once and remain FIFO data."
   [store]
   (let [wf-id    (str "sig-double-" (random-uuid))
         sig      "approval"
-        invoked  (atom 0)
-        consumed (atom [])]
-    (p/register-signal-callback store wf-id sig
-                                (fn []
-                                  (swap! invoked inc)
-                                  (when-let [v (p/consume-signal store wf-id sig)]
-                                    (swap! consumed conj v))))
-    ;; two rapid signals against the same registered wait
+        now      (System/currentTimeMillis)]
+    (p/save-event store wf-id {:event-type :workflow-started
+                               :seq -1 :workflow-id wf-id :args []
+                               :timestamp now})
+    (let [claim (some #(when (= wf-id (:workflow-id %)) %)
+                      (p/claim-runnable! store "signal-owner" 10000 now))]
+      (is (some? claim))
+      (is (= {:park-status :parked}
+             (p/park-workflow! store wf-id (:wake-version claim) [] nil))))
     (p/add-signal store wf-id sig {:n 1})
     (p/add-signal store wf-id sig {:n 2})
-    ;; callbacks fire in a future — wait for the first fire, plus a grace
-    ;; period during which a buggy second fire would also happen
-    (let [deadline (+ (System/currentTimeMillis) 3000)]
-      (while (and (zero? @invoked)
-                  (< (System/currentTimeMillis) deadline))
-        (Thread/sleep 10)))
-    (Thread/sleep 300)
-    (is (= 1 @invoked)
-        "callback fires exactly once for two rapid signals")
-    (is (= 1 (count @consumed))
-        "the callback consumes exactly one signal")
-    (is (= 1 (count (get (p/get-pending-signals store wf-id) sig)))
-        "the second signal stays pending for the next wait")))
+    (let [claims (filterv #(= wf-id (:workflow-id %))
+                          (p/claim-runnable! store "signal-owner" 10000
+                                             (System/currentTimeMillis)))]
+      (is (= 1 (count claims)) "one workflow is eligible, regardless of signal count")
+      (is (empty? (filter #(= wf-id (:workflow-id %))
+                          (p/claim-runnable! store "signal-owner" 10000
+                                             (System/currentTimeMillis))))))
+    (is (= {:n 1} (p/consume-signal store wf-id sig)))
+    (is (= {:n 2} (p/consume-signal store wf-id sig)))
+    (is (nil? (p/consume-signal store wf-id sig)))))
 
 (deftest signal-double-fire-in-memory
-  (testing "InMemoryStore: callback fires once (parity reference)"
-    (check-callback-fires-once (store/create-store))))
+  (testing "InMemoryStore: rapid signals create one runnable workflow"
+    (check-signals-queue-durably (store/create-store))))
 
 ;; --- JDBC (mirrors jdbc_test.clj setup) ---
 
@@ -63,16 +54,16 @@
         (.execute (.createStatement conn) "CREATE DATABASE intemporal_test")))))
 
 (deftest ^:integration signal-double-fire-jdbc
-  (testing "JdbcStore: callback fires once for two rapid signals"
+  (testing "JdbcStore: rapid signals create one runnable workflow"
     (ensure-database!)
     (with-open [store (jdbc-store/create-store db-spec)]
-      (check-callback-fires-once store))))
+      (check-signals-queue-durably store))))
 
 ;; --- FDB (mirrors fdb_test.clj setup) ---
 
 (deftest ^:integration signal-double-fire-fdb
-  (testing "FDBStore: callback fires once for two rapid signals"
+  (testing "FDBStore: rapid signals create one runnable workflow"
     (let [db (cfdb/select-api-version 710)
           db (cfdb/open db "docker/fdb.cluster")]
       (with-open [store (fdb-store/create-store db "intemporal-tests")]
-        (check-callback-fires-once store)))))
+        (check-signals-queue-durably store)))))

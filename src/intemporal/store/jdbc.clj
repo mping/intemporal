@@ -1,12 +1,14 @@
 (ns intemporal.store.jdbc
-  (:require [intemporal.protocol :as p]
-            [intemporal.store.checked :as checked]
-            [intemporal.internal.codec :as codec]
-            [intemporal.internal.logging :as log]
-            [migratus.core :as migratus]
-            [next.jdbc :as jdbc]
-            [hikari-cp.core :as hikari])
-  (:import (java.lang AutoCloseable)))
+  (:require
+   [clojure.string :as str]
+   [hikari-cp.core :as hikari]
+   [intemporal.internal.codec :as codec]
+   [intemporal.protocol :as p]
+   [intemporal.store.checked :as checked]
+   [migratus.core :as migratus]
+   [next.jdbc :as jdbc])
+  (:import
+   (java.lang AutoCloseable)))
 
 ;; ============================================================================
 ;; JDBC URL resolution
@@ -34,7 +36,7 @@
     (migratus/rollback cfg)
     (migratus/migrate cfg))
 
-  ;(migratus/create cfg "initial-schema"))
+  ; (migratus/create cfg "initial-schema"))
   "")
 
 ;; ============================================================================
@@ -92,11 +94,50 @@
     "INSERT INTO intemporal_workflows (id, cancelled) VALUES (?, true)
                 ON DUPLICATE KEY UPDATE cancelled = true"))
 
-(defn- set-wake-at-sql [kind]
-  (case kind
-    :postgres "UPDATE intemporal_workflows SET wake_at = to_timestamp(? / 1000.0) WHERE id = ?"
-    ;; MariaDB / MySQL
-    "UPDATE intemporal_workflows SET wake_at = FROM_UNIXTIME(? / 1000.0) WHERE id = ?"))
+(declare ->payload-param)
+
+(defn- terminal-status-in [events]
+  (some #(case (:event-type %)
+           :workflow-completed  "completed"
+           :workflow-failed     "failed"
+           :workflow-cancelled  "cancelled"
+           :workflow-terminated "terminated"
+           nil)
+        events))
+
+(defn- row-value [row column]
+  (or (get row (keyword "intemporal_workflows" (name column)))
+      (get row column)))
+
+(defn- append-events!
+  [tx kind workflow-id events]
+  (jdbc/execute! tx [(upsert-workflow-sql kind) workflow-id])
+  (doseq [event events]
+    (jdbc/execute! tx [(upsert-history-sql kind)
+                       workflow-id
+                       (:seq event)
+                       (name (:event-type event))
+                       (->payload-param kind (dissoc event :event-type))]))
+  (when-let [term (terminal-status-in events)]
+    (jdbc/execute! tx
+                   ["UPDATE intemporal_workflows
+                       SET status = ?, run_state = 'TERMINAL', next_run_at = NULL
+                     WHERE id = ?"
+                    term workflow-id])))
+
+(defn- wake-row!
+  [tx workflow-id]
+  (let [res (jdbc/execute-one!
+              tx
+              ["UPDATE intemporal_workflows
+                 SET wake_version = wake_version + 1,
+                     next_run_at = NULL,
+                     run_state = CASE WHEN run_state = 'WAITING' THEN 'RUNNABLE' ELSE run_state END
+               WHERE id = ?
+                 AND status NOT IN ('completed','failed','cancelled','terminated')
+                 AND run_state <> 'TERMINAL'"
+               workflow-id])]
+    (pos? (or (:next.jdbc/update-count res) 0))))
 
 ;; ============================================================================
 ;; Payload serialization
@@ -126,7 +167,7 @@
 ;; JdbcStore Implementation
 ;; ============================================================================
 
-(defrecord JdbcStore [datasource callbacks kind]
+(defrecord JdbcStore [datasource kind]
   AutoCloseable
   (close [this]
     (when datasource (hikari/close-datasource datasource)))
@@ -146,29 +187,13 @@
   (save-events [_ workflow-id events]
     (when (seq events)
       (jdbc/with-transaction [tx datasource]
-        ;; Ensure workflow exists
-        (jdbc/execute! tx [(upsert-workflow-sql kind) workflow-id])
-        ;; Insert events.  Idempotent under normal replay (the engine re-writes
-        ;; the same seq with identical data on each pass).  Concurrent execution
-        ;; is prevented by exclusive ownership (claim-owner) + the worker
-        ;; resuming owned workflows one at a time.
-        (doseq [event events]
-          (let [seq-num (:seq event)
-                event-type (name (:event-type event))
-                data (->payload-param kind (dissoc event :event-type))]
-            (jdbc/execute! tx [(upsert-history-sql kind)
-                               workflow-id seq-num event-type data])))
-        ;; Phase B2: maintain the O(1) status column on terminal events.
-        (when-let [term (some (fn [e] (case (:event-type e)
-                                        :workflow-completed "completed"
-                                        :workflow-failed "failed"
-                                        :workflow-cancelled "cancelled"
-                                        :workflow-terminated "terminated"
-                                        nil))
-                              events)]
-          (jdbc/execute! tx ["UPDATE intemporal_workflows SET status = ? WHERE id = ?"
-                             term workflow-id]))))
+        (append-events! tx kind workflow-id events)))
     events)
+
+  (save-events-and-wake! [_ workflow-id events]
+    (jdbc/with-transaction [tx datasource]
+      (append-events! tx kind workflow-id events)
+      (wake-row! tx workflow-id)))
 
   (find-event [_ workflow-id event-type seq-num]
     (let [row (jdbc/execute-one! datasource
@@ -200,18 +225,8 @@
     (jdbc/with-transaction [tx datasource]
       (jdbc/execute! tx [(upsert-workflow-sql kind) workflow-id])
       (jdbc/execute! tx ["INSERT INTO intemporal_signals (workflow_id, signal_name, payload) VALUES (?, ?, ?)"
-                         workflow-id signal-name (->payload-param kind signal-data)]))
-    ;; In-process fast path for an embedded (no-worker) engine in THIS process.
-    ;; Worker mode picks the workflow up via the ownership scan (list-pending).
-    ;; Atomically remove the callback before firing it (mirrors the InMemory
-    ;; store): rapid successive signals for the same name must not re-fire the
-    ;; same callback, which would consume later signals at the wrong seq-num.
-    (let [[old-callbacks] (swap-vals! callbacks update workflow-id dissoc signal-name)]
-      (when-let [callback (get-in old-callbacks [workflow-id signal-name])]
-        (future
-          (try (callback)
-               (catch Throwable t
-                 (log/warnf t "Signal callback threw for workflow %s signal %s" workflow-id signal-name))))))
+                         workflow-id signal-name (->payload-param kind signal-data)])
+      (wake-row! tx workflow-id))
     signal-data)
 
   (consume-signal [_ workflow-id signal-name]
@@ -223,21 +238,9 @@
           (jdbc/execute! tx ["DELETE FROM intemporal_signals WHERE id = ?" (:intemporal_signals/id row)])
           (<-payload-val kind (:intemporal_signals/payload row))))))
 
-  (register-signal-callback [_ workflow-id signal-name callback]
-    (swap! callbacks assoc-in [workflow-id signal-name] callback))
-
-  (unregister-signal-callback [_ workflow-id signal-name]
-    (swap! callbacks update workflow-id dissoc signal-name))
-
-  (register-wake-callback [_ workflow-id callback]
-    (swap! callbacks assoc-in [workflow-id ::wake] callback))
-
   (wake-workflow [_ workflow-id]
-    (when-let [callback (get-in @callbacks [workflow-id ::wake])]
-      (future
-        (try (callback)
-             (catch Throwable t
-               (log/warnf t "Wake callback threw for workflow %s" workflow-id))))))
+    (jdbc/with-transaction [tx datasource]
+      (wake-row! tx workflow-id)))
 
   (is-cancelled? [_ workflow-id]
     (let [row (jdbc/execute-one! datasource
@@ -246,10 +249,12 @@
       (boolean (:intemporal_workflows/cancelled row))))
 
   (mark-cancelled [_ workflow-id]
-    (jdbc/execute! datasource
-                   [(upsert-cancel-sql kind) workflow-id]))
+    (jdbc/with-transaction [tx datasource]
+      (jdbc/execute! tx [(upsert-cancel-sql kind) workflow-id])
+      (wake-row! tx workflow-id))
+    nil)
 
-  (get-workflow-status [this workflow-id]
+  (get-workflow-status [_ workflow-id]
     (let [wf-row (jdbc/execute-one! datasource
                                     ["SELECT cancelled, status FROM intemporal_workflows WHERE id = ?"
                                      workflow-id])
@@ -260,57 +265,108 @@
         ;; a workflow that already completed or failed.
         (#{"completed" "failed" "cancelled" "terminated"} status) (keyword status)
         (:intemporal_workflows/cancelled wf-row) :cancelled
-        ;; Otherwise (running / pre-migration) derive from history as before.
-        :else (let [history (p/load-history this workflow-id)]
-                (if (empty? history)
-                  :not-found
-                  (let [last-event (last history)]
-                    (case (:event-type last-event)
-                      :workflow-completed :completed
-                      :workflow-failed :failed
-                      :workflow-cancelled :cancelled
-                      :workflow-terminated :terminated
-                      :running)))))))
+        :else :running)))
 
-  ;; --- Phase C: ownership-based recovery ---
-  (claim-owner [_ workflow-id owner-id]
-    (let [res (jdbc/execute-one! datasource
-                                 ["UPDATE intemporal_workflows SET owner = ?
-                  WHERE id = ?
-                    AND (owner IS NULL OR owner = ?)
-                    AND status NOT IN ('completed','failed','cancelled','terminated')"
-                                  owner-id workflow-id owner-id])]
+  ;; --- Durable scheduling + ownership-based recovery ---
+  (claim-runnable! [_ owner-id limit now-ms]
+    (jdbc/with-transaction [tx datasource]
+      (let [rows (jdbc/execute!
+                   tx
+                   [(case kind
+                      :postgres
+                      "SELECT id, wake_version FROM intemporal_workflows
+                        WHERE status NOT IN ('completed','failed','cancelled','terminated')
+                          AND EXISTS (SELECT 1 FROM intemporal_history h
+                                       WHERE h.workflow_id = intemporal_workflows.id)
+                          AND (owner = ? OR owner IS NULL)
+                          AND (run_state = 'RUNNABLE'
+                               OR (run_state = 'WAITING' AND next_run_at <= to_timestamp(? / 1000.0)))
+                        ORDER BY COALESCE(next_run_at, created_at), created_at
+                        LIMIT ?
+                        FOR UPDATE SKIP LOCKED"
+                      "SELECT id, wake_version FROM intemporal_workflows
+                        WHERE status NOT IN ('completed','failed','cancelled','terminated')
+                          AND EXISTS (SELECT 1 FROM intemporal_history h
+                                       WHERE h.workflow_id = intemporal_workflows.id)
+                          AND (owner = ? OR owner IS NULL)
+                          AND (run_state = 'RUNNABLE'
+                               OR (run_state = 'WAITING' AND next_run_at <= FROM_UNIXTIME(? / 1000.0)))
+                        ORDER BY COALESCE(next_run_at, created_at), created_at
+                        LIMIT ?
+                        FOR UPDATE SKIP LOCKED")
+                    owner-id now-ms limit])]
+        (doseq [row rows]
+          (jdbc/execute! tx
+                         ["UPDATE intemporal_workflows
+                             SET owner = ?, run_state = 'RUNNING', next_run_at = NULL
+                           WHERE id = ?"
+                          owner-id (row-value row :id)]))
+        (mapv (fn [row]
+                {:workflow-id (row-value row :id)
+                 :wake-version (long (or (row-value row :wake_version) 0))})
+              rows))))
+
+  (park-workflow! [_ workflow-id expected-wake-version events next-run-at-ms]
+    (jdbc/with-transaction [tx datasource]
+      (let [row (jdbc/execute-one!
+                  tx
+                  ["SELECT status, run_state, wake_version
+                     FROM intemporal_workflows WHERE id = ? FOR UPDATE"
+                   workflow-id])
+            status (row-value row :status)
+            state  (some-> (row-value row :run_state) str str/upper-case)
+            current-version (long (or (row-value row :wake_version) 0))
+            terminal-event? (terminal-status-in events)]
+        (cond
+          (#{"completed" "failed" "cancelled" "terminated"} status) {:park-status :terminal}
+          terminal-event? (do (append-events! tx kind workflow-id events)
+                              {:park-status :terminal})
+          (not= "RUNNING" state) {:park-status :not-running}
+          (not= (long expected-wake-version) current-version)
+          {:park-status :wake-raced :wake-version current-version}
+          :else
+          (do
+            (append-events! tx kind workflow-id events)
+            (if next-run-at-ms
+              (jdbc/execute! tx
+                             [(case kind
+                                :postgres "UPDATE intemporal_workflows SET run_state = 'WAITING', next_run_at = to_timestamp(? / 1000.0) WHERE id = ?"
+                                "UPDATE intemporal_workflows SET run_state = 'WAITING', next_run_at = FROM_UNIXTIME(? / 1000.0) WHERE id = ?")
+                              next-run-at-ms workflow-id])
+              (jdbc/execute! tx
+                             ["UPDATE intemporal_workflows SET run_state = 'WAITING', next_run_at = NULL WHERE id = ?"
+                              workflow-id]))
+            {:park-status :parked})))))
+
+  (requeue-running! [_ workflow-id]
+    (let [res (jdbc/execute-one!
+                datasource
+                ["UPDATE intemporal_workflows
+                   SET run_state = 'RUNNABLE', next_run_at = NULL
+                 WHERE id = ? AND run_state = 'RUNNING'
+                   AND status NOT IN ('completed','failed','cancelled','terminated')"
+                 workflow-id])]
       (pos? (or (:next.jdbc/update-count res) 0))))
 
-  ;; A4: cancelled-but-not-finalized workflows MUST stay listed — the worker has
-  ;; to re-drive them so the body observes the cancel flag, runs any saga
-  ;; compensation, and writes the terminal :workflow-cancelled event (which then
-  ;; excludes them via the status filter).
-  (list-pending [_ owner-id limit]
-    (let [rows (jdbc/execute! datasource
-                              ["SELECT id FROM intemporal_workflows
-                   WHERE status NOT IN ('completed','failed','cancelled','terminated')
-                     AND (wake_at IS NULL OR wake_at <= now())
-                     AND (owner = ? OR owner IS NULL)
-                   ORDER BY created_at
-                   LIMIT ?"
-                               owner-id limit])]
-      (mapv :intemporal_workflows/id rows)))
+  (recover-running! [_ owner-id]
+    (let [res (jdbc/execute-one!
+                datasource
+                ["UPDATE intemporal_workflows
+                   SET run_state = 'RUNNABLE', next_run_at = NULL
+                 WHERE run_state = 'RUNNING'
+                   AND status NOT IN ('completed','failed','cancelled','terminated')
+                   AND owner = ?"
+                 owner-id])]
+      (long (or (:next.jdbc/update-count res) 0))))
 
   (release-owner [_ owner-id]
     (jdbc/execute! datasource
-                   ["UPDATE intemporal_workflows SET owner = NULL
+                   ["UPDATE intemporal_workflows
+                       SET owner = NULL,
+                           next_run_at = CASE WHEN run_state = 'RUNNING' THEN NULL ELSE next_run_at END,
+                           run_state = CASE WHEN run_state = 'RUNNING' THEN 'RUNNABLE' ELSE run_state END
                      WHERE owner = ? AND status NOT IN ('completed','failed','cancelled','terminated')"
                     owner-id])
-    nil)
-
-  (set-wake-at [_ workflow-id wake-at-ms]
-    (if wake-at-ms
-      (jdbc/execute! datasource
-                     [(set-wake-at-sql kind) wake-at-ms workflow-id])
-      (jdbc/execute! datasource
-                     ["UPDATE intemporal_workflows SET wake_at = NULL WHERE id = ?"
-                      workflow-id]))
     nil)
 
   ;; --- Tier 2: independent child workflows ---
@@ -351,5 +407,5 @@
   [jdbc-url & {:keys [checked?] :or {checked? true}}]
   (let [kind  (migrate! jdbc-url)
         ds    (hikari/make-datasource {:jdbc-url jdbc-url})
-        store (->JdbcStore ds (atom {}) kind)]
+        store (->JdbcStore ds kind)]
     (if checked? (checked/->CheckedStore store) store)))

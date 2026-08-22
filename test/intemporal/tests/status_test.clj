@@ -1,13 +1,14 @@
 (ns intemporal.tests.status-test
   "Phase B2 — get-workflow-status reflects lifecycle via the cached status
   column/key (O(1) for terminal states), across InMemory + JDBC + FDB."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.store :as store]
-            [intemporal.store.jdbc :as jdbc-store]
-            [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [intemporal.store.fdb :as fdb-store]
+   [intemporal.store.jdbc :as jdbc-store]
+   [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (defn dbl [x] (* x 2))
 (intemporal/defn-workflow done-wf [x] (let [a (intemporal/stub #'dbl)] (a x)))
@@ -25,8 +26,8 @@
             (is (= {:status :completed :result 42}
                    (intemporal/await-workflow e workflow-id :timeout-ms 5000)))
             (is (= :completed (p/get-workflow-status store workflow-id))))
-          ;; stop the worker before the start-workflow section below, so it does
-          ;; not race the blocking-loop-driven sleep-wf on the same store.
+          ;; Stop the explicit worker before start-workflow starts the engine's
+          ;; managed worker below.
           (finally (stop))))
       ;; A cancelled workflow is first-class: finalize-cancelled writes a
       ;; :workflow-cancelled terminal event, so the derived status is :cancelled

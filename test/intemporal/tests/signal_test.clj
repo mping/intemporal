@@ -1,9 +1,10 @@
 (ns intemporal.tests.signal-test
-  (:require [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.tests.utils :refer [wait-until]]
-            [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.tests.utils :refer [wait-until]]
+   [matcher-combinators.test :refer [match?]]))
 
 (defn activity-fn [arg]
   [:processed arg])

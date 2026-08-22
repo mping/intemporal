@@ -1,7 +1,8 @@
 (ns intemporal.tests.store.store-test
-  (:require [intemporal.core :as intemporal]
-            [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [matcher-combinators.test :refer [match?]]))
 
 ;; Test activity function
 (defn test-activity [x]
@@ -356,8 +357,7 @@
             history-1 (intemporal/get-workflow-history (:store engine) wf-id)
 
             ;; Second execution (resume/replay)
-            result-2 (intemporal/resume-workflow engine wf-id
-                                                 comprehensive-workflow [initial-value])
+            result-2 (intemporal/resume-workflow engine wf-id)
             history-2 (intemporal/get-workflow-history (:store engine) wf-id)]
 
         (testing "Results should be consistent"

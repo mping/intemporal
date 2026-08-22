@@ -2,11 +2,12 @@
   "Tests for saga / compensation support (saga + add-compensation + compensate).
    A compensation registered for a successful step runs (in reverse order)
    when the workflow later fails and the catch block calls compensate."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.tests.utils :refer [with-result]]
-            [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.matchers :as m]
-            [matcher-combinators.test :refer [match?]]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.tests.utils :refer [with-result]]
+   [matcher-combinators.matchers :as m]
+   [matcher-combinators.test :refer [match?]]))
 
 ;; ============================================================================
 ;; Activities - record execution order + args into a shared atom

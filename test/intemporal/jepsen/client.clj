@@ -14,7 +14,8 @@
 
   History entries are plain EDN maps compatible with jepsen.history format:
     {:process <int> :type (:ok|:fail|:info) :f <op> :value {...} :time <ms>}"
-  (:require [next.jdbc :as jdbc]))
+  (:require
+   [next.jdbc :as jdbc]))
 
 (defn now-ms [] (System/currentTimeMillis))
 
@@ -32,8 +33,8 @@
   object (avoids creating a new engine just to read status)."
   [db-spec workflow-id]
   (let [wf (jdbc/execute-one! db-spec
-              ["SELECT cancelled FROM intemporal_workflows WHERE id = ?"
-               workflow-id])
+             ["SELECT cancelled FROM intemporal_workflows WHERE id = ?"
+              workflow-id])
         last-evt (jdbc/execute-one! db-spec
                    ["SELECT event_type FROM intemporal_history
                      WHERE workflow_id = ?

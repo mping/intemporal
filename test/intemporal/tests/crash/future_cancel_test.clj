@@ -1,12 +1,14 @@
-(ns ^:crash intemporal.tests.crash.future-cancel-test
+(ns intemporal.tests.crash.future-cancel-test
   "Crash recovery test using future cancellation.
    Workflow executes in a future which we cancel mid-execution to simulate
    an abrupt crash, then we create a new engine and resume."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.store :as store]
-            [intemporal.protocol :as p]
-            [clojure.pprint :as pprint]
-            [clojure.test :refer [deftest is testing]]))
+  {:crash true}
+  (:require
+   [clojure.pprint :as pprint]
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]))
 
 ;; ============================================================================
 ;; Test Infrastructure
@@ -114,9 +116,7 @@
               ;; Resume workflow
               result-2 (intemporal/resume-workflow
                          engine-2
-                         workflow-id
-                         future-crash-workflow
-                         [workflow-id num-activities])]
+                         workflow-id)]
 
           ;; Verify: Workflow completed successfully
           (is (= :completed (:status result-2))

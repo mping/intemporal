@@ -1,12 +1,14 @@
 (ns intemporal.internal.context
-  (:require [intemporal.internal.error :as error]
-            [intemporal.internal.logging :as log]
-            [intemporal.protocol :as p]
-            [promesa.core])
-  #?(:clj (:require [net.cgrand.macrovich :as macros])
-     :cljs (:require-macros [net.cgrand.macrovich :as macros]
-                            [intemporal.internal.logging :as log])))
-
+  #?(:cljs
+     (:require-macros
+      [intemporal.internal.logging :as log]
+      [net.cgrand.macrovich :as macros]))
+  (:require
+   [intemporal.internal.error :as error]
+   [intemporal.internal.logging :as log]
+   [intemporal.protocol :as p]
+   [promesa.core]
+   #?(:clj [net.cgrand.macrovich :as macros])))
 
 ;; ============================================================================
 ;; Dynamic Context
@@ -58,7 +60,7 @@
   "Pass-local replay index: {[event-type seq] event}. FIRST occurrence wins,
    exactly like `find-event`'s `first`.
 
-   History legitimately contains DUPLICATE (seq, event-type) entries —
+   History may legitimately contain DUPLICATE (seq, event-type) entries —
    :activity-scheduled is re-emitted on every pass that reaches it before
    completion, and check-then-act writes double-write on InMemory/FDB (kimi.md
    P4) — and replay must keep resolving each seq to the same, earliest one. A
@@ -73,11 +75,11 @@
 
 (defn history-event
   "Find the event of `event-type` at `seq-num` in the CURRENT PASS's history
-   snapshot — the vector run-workflow-internal loaded once, before the body
+   snapshot — the vector drive-workflow! loaded once, before the body
    started replaying (`:history`, written once per iteration, never mutated).
 
    Replay reads THIS, never the live store: an event written by another thread
-   while the pass is in flight (a signal/timer callback future, store.cljc)
+   while the pass is in flight (for example, a concurrent signal writer)
    belongs to the NEXT pass. Reading the store per op mixes two snapshots inside
    one pass (kimi.md X9) and costs a round-trip per replayed step (A16).
 
@@ -249,24 +251,24 @@
   [promise f]
   (macros/case
     :clj (throw (IllegalArgumentException. "CLJS only"))
-    :cljs(let [ctx-sym (gensym "workflow-ctx")]
-           `(let [~ctx-sym *workflow-context*]
-              (promesa.core/then ~promise
-                (fn [res#]
-                  (binding [*workflow-context* ~ctx-sym]
-                    (~f res#))))))))
+    :cljs (let [ctx-sym (gensym "workflow-ctx")]
+            `(let [~ctx-sym *workflow-context*]
+               (promesa.core/then ~promise
+                 (fn [res#]
+                   (binding [*workflow-context* ~ctx-sym]
+                     (~f res#))))))))
 
 (defmacro bfinally
   "Like p/finally, but automatically propagates *workflow-context*."
   [promise f]
   (macros/case
     :clj (throw (IllegalArgumentException. "CLJS only"))
-    :cljs(let [ctx-sym (gensym "workflow-ctx")]
-           `(let [~ctx-sym *workflow-context*]
-              (promesa.core/finally ~promise
-                (fn [& args#]
-                  (binding [*workflow-context* ~ctx-sym]
-                    (apply ~f args#))))))))
+    :cljs (let [ctx-sym (gensym "workflow-ctx")]
+            `(let [~ctx-sym *workflow-context*]
+               (promesa.core/finally ~promise
+                 (fn [& args#]
+                   (binding [*workflow-context* ~ctx-sym]
+                     (apply ~f args#))))))))
 
 (defmacro bloop
   "Like p/loop, but automatically propagates *workflow-context*.

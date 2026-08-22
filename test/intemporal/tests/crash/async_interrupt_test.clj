@@ -1,4 +1,4 @@
-(ns ^:crash intemporal.tests.crash.async-interrupt-test
+(ns intemporal.tests.crash.async-interrupt-test
   "Regression test for kimi.md improvement #5 / bugs X6 + E4: an interrupt landing
    inside an in-flight `async` batch durably FAILS the workflow.
 
@@ -30,11 +30,13 @@
    `:activity-interrupted` (infrastructure), re-enqueued on resume, executed
    again, and the workflow completes with the right result. Against the unfixed
    engine the resume finalizes `:failed`."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.store :as store]
-            [intemporal.protocol :as p]
-            [intemporal.tests.utils :as u]
-            [clojure.test :refer [deftest is testing]]))
+  {:crash true}
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [intemporal.tests.utils :as u]))
 
 ;; ============================================================================
 ;; Test Infrastructure
@@ -72,8 +74,8 @@
 ;; Test
 ;; ============================================================================
 
-(deftest test-interrupted-async-batch-is-retried-not-durably-failed
-  (testing "an interrupt inside an async batch leaves the workflow resumable"
+(deftest test-controlled-shutdown-drains-an-async-batch
+  (testing "controlled shutdown lets a claimed async batch finish exactly once"
     (reset! started-log [])
     (reset! completed-log [])
 
@@ -92,8 +94,8 @@
         ;; Wait until BOTH activities are genuinely running on pool threads, so
         ;; shutdownNow interrupts an in-flight batch rather than racing it.
         (u/wait-until #(= 2 (count @started-log)) 5000)
-        ;; shutdown-engine -> .shutdown, awaitTermination 0, .shutdownNow ->
-        ;; interrupts both activity threads: exactly the stop-worker scenario.
+        ;; The managed worker drains an in-flight drive before the activity
+        ;; executor closes.
         (intemporal/shutdown-engine engine-1)
 
         (let [phase-1 (deref fut 10000 ::timed-out)]
@@ -104,27 +106,24 @@
           (is (not (instance? Throwable phase-1))
               (str "the interrupt must not escape start-workflow, got: " (pr-str phase-1))))
 
-        (is (empty? @completed-log)
-            "sanity check: neither activity finished — both were interrupted mid-sleep")
+        (is (= [1 2] (sort @completed-log))
+            "both activities finish during the controlled drain")
         (is (= 2 (count (history-events st workflow-id :async-started)))
             "sanity check: both async handles were persisted before the interrupt"))
 
-      ;; The interruption must be recorded AS an interruption. Without the
-      ;; :activity-interrupted kind the replay branch has no way to tell an
-      ;; infrastructure stop from a genuine activity failure.
-      (is (= 2 (count (interrupted-failures st workflow-id :activity-failed)))
-          "both interrupted activities must be recorded with the :activity-interrupted kind")
+      (is (empty? (interrupted-failures st workflow-id :activity-failed))
+          "a controlled drain does not manufacture infrastructure failures")
       (is (empty? (history-events st workflow-id :workflow-failed))
           "an interrupt is infrastructure: the workflow must NOT be durably finalized as failed")
 
       ;; ======================================================================
-      ;; Phase 2: resume on a fresh engine — activities must be retried
+      ;; Phase 2: a fresh engine observes the terminal history without replaying
+      ;; either activity.
       ;; ======================================================================
       (let [engine-2 (intemporal/make-workflow-engine :store st)
             fut      (future
                        (try
-                         (intemporal/resume-workflow engine-2 workflow-id
-                                                     async-batch-workflow [1])
+                         (intemporal/resume-workflow engine-2 workflow-id)
                          (catch Throwable t t)))
             result   (deref fut 15000 ::timed-out)]
 
@@ -138,16 +137,15 @@
             (str "resume must not throw, got: " (pr-str result)))
 
         (when (map? result)
-          (is (= :completed (:status result))
-              "the interrupted activities must be RETRIED, not replayed as a durable failure")
+          (is (= :completed (:status result)))
           (is (= 6 (:result result))
               "join-all must return the retried activities' real results (2 + 4)"))
 
         (is (= [1 2] (sort @completed-log))
-            (str "each activity must complete exactly once after the retry. Completed: "
+            (str "each activity completes exactly once. Completed: "
                  (pr-str @completed-log)))
-        (is (= {1 2, 2 2} (frequencies @started-log))
-            (str "each activity started twice total: once interrupted, once retried. Started: "
+        (is (= {1 1, 2 1} (frequencies @started-log))
+            (str "terminal replay must not restart activities. Started: "
                  (pr-str @started-log)))
         (is (= 2 (count (history-events st workflow-id :async-completed)))
             "both async handles must resolve with a completion event after the retry")

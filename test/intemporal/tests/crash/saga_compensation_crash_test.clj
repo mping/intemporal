@@ -1,12 +1,14 @@
-(ns ^:crash intemporal.tests.crash.saga-compensation-crash-test
+(ns intemporal.tests.crash.saga-compensation-crash-test
   "Crash recovery test for saga compensations.
    A compensation suspends mid-way (waiting on a signal) to simulate a crash
    between compensating activities. After resume, each compensating activity
    must run exactly once and the workflow finalizes :failed."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.store :as store]
-            [intemporal.protocol :as p]
-            [clojure.test :refer [deftest is testing]]))
+  {:crash true}
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]))
 
 ;; ============================================================================
 ;; Activities - count actual executions (replays don't re-run the fn)
@@ -85,7 +87,7 @@
       (testing "Phase 2: resume completes compensation and finalizes :failed"
         (let [engine-2 (intemporal/make-workflow-engine :store persistent-store :threads 2)]
           (intemporal/send-signal persistent-store workflow-id "continue-compensation" {})
-          (let [result (intemporal/resume-workflow engine-2 workflow-id crash-saga ["o1"])]
+          (let [result (intemporal/resume-workflow engine-2 workflow-id)]
             (is (= :failed (:status result)))
             ;; each compensating activity ran exactly once across the crash
             (is (= 1 (get @exec-counts :cancel-flight)))

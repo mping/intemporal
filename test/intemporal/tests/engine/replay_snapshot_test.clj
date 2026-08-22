@@ -2,7 +2,7 @@
   "Regression test for kimi.md improvement #6 (bugs A16 + X9): replay must read
    the PASS-LOCAL history snapshot, not the live store, one operation at a time.
 
-   `run-workflow-internal` already loads the whole history once per iteration
+   `drive-workflow!` loads the whole history once per iteration
    into the workflow context (`execution.clj`, `(:history ctx)`), but the stub
    operations in `intemporal.core` ignore it: every replayed op issues its own
    `p/find-event` against the STORE — 20 call sites in `core.cljc` (68-69,
@@ -14,10 +14,9 @@
        SELECT per step per pass; on FDB `find-event` loads the ENTIRE history per
        call, making it O(n^3) event throughput.
 
-     X9 (correctness) — the reads are not snapshot-isolated. A signal or timer
-       callback firing on another thread mid-pass (InMemoryStore fires callbacks
-       in a `future`, `store.cljc`) writes into the store while the pass is in
-       flight. Earlier ops in that pass were resolved against the OLD history;
+     X9 (correctness) — the reads are not snapshot-isolated. A concurrent signal
+       or completion writer can update the store while the pass is in flight.
+       Earlier ops in that pass were resolved against the OLD history;
        a later op reads the live store and sees the NEW event. The pass is then
        internally inconsistent: it mixes two snapshots.
 
@@ -28,25 +27,24 @@
    What these tests assert:
      1. replaying a linear activity chain issues NO per-op store `find-event`,
         and the read count stays linear in the step count rather than quadratic;
-     2. a `:signal-received` written mid-pass (as a callback future would) is not
+     2. a `:signal-received` written mid-pass by another writer is not
         consumed by the pass already in flight;
      3. an `:activity-completed` written mid-pass does not preempt the frontier
         activity of the pass already in flight.
 
-   Tests 2 and 3 stand in for a concurrent writer (a callback future, or another
-   pod) with a deterministic write issued immediately after the pass takes its
+   Tests 2 and 3 stand in for a concurrent writer with a deterministic write
+   issued immediately after the pass takes its
    snapshot — the exact hazard window, without racing threads. The property under
    test is intra-pass snapshot consistency, not the fabricated event's content:
    in both tests the workflow's final RESULT is identical either way, so each
-   test asserts the observable that actually differs.
-
-   All three currently FAIL against the unfixed engine."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.internal.context :as ctx]
-            [intemporal.protocol :as p]
-            [intemporal.store :as store]
-            [intemporal.utils :as utils]))
+   test asserts the observable that actually differs."
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.internal.context :as ctx]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [intemporal.utils :as utils]))
 
 ;; ============================================================================
 ;; Test Infrastructure
@@ -77,6 +75,11 @@
       (swap! trace conj {:op :save :event-type (:event-type e) :seq (:seq e)}))
     (p/save-events inner workflow-id events))
 
+  (save-events-and-wake! [_ workflow-id events]
+    (doseq [e events]
+      (swap! trace conj {:op :save-and-wake :event-type (:event-type e) :seq (:seq e)}))
+    (p/save-events-and-wake! inner workflow-id events))
+
   (find-event [_ workflow-id event-type seq-num]
     (swap! trace conj {:op :find-event :event-type event-type :seq seq-num})
     (p/find-event inner workflow-id event-type seq-num))
@@ -87,20 +90,16 @@
     (p/add-signal inner workflow-id signal-name signal-data))
   (consume-signal [_ workflow-id signal-name]
     (p/consume-signal inner workflow-id signal-name))
-  (register-signal-callback [_ workflow-id signal-name callback]
-    (p/register-signal-callback inner workflow-id signal-name callback))
-  (unregister-signal-callback [_ workflow-id signal-name]
-    (p/unregister-signal-callback inner workflow-id signal-name))
-  (register-wake-callback [_ workflow-id callback]
-    (p/register-wake-callback inner workflow-id callback))
   (wake-workflow [_ workflow-id] (p/wake-workflow inner workflow-id))
   (is-cancelled? [_ workflow-id] (p/is-cancelled? inner workflow-id))
   (mark-cancelled [_ workflow-id] (p/mark-cancelled inner workflow-id))
   (get-workflow-status [_ workflow-id] (p/get-workflow-status inner workflow-id))
-  (claim-owner [_ workflow-id owner-id] (p/claim-owner inner workflow-id owner-id))
-  (list-pending [_ owner-id limit] (p/list-pending inner owner-id limit))
+  (claim-runnable! [_ owner-id limit now-ms] (p/claim-runnable! inner owner-id limit now-ms))
+  (park-workflow! [_ workflow-id wake-version events next-run-at]
+    (p/park-workflow! inner workflow-id wake-version events next-run-at))
+  (requeue-running! [_ workflow-id] (p/requeue-running! inner workflow-id))
+  (recover-running! [_ owner-id] (p/recover-running! inner owner-id))
   (release-owner [_ owner-id] (p/release-owner inner owner-id))
-  (set-wake-at [_ workflow-id wake-at-ms] (p/set-wake-at inner workflow-id wake-at-ms))
   (link-child! [_ parent-id parent-seq child-id policy]
     (p/link-child! inner parent-id parent-seq child-id policy))
   (list-children [_ parent-id] (p/list-children inner parent-id)))
@@ -218,10 +217,12 @@
     (let [trace    (atom [])
           injector (fn [inner load-count]
                      ;; Pass 2 has just snapshotted its history. Simulate the
-                     ;; callback future in store.cljc firing right now: a real
-                     ;; client signal lands, and the :signal-received event for
+                     ;; A concurrent writer runs now: a real client signal lands,
+                     ;; and the :signal-received event for
                      ;; the wait at seq 1 is written.
-                     (when (= 2 load-count)
+                     ;; One claim metadata read, then pass 1; inject after pass
+                     ;; 2 takes the third snapshot.
+                     (when (= 3 load-count)
                        (p/add-signal inner signal-wf-id signal-name
                                      {:id "real" :payload :real})
                        (p/save-event inner signal-wf-id
@@ -280,7 +281,7 @@
                      ;; a completion for seq 1 — the activity this pass is about
                      ;; to reach. It carries the SAME activity name, so `stub`'s
                      ;; determinism check accepts it and the preemption is silent.
-                     (when (= 2 load-count)
+                     (when (= 3 load-count)
                        (p/save-event inner ghost-wf-id
                                      {:event-type    :activity-completed
                                       :seq           1

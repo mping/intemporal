@@ -1,11 +1,12 @@
 (ns intemporal.tests.timer-test
-  (:require [intemporal.core :as intemporal]
-            [intemporal.tests.utils :refer [with-result]]
-            [cljs.test :as t :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]])
-
-  (:require-macros [intemporal.tests.utils :refer [with-result]]
-                   [intemporal.internal.context :refer [blet]]))
+  (:require-macros
+   [intemporal.internal.context :refer [blet]]
+   [intemporal.tests.utils :refer [with-result]])
+  (:require
+   [cljs.test :as t :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.tests.utils :refer [with-result]]
+   [matcher-combinators.test :refer [match?]]))
 
 (defn activity-fn [arg]
   [:processed arg])
@@ -49,10 +50,9 @@
     (let [engine (intemporal/make-workflow-engine :threads 2)]
       (with-result [[result1 result2]
                     (blet [r1 (intemporal/start-workflow engine
-                                                          timed-flow [100]
-                                                          :workflow-id "timer-replay-test")
-                            r2 (intemporal/resume-workflow engine "timer-replay-test"
-                                                           timed-flow [100])]
+                                timed-flow [100]
+                                :workflow-id "timer-replay-test")
+                           r2 (intemporal/resume-workflow engine "timer-replay-test")]
                       [r1 r2])]
         (is (match? {:status :completed} result1))
         (is (match? {:status :completed} result2))

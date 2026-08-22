@@ -6,12 +6,13 @@
    blocking loop, which would race the worker on the same workflow) and the worker
    runs it plus every descendant child. Each `check-*` is store-agnostic and run
    against InMemory (always) plus JDBC and FDB (^:integration)."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.store :as store]
-            [intemporal.store.jdbc :as jdbc-store]
-            [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]))
+  (:require
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [intemporal.store.fdb :as fdb-store]
+   [intemporal.store.jdbc :as jdbc-store]
+   [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (defn await-status
   "Poll `wf-id`'s status until it equals `target` (or the timeout elapses); returns

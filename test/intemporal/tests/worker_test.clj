@@ -4,15 +4,16 @@
   Proves the durable, cross-pod recovery model WITHOUT leases:
    - a workflow whose original engine crashed is resumed by a worker (the
      ownership scan is both the live wake and the crash recovery);
-   - claim-owner is the exclusivity gate: only one owner can claim a workflow,
+   - claim-runnable! is the exclusivity gate: only one owner can claim a workflow,
      so concurrent execution (and history corruption) cannot occur (bug 1.2)."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.store :as store]
-            [intemporal.store.jdbc :as jdbc-store]
-            [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [intemporal.store.fdb :as fdb-store]
+   [intemporal.store.jdbc :as jdbc-store]
+   [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (defn w-act [x] (* x 10))
 
@@ -71,32 +72,44 @@
           store (fdb-store/create-store db root)]
       (check-worker-recovery store))))
 
-;; ── exclusivity: claim-owner lets exactly one owner run a workflow ──────────────
+;; ── exclusivity: an atomic runnable claim selects exactly one owner ─────────────
 
 (defn- check-claim-exclusivity [store]
   (let [wid (str "claim-" (random-uuid))]
     (p/save-event store wid {:event-type :workflow-started :seq -1 :workflow-id wid :args []})
-    (is (p/claim-owner store wid "owner-A") "A claims the unowned workflow")
-    (is (p/claim-owner store wid "owner-A") "A re-claims its own (idempotent)")
-    (is (false? (p/claim-owner store wid "owner-B")) "B cannot claim A's workflow")
-    ;; scope to this wid — the shared DB may hold unowned rows from prior runs
-    (is (contains? (set (p/list-pending store "owner-A" 1000)) wid) "the workflow is pending for A")
-    (is (not (contains? (set (p/list-pending store "owner-B" 1000)) wid)) "and not pending for B")
-    (p/release-owner store "owner-A")
-    (is (p/claim-owner store wid "owner-B") "B claims after A releases")))
+    (let [claim-for (fn [owner]
+                      (some #(when (= wid (:workflow-id %)) %)
+                            (p/claim-runnable! store owner 1000
+                                               (System/currentTimeMillis))))
+          claim-a   (claim-for "owner-A")]
+      (is (some? claim-a) "A atomically claims the unowned runnable workflow")
+      (is (nil? (claim-for "owner-A"))
+          "RUNNING work is not dispatched twice to the same worker")
+      (is (nil? (claim-for "owner-B"))
+          "B cannot claim A's running workflow")
+      (p/release-owner store "owner-A")
+      (let [claim-b (claim-for "owner-B")]
+        (is (some? claim-b) "release requeues RUNNING work so B can claim it")
+        (is (= {:park-status :terminal}
+               (p/park-workflow! store wid (:wake-version claim-b)
+                                 [{:event-type :workflow-completed
+                                   :seq 0 :result :done
+                                   :timestamp (System/currentTimeMillis)}]
+                                 nil))))
+      (p/release-owner store "owner-B"))))
 
 (deftest claim-exclusivity-in-memory
-  (testing "InMemoryStore claim-owner exclusivity"
+  (testing "InMemoryStore claim-runnable! exclusivity"
     (check-claim-exclusivity (store/create-store))))
 
 (deftest ^:integration claim-exclusivity-jdbc
-  (testing "JdbcStore claim-owner exclusivity"
+  (testing "JdbcStore claim-runnable! exclusivity"
     (let [url   (jdbc-store/resolve-jdbc-url)
           store (jdbc-store/create-store url)]
       (try (check-claim-exclusivity store) (finally (.close store))))))
 
 (deftest ^:integration claim-exclusivity-fdb
-  (testing "FDBStore claim-owner exclusivity"
+  (testing "FDBStore claim-runnable! exclusivity"
     (let [root  (str "claim-" (random-uuid))
           fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")

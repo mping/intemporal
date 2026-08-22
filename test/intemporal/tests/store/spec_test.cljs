@@ -9,9 +9,10 @@
   load-time state: kaocha-cljs has no `:bindings` hook and loads every `-test$`
   namespace before running any of them, so this single call is what enables the
   inline InMemoryStore `check!` assertions for the whole :test-cljs suite."
-  (:require [clojure.spec.alpha :as s]
-            [cljs.test :refer-macros [deftest is testing]]
-            [intemporal.spec :as spec]))
+  (:require
+   [cljs.test :refer-macros [deftest is testing]]
+   [clojure.spec.alpha :as s]
+   [intemporal.spec :as spec]))
 
 (s/check-asserts true)
 

@@ -7,10 +7,11 @@
   whose owner is currently dead.  This is the primary way to trigger bug 1.1:
   the signal row lands in intemporal_signals but no callback fires because the
   owning worker is gone."
-  (:require [intemporal.jepsen.db :as db]
-            [next.jdbc :as jdbc]
-            [clojure.string :as str]
-            [taoensso.telemere :as log]))
+  (:require
+   [clojure.string :as str]
+   [intemporal.jepsen.db :as db]
+   [next.jdbc :as jdbc]
+   [taoensso.telemere :as log]))
 
 (defn- pick-victim
   "Returns a random alive owner-id to kill, respecting min-alive."
@@ -98,7 +99,7 @@
                                 AND claimed_by IN ("
                              (str/join "," (repeat (count dead-owners) "?"))
                              ")")
-                         test-run]
+                        test-run]
                        dead-owners)))]
     (doseq [{:jepsen_work_queue/keys [workflow_id wf_type]} rows]
       (let [signal-name (case wf_type

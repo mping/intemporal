@@ -10,12 +10,10 @@ CREATE TABLE IF NOT EXISTS intemporal_workflows (
     -- owns-or-null; a crashed pod's work is reclaimed when it restarts with the
     -- same owner-id. No time-based leases.
     owner TEXT,
-    -- C2: earliest-wake filter for the ownership scan. A workflow suspended on
-    -- a timer (sleep / signal-with-timeout) records when it next needs
-    -- attention, so the recovery worker can skip long-sleeping workflows until
-    -- they are due instead of replaying them every poll. NULL = always
-    -- eligible (e.g. waiting on an external signal, not the clock).
-    wake_at TIMESTAMPTZ,
+    -- Durable scheduling is independent of the public workflow status.
+    run_state TEXT NOT NULL DEFAULT 'RUNNABLE',
+    next_run_at TIMESTAMPTZ,
+    wake_version BIGINT NOT NULL DEFAULT 0,
     -- Tier 2: independent child workflows. A child is a first-class workflow
     -- row that also records its parent linkage: which workflow scheduled it
     -- (parent_workflow_id), at which parent sequence number (parent_seq, used
@@ -31,14 +29,9 @@ CREATE TABLE IF NOT EXISTS intemporal_workflows (
 CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_status
     ON intemporal_workflows (status);
 --;;
-CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_owner
-    ON intemporal_workflows (owner);
---;;
--- Partial index for the due-scan: only non-terminal rows with a future wake_at
--- are interesting to the poller's "skip until due" predicate.
-CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_wake_at
-    ON intemporal_workflows (wake_at)
-    WHERE wake_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_schedule
+    ON intemporal_workflows (owner, run_state, next_run_at, created_at)
+    WHERE status NOT IN ('completed', 'failed', 'cancelled', 'terminated');
 --;;
 -- list-children enumerates a parent's children for close-policy enforcement.
 CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_parent

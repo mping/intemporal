@@ -26,14 +26,16 @@
     checker cancellation-liveness -> FAIL  (bug 2.3)
 
   After the Phase A + B + C fixes from improvements.md, all four should PASS."
-  (:require [intemporal.jepsen.db      :as db]
-            [intemporal.jepsen.client  :as client]
-            [intemporal.jepsen.nemesis :as nemesis]
-            [intemporal.jepsen.checker :as checker]
-            [intemporal.store.jdbc :as jdbc-store]
-            [clojure.pprint :as pp]
-            [taoensso.telemere :as log])
-  (:import [java.util.concurrent Executors TimeUnit]))
+  (:require
+   [clojure.pprint :as pp]
+   [intemporal.jepsen.checker :as checker]
+   [intemporal.jepsen.client :as client]
+   [intemporal.jepsen.db :as db]
+   [intemporal.jepsen.nemesis :as nemesis]
+   [intemporal.store.jdbc :as jdbc-store]
+   [taoensso.telemere :as log])
+  (:import
+   (java.util.concurrent Executors TimeUnit)))
 
 ;; ---------------------------------------------------------------------------
 ;; Defaults

@@ -49,16 +49,14 @@ Two concepts apply:
     (println result)))
 ```
 
-### Two execution models
+### Durable execution model
 
-intemporal workflows need to be *driven* — something must call `run-workflow-internal` each
-time the workflow is ready to advance (timers, signals, activity results). There are two
-ways to do that, and they must **not** be mixed on the same workflow:
+Every workflow follows the same path: it is persisted as `RUNNABLE`, atomically claimed as
+`RUNNING`, and either terminates or parks as `WAITING`. Workflow code is never driven
+directly by an API caller.
 
-#### 1. `start-workflow` — in-process, caller-driven (blocking loop)
-
-The caller's thread runs the workflow to completion in a loop, blocking on each suspension.
-Simple — no worker needed. Good for single-shot, embedded, or test scenarios.
+`start-workflow` is the convenient blocking API. It submits the workflow, lazily starts the
+engine's bounded worker, and waits for the terminal result:
 
 ```clojure
 ;; The caller blocks until the workflow completes.
@@ -66,12 +64,13 @@ Simple — no worker needed. Good for single-shot, embedded, or test scenarios.
   (println result))
 ```
 
-#### 2. A **worker** — out-of-process, owner-driven (ownership scan)
-
-`start-worker` polls the store for non-terminal workflows belonging to this owner (or
-unowned), claims each, and resumes it. The same loop picks up timed-out sleeps, signals,
-and children completing — and recovers orphaned workflows after a crash (the crashed pod
-reclaims its own on restart with the same `owner-id`). **A worker is required** for:
+`submit-workflow` returns immediately and is intended for a long-running explicit worker.
+`start-worker` polls only `RUNNABLE` workflows and due timed waits belonging to this owner
+(or unowned), atomically changes them to `RUNNING`, and resumes them through a bounded
+drive pool. Indefinite signal/join waits are `WAITING` and do not appear in scans until a
+signal, cancellation, or child completion durably wakes them. A restarted worker requeues
+its own interrupted `RUNNING` work when it uses the same stable `owner-id`. An explicit
+worker is useful for:
 
 - `submit-workflow` (submitting a workflow for worker execution)
 - Independent child workflows (`run-child-workflow-async` / `run-child-workflow-detached`)
@@ -80,7 +79,10 @@ reclaims its own on restart with the same `owner-id`). **A worker is required** 
 
 ```clojure
 (let [engine (intemporal/make-workflow-engine :threads 4)
-      stop   (intemporal/start-worker engine :poll-ms 100 :owner-id "pod-0")]
+      stop   (intemporal/start-worker engine
+                                      :poll-ms 100
+                                      :owner-id "pod-0"
+                                      :workflow-concurrency 4)]
   ;; Submit a workflow for the worker to drive — returns immediately
   (intemporal/submit-workflow engine my-wf [arg] :workflow-id "my-wf")
   ;; The worker picks it up, runs it to completion
@@ -88,9 +90,8 @@ reclaims its own on restart with the same `owner-id`). **A worker is required** 
   (stop))
 ```
 
-> Mixing `start-workflow` and a worker on the **same** workflow id will double-drive it
-> (both the caller's loop and the worker claim+resume it) — the ownership claim is the
-> guard for workers, but `start-workflow` bypasses it entirely. Pick one model per workflow.
+Both APIs use the same claim protocol, so an explicit worker and the engine-owned worker
+cannot concurrently drive the same workflow.
 
 ### Activities
 
@@ -132,7 +133,8 @@ thunk is NOT re-invoked — the engine replays the cached result.
 A workflow can run other workflows as **child workflows**. Each child has its own
 independent event history and lifecycle.
 
-**Synchronous** — the child runs to completion inline (`run-child-workflow`):
+**Synchronous** — `run-child-workflow` schedules an independent child and immediately
+joins its handle:
 ```clojure
 (intemporal/defn-workflow parent [x]
   (let [a     (intemporal/stub #'my-activity)
@@ -140,8 +142,7 @@ independent event history and lifecycle.
     {:own (a x) :child child}))
 ```
 
-**Independent (worker-driven)** — the child becomes a first-class persisted workflow
-with its own ownership claim, driven by a worker (must be running). The parent
+**Asynchronous** — the child is the same first-class persisted workflow, but the parent
 continues in parallel and `join`s later. Each child takes a `:parent-close-policy` (Temporal's ParentClosePolicy)
 deciding its fate when the parent closes (success, failure, or cancellation):
 
@@ -232,7 +233,10 @@ In **ClojureScript** catch `:default` and rethrow engine suspensions explicitly:
 (let [engine (intemporal/make-workflow-engine :threads 4
                                               :store  my-store   ;; see "Stores" below
                                               :enable-logging true)
-      stop   (intemporal/start-worker engine :poll-ms 100 :owner-id "pod-0")]
+      stop   (intemporal/start-worker engine
+                                      :poll-ms 100
+                                      :owner-id "pod-0"
+                                      :workflow-concurrency 4)]
   ;; Submit workflows — the worker drives them
   (intemporal/submit-workflow engine my-wf [arg] :workflow-id "my-wf")
   ;; ... send signals, cancel, observe ...
@@ -245,11 +249,10 @@ In **ClojureScript** catch `:default` and rethrow engine suspensions explicitly:
 | Option                | Default         | Description                             |
 |-----------------------|-----------------|-----------------------------------------|
 | `:store`              | `InMemoryStore` | Persistence backend (see Stores)        |
-| `:threads`            | 4               | Executor threads                        |
-| `:scheduler-threads`  | 2               | Timer/scheduler threads                 |
+| `:threads`            | unbounded       | Maximum concurrent activities           |
 | `:default-timeout-ms` | 30000           | Default activity timeout                |
-| `:enable-logging`     | false           | Logging observer (logs all events)      |
-| `:enable-telemetry`   | false           | OpenTelemetry observer (JVM only)       |
+| `:enable-logging`     | true            | Logging observer (logs all events)      |
+| `:enable-telemetry`   | true            | OpenTelemetry tracing (JVM only)        |
 | `:observer`           | —               | Additional `IWorkflowObserver` instance |
 
 ### Worker & recovery
@@ -284,9 +287,9 @@ CLJS (the CLJS worker is also single-process). No persistence across restarts.
 (store/create-store)
 ```
 
-### JDBC (PostgreSQL)
-Persistent store backed by PostgreSQL with JSONB columns. Runs Migratus migrations on
-construction. Requires the `:jdbc` deps.edn alias.
+### JDBC (PostgreSQL / MariaDB)
+Persistent store backed by PostgreSQL or MariaDB. Event payloads use the library's EDN
+codec. Runs Migratus migrations on construction and requires the `:jdbc` deps.edn alias.
 
 ```clojure
 (require '[intemporal.store.jdbc :as jdbc])
@@ -294,12 +297,15 @@ construction. Requires the `:jdbc` deps.edn alias.
 ;; .close the store to release the HikariCP pool
 ```
 
-`list-pending` / `claim-owner` use SQL `UPDATE … WHERE owner IS NULL OR owner = ?`,
-and C2 wake-at filtering via `wake_at <= now()`.
+Scheduling uses `run_state`, `next_run_at`, and monotonic `wake_version` columns.
+`claim-runnable!` locks and claims only `RUNNABLE` rows or `WAITING` rows whose deadline
+is due. `park-workflow!` checks the drive's captured wake version, so a concurrent wake
+cannot be overwritten by the transition to `WAITING`.
 
 ### FoundationDB
-Persistent store backed by FoundationDB, using subspaces for history, signals, ownership
-index, and child linkage. Requires the `:fdb` deps.edn alias.
+Persistent store backed by FoundationDB, using subspaces for history, signals, ownership,
+ready/deadline scheduling indexes, and child linkage. Indefinite `WAITING` workflows have
+no scheduling-index entry. Requires the `:fdb` deps.edn alias.
 
 ```clojure
 (require '[intemporal.store.fdb :as fdb])

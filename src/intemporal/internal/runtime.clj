@@ -1,67 +1,11 @@
 (ns intemporal.internal.runtime
-  (:require [intemporal.internal.error :as error]
-            [intemporal.internal.logging :as log]
-            [intemporal.protocol :as p]
-            [intemporal.tracing :as tracing])
-  (:import (java.util.concurrent ArrayBlockingQueue BlockingQueue CancellationException ExecutorService Executors Future RejectedExecutionException RejectedExecutionHandler ScheduledExecutorService ScheduledFuture ThreadPoolExecutor TimeUnit TimeoutException)))
-
-
-;; ============================================================================
-;; Default Scheduler Implementation
-;; ============================================================================
-
-(defrecord DefaultScheduler [^ScheduledExecutorService pool
-                             pending-timers]
-  p/IScheduler
-  (schedule-timer [_ workflow-id seq-num fire-at callback]
-    (let [timer-key [workflow-id seq-num]]
-      ;; Idempotent: under the ownership scan a suspended timer workflow is
-      ;; re-resumed every poll, so process-timer may call schedule-timer again
-      ;; for the same [wf,seq]. Scheduling a second future would leak it and
-      ;; risk a duplicate :timer-fired. If one is already armed, keep it.
-      (if (contains? @pending-timers timer-key)
-        timer-key
-        (let [delay-ms   (max 0 (- fire-at (System/currentTimeMillis)))
-              ;; Capture the workflow-thread context so the timer callback (which
-              ;; fires on a scheduler-pool thread) runs under the workflow trace.
-              parent-ctx (tracing/capture)
-              future   (.schedule pool
-                                  ^Runnable (fn []
-                                              (swap! pending-timers dissoc timer-key)
-                                              (tracing/traced-call parent-ctx "timer-fired" nil callback))
-                                  delay-ms
-                                  TimeUnit/MILLISECONDS)]
-          (swap! pending-timers assoc timer-key future)
-          timer-key))))
-
-  (cancel-timer [_ workflow-id seq-num]
-    (let [timer-key [workflow-id seq-num]]
-      (when-let [^ScheduledFuture future (get @pending-timers timer-key)]
-        (.cancel future false)
-        (swap! pending-timers dissoc timer-key))))
-
-  (shutdown-scheduler [_ grace-period-secs]
-    (doseq [[_ ^ScheduledFuture future] @pending-timers]
-      (.cancel future false))
-    (reset! pending-timers {})
-    (try
-      (.shutdown pool)
-      (when-not (.awaitTermination pool grace-period-secs TimeUnit/SECONDS)
-        (.shutdownNow pool)
-        (when-not (.awaitTermination pool grace-period-secs TimeUnit/SECONDS)
-          (log/error "Could not terminate all threads")))
-      (catch InterruptedException e
-        (log/error e "Interrupted while shutting down pool"))))
-
-  (shutdown-scheduler? [_]
-    (.isTerminated pool)))
-
-(defn make-scheduler
-  "Create a new scheduler"
-  [& {:keys [threads] :or {threads 2}}]
-  (->DefaultScheduler
-    (Executors/newScheduledThreadPool threads)
-    (atom {})))
+  (:require
+   [intemporal.internal.error :as error]
+   [intemporal.internal.logging :as log]
+   [intemporal.protocol :as p]
+   [intemporal.tracing :as tracing])
+  (:import
+   (java.util.concurrent ArrayBlockingQueue BlockingQueue CancellationException ExecutorService Executors Future RejectedExecutionException RejectedExecutionHandler ThreadPoolExecutor TimeUnit TimeoutException)))
 
 ;; ============================================================================
 ;; Default Parallel Executor
@@ -134,7 +78,7 @@
                                 ;; mapv. A saturated or closing pool rejects here, and an
                                 ;; escaping RejectedExecutionException blows straight
                                 ;; through process-pending-asyncs-parallel ->
-                                ;; handle-suspension -> run-workflow-internal (none of
+                                ;; handle-suspension -> drive-workflow! (none of
                                 ;; which catch it), killing the drive AND leaving the
                                 ;; already-submitted activities' side effects with no
                                 ;; recorded events. Instead degrade the same way the
@@ -146,18 +90,18 @@
                                 (try
                                   {:future        (.submit pool ^Callable
                                                            (fn []
-                                                            (tracing/traced-call parent-ctx (str "activity: " activity-name)
-                                                                                 {:intemporal.activity/name activity-name}
-                                                             (fn []
-                                                               ;; Exactly ONE attempt. Retrying here was invisible to the
-                                                               ;; engine: this thread has no store, workflow-id or seq, so
-                                                               ;; nothing about an attempt could be recorded and every crash
-                                                               ;; restarted the count at 1 (kimi.md X8). The engine now owns
-                                                               ;; the retry loop, which also makes `timeout` bound a single
-                                                               ;; attempt rather than the whole sequence.
-                                                               (let [start (System/currentTimeMillis)]
-                                                                 {:result   (apply (:fn act) args)
-                                                                  :duration (- (System/currentTimeMillis) start)})))))
+                                                             (tracing/traced-call parent-ctx (str "activity: " activity-name)
+                                                                                  {:intemporal.activity/name activity-name}
+                                                                                  (fn []
+                                                                                    ;; Exactly ONE attempt. Retrying here was invisible to the
+                                                                                    ;; engine: this thread has no store, workflow-id or seq, so
+                                                                                    ;; nothing about an attempt could be recorded and every crash
+                                                                                    ;; restarted the count at 1 (kimi.md X8). The engine now owns
+                                                                                    ;; the retry loop, which also makes `timeout` bound a single
+                                                                                    ;; attempt rather than the whole sequence.
+                                                                                    (let [start (System/currentTimeMillis)]
+                                                                                      {:result   (apply (:fn act) args)
+                                                                                       :duration (- (System/currentTimeMillis) start)})))))
                                    :timeout       timeout
                                    :activity-name activity-name}
                                   (catch RejectedExecutionException e
@@ -304,5 +248,3 @@
         (Executors/newVirtualThreadPerTaskExecutor))
       activity-registry-atom
       default-timeout-ms)))
-
-

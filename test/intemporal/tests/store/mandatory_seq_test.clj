@@ -19,14 +19,15 @@
   non-nil :seq, :workflow-started uses the -1 sentinel, :workflow-completed
   carries the highest seq in history, and p/max-seq agrees — on InMemory,
   JDBC, and FDB alike."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.store :as store]
-            [intemporal.store.jdbc :as jdbc-store]
-            [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]
-            [next.jdbc :as jdbc]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [intemporal.store.fdb :as fdb-store]
+   [intemporal.store.jdbc :as jdbc-store]
+   [me.vedang.clj-fdb.FDB :as cfdb]
+   [next.jdbc :as jdbc]))
 
 (defn- seq-test-activity [x]
   (* x 2))

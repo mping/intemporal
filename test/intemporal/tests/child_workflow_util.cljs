@@ -3,10 +3,11 @@
    (ClojureScript). CLJS has no thread pool: the recovery worker is promise /
    setTimeout based and drives the seeded parent plus every descendant child.
    In-memory store only."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.store :as store]
-            [promesa.core :as prom]))
+  (:require
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [promesa.core :as prom]))
 
 (defn await-status
   "Promise that resolves to `wf-id`'s status once it equals `target` (or the last

@@ -10,12 +10,10 @@ CREATE TABLE IF NOT EXISTS intemporal_workflows (
     -- owns-or-null; a crashed pod's work is reclaimed when it restarts with the
     -- same owner-id. No time-based leases.
     owner VARCHAR(255),
-    -- C2: earliest-wake filter for the ownership scan. A workflow suspended on
-    -- a timer (sleep / signal-with-timeout) records when it next needs
-    -- attention, so the recovery worker can skip long-sleeping workflows until
-    -- they are due instead of replaying them every poll. NULL = always
-    -- eligible (e.g. waiting on an external signal, not the clock).
-    wake_at TIMESTAMP,
+    -- Durable scheduling is independent of the public workflow status.
+    run_state VARCHAR(32) NOT NULL DEFAULT 'RUNNABLE',
+    next_run_at TIMESTAMP(3) NULL,
+    wake_version BIGINT NOT NULL DEFAULT 0,
     -- Tier 2: independent child workflows. A child is a first-class workflow
     -- row that also records its parent linkage.
     parent_workflow_id   VARCHAR(512),
@@ -26,13 +24,8 @@ CREATE TABLE IF NOT EXISTS intemporal_workflows (
 CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_status
     ON intemporal_workflows (status);
 --;;
-CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_owner
-    ON intemporal_workflows (owner);
---;;
--- MariaDB does not support partial indexes (WHERE clause on CREATE INDEX).
--- The application filters NULL wake_at values in list-pending via SQL.
-CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_wake_at
-    ON intemporal_workflows (wake_at);
+CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_schedule
+    ON intemporal_workflows (owner, run_state, next_run_at, created_at);
 --;;
 -- MariaDB does not support partial indexes. The application filters NULL
 -- parent_workflow_id values in list-children via SQL WHERE clause.

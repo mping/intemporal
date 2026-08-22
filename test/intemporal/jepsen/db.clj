@@ -10,12 +10,14 @@
   Process model deviation: we don't use SSH/sshd containers (local-only).
   The jepsen library is not required here; we implement our own lightweight
   orchestrator."
-  (:require [clojure.java.io :as io]
-            [next.jdbc :as jdbc]
-            [migratus.core :as migratus]
-            [taoensso.telemere :as log])
-  (:import [java.io BufferedReader InputStreamReader]
-           [java.util.concurrent TimeUnit]))
+  (:require
+   [clojure.java.io :as io]
+   [migratus.core :as migratus]
+   [next.jdbc :as jdbc]
+   [taoensso.telemere :as log])
+  (:import
+   (java.io BufferedReader InputStreamReader)
+   (java.util.concurrent TimeUnit)))
 
 (def ^:private registry (atom {}))
 

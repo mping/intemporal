@@ -4,10 +4,11 @@
    replay budget (which previously failed the parent with 'Replay budget
    exceeded'). Driven by the recovery worker; runs against InMemory (always)
    plus JDBC and FDB (^:integration)."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.tests.child-workflow-util :as u]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.tests.child-workflow-util :as u]))
 
 (intemporal/defn-workflow ja-child-wf
   "A child that suspends on a signal, then returns x + payload."

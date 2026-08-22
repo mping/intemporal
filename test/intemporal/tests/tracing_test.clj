@@ -1,27 +1,28 @@
 (ns intemporal.tests.tracing-test
   "Tests OpenTelemetry tracing integration using the in-memory SDK exporter.
 
-   Tracing is wired at execution boundaries (start-workflow, resume-workflow,
-   process-child-workflow, runtime activity/timer submit) rather than via an
-   observer. These tests install an InMemorySpanExporter and assert:
+   Tracing is wired at claimed workflow drives and runtime activity boundaries
+   rather than via an observer. These tests install an InMemorySpanExporter and assert:
    - a root workflow span with nested activity / child-workflow spans
    - the W3C tracecontext is persisted on the :workflow-started event
    - the workflow span status is ERROR when the workflow fails or is cancelled
    - cross-process resume links new spans to the original trace via tracecontext"
-  (:require [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.store :as store]
-            [clojure.string :as str]
-            [steffan-westcott.clj-otel.api.otel :as otel]
-            [steffan-westcott.clj-otel.api.trace.span :as span]
-            [clojure.test :refer [deftest is testing use-fixtures]])
-  (:import (io.opentelemetry.sdk OpenTelemetrySdk)
-           (io.opentelemetry.sdk.trace SdkTracerProvider)
-           (io.opentelemetry.sdk.trace.export SimpleSpanProcessor)
-           (io.opentelemetry.sdk.testing.exporter InMemorySpanExporter)
-           (io.opentelemetry.api.trace StatusCode)
-           (io.opentelemetry.api.trace.propagation W3CTraceContextPropagator)
-           (io.opentelemetry.context.propagation ContextPropagators)))
+  (:require
+   [clojure.string :as str]
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [steffan-westcott.clj-otel.api.otel :as otel]
+   [steffan-westcott.clj-otel.api.trace.span :as span])
+  (:import
+   (io.opentelemetry.api.trace StatusCode)
+   (io.opentelemetry.api.trace.propagation W3CTraceContextPropagator)
+   (io.opentelemetry.context.propagation ContextPropagators)
+   (io.opentelemetry.sdk OpenTelemetrySdk)
+   (io.opentelemetry.sdk.testing.exporter InMemorySpanExporter)
+   (io.opentelemetry.sdk.trace SdkTracerProvider)
+   (io.opentelemetry.sdk.trace.export SimpleSpanProcessor)))
 
 ;; ----------------------------------------------------------------------------
 ;; In-memory SDK fixture
@@ -37,7 +38,7 @@
         sdk      (-> (OpenTelemetrySdk/builder)
                      (.setTracerProvider provider)
                      (.setPropagators (ContextPropagators/create
-                                       (W3CTraceContextPropagator/getInstance)))
+                                        (W3CTraceContextPropagator/getInstance)))
                      (.build))]
     (otel/set-default-otel! sdk)
     ;; Force a fresh tracer bound to this SDK (clj-otel caches a default tracer).
@@ -136,7 +137,7 @@
         (is (= :completed (:status result)))
         (let [spans      (finished-spans)
               parent-sp  (span-named spans "/parent-flow")
-              child-sp   (first (filter #(.startsWith (.getName %) "workflow:child wf-parent/child-") spans))
+              child-sp   (span-named spans "/child-flow")
               ;; the child runs one double-activity; there may be several activity
               ;; spans (parent has none here), pick those under the child.
               trace-id   (.. parent-sp getSpanContext getTraceId)]
@@ -176,11 +177,11 @@
                              (filter #(= :workflow-started (:event-type %)))
                              first)
             anchor-trace (nth (str/split
-                               (get-in started [:tracecontext "traceparent"]) #"-") 1)]
+                                (get-in started [:tracecontext "traceparent"]) #"-") 1)]
         (is (some? anchor-trace) "anchor tracecontext persisted by submit-workflow")
         ;; Second engine (fresh "process") resumes — no live root span on the stack.
         (intemporal/with-workflow-engine [engine2 {:enable-telemetry true :store st}]
-          (let [result (intemporal/resume-workflow engine2 "wf-resume" simple-flow [21])]
+          (let [result (intemporal/resume-workflow engine2 "wf-resume")]
             (is (= :completed (:status result)))
             (let [spans     (finished-spans)
                   resume-sp (span-named spans "/simple-flow")

@@ -1,10 +1,13 @@
 (ns intemporal.tests.defn-workflow-test
   "defn-workflow registers the workflow in the registry at load time, so it is
    resolvable by id with no manual register-workflow! call (clj + cljs)."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.internal.workflow-registry :as wreg]
-            [clojure.test :refer [deftest is testing]])
-  #?(:cljs (:require-macros [intemporal.core :as intemporal])))
+  #?(:cljs
+     (:require-macros
+      [intemporal.core :as intemporal]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.internal.workflow-registry :as wreg]))
 
 (intemporal/defn-workflow sample-wf [x] (* x 2))
 

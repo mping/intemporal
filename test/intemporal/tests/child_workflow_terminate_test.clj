@@ -4,11 +4,12 @@
    When the parent closes, an in-flight :terminate child is forcefully stopped — no
    cleanup, no replay — and ends in the distinct :terminated state. Modelled as an
    order whose fulfilment child is mid-flight when the parent order workflow closes."
-  (:require [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.tests.child-workflow-util :as u]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.tests.child-workflow-util :as u]
+   [matcher-combinators.test :refer [match?]]))
 
 ;; ── activities ──────────────────────────────────────────────────────────────────
 

@@ -7,9 +7,10 @@
   non-obvious properties the stores depend on: that strings stay strings (FDB
   compares cached status/owner values against string sets), and that a bound
   *print-length* cannot truncate persisted history."
-  (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
-            [intemporal.internal.codec :as codec]))
+  (:require
+   [clojure.string :as str]
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.internal.codec :as codec]))
 
 (defn- round-trip [x] (codec/decode (codec/encode x)))
 
@@ -56,8 +57,9 @@
 
   (testing "owner ids and index entries"
     (is (= "owner-1" (round-trip "owner-1")))
-    (is (= {:wake-at nil} (round-trip {:wake-at nil})))
-    (is (= {:wake-at 1700000000000} (round-trip {:wake-at 1700000000000})))
+    (is (= {:next-run-at nil} (round-trip {:next-run-at nil})))
+    (is (= {:next-run-at 1700000000000}
+           (round-trip {:next-run-at 1700000000000})))
     (is (= {:parent-seq 4 :policy "terminate"} (round-trip {:parent-seq 4 :policy "terminate"}))))
 
   (testing "booleans"

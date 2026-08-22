@@ -1,4 +1,4 @@
-(ns ^:crash intemporal.tests.crash.async-retry-durability-test
+(ns intemporal.tests.crash.async-retry-durability-test
   "Bug #28 / X8, async half — the parallel path kept its own retry loop.
 
   `execute-activities-parallel` retried inside the executor, on a pool thread
@@ -19,12 +19,14 @@
   REGRESSION GUARDS: attempts survive a crash mid-retry; a batch that is only
   backing off does not spin the replay budget; and an activity whose attempts
   each fit the timeout but whose sum does not now succeeds."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.internal.activity :as a]
-            [intemporal.store :as store]
-            [intemporal.protocol :as p]
-            [intemporal.tests.utils :as u]
-            [clojure.test :refer [deftest is testing]]))
+  {:crash true}
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.internal.activity :as a]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [intemporal.tests.utils :as u]))
 
 ;; ============================================================================
 ;; Test Infrastructure
@@ -54,20 +56,10 @@
   (->> (p/load-history store workflow-id)
        (filter #(= event-type (:event-type %)))))
 
-(def ^:private waiting-statuses
-  #{:waiting-timer :waiting-signal :waiting-signal-timeout :waiting-async})
-
 (defn- drive-to-terminal
-  "Resume until terminal, the way a worker would: a retry backoff is a real
-   suspension, so one resume drives one step."
-  [engine workflow-id workflow-fn args]
-  (let [deadline (+ (System/currentTimeMillis) 20000)]
-    (loop []
-      (let [result (intemporal/resume-workflow engine workflow-id workflow-fn args)]
-        (cond
-          (not (waiting-statuses (:status result))) result
-          (> (System/currentTimeMillis) deadline)   result
-          :else (do (Thread/sleep 25) (recur)))))))
+  "Wake a persisted workflow and await its terminal event."
+  [engine workflow-id]
+  (intemporal/resume-workflow engine workflow-id))
 
 ;; ============================================================================
 ;; 1. Async attempts survive a crash mid-retry
@@ -106,7 +98,7 @@
 
       ;; Phase 2: resume elsewhere — the sequence continues rather than restarting.
       (let [engine-2 (intemporal/make-workflow-engine :store st :threads 2)
-            result   (drive-to-terminal engine-2 workflow-id async-retry-workflow [1])]
+            result   (drive-to-terminal engine-2 workflow-id)]
         (intemporal/shutdown-engine engine-2)
 
         (is (= :failed (:status result))
@@ -127,27 +119,28 @@
 
     (let [workflow-id "async-retry-durability-2"
           st          (store/create-store)
-          engine      (intemporal/make-workflow-engine :store st :threads 2)]
+          engine      (intemporal/make-workflow-engine :store st :threads 2)
+          start       (System/currentTimeMillis)]
 
-      (let [start   (System/currentTimeMillis)
-            result  (intemporal/resume-workflow engine workflow-id async-retry-workflow [1])
-            elapsed (- (System/currentTimeMillis) start)]
+      (intemporal/submit-workflow engine async-retry-workflow [1]
+                                  :workflow-id workflow-id)
+      (let [stop (intemporal/start-worker engine :owner-id "async-retry-parking-worker"
+                   :poll-ms 5 :workflow-concurrency 1)]
+        (u/wait-until #(seq (history-events st workflow-id :activity-attempt-failed)) 5000)
+        (stop))
 
-        (is (= 1 (count @invocation-log)) "exactly one attempt ran")
-        (is (contains? waiting-statuses (:status result))
-            (str "the drive must park while the handle backs off, got " (:status result)))
-        (is (< elapsed backoff-ms)
-            (str "the drive returned in " elapsed "ms — it must not block for the "
-                 backoff-ms "ms backoff"))
-        ;; The batch flush used to return :continue unconditionally, which with
-        ;; nothing runnable would re-run the pass until the deadline and burn the
-        ;; 1000-iteration replay budget.
-        (is (not= :failed (:status result))
-            "parking must not be mistaken for budget exhaustion"))
+      (is (= 1 (count @invocation-log)) "exactly one attempt ran before the park")
+      (is (< (- (System/currentTimeMillis) start) backoff-ms)
+          "the worker released the drive instead of sleeping through backoff")
+      (is (empty? (history-events st workflow-id :workflow-failed))
+          "parking is not replay-budget exhaustion")
 
       ;; Not due yet, so a worker's ownership scan skips it entirely.
-      (is (not (contains? (set (p/list-pending st "test-owner" 10)) workflow-id))
-          "a workflow whose async retry is not due must be excluded from list-pending")
+      (is (not (contains? (set (map :workflow-id
+                                 (p/claim-runnable! st "test-owner" 10
+                                                    (System/currentTimeMillis))))
+                          workflow-id))
+          "a workflow whose async retry is not due must be excluded from worker claims")
 
       (intemporal/shutdown-engine engine))))
 
@@ -189,7 +182,7 @@
       (intemporal/shutdown-engine engine)
 
       (is (= :completed (:status result))
-            (str "attempts of 150ms each fit a 400ms timeout, so the workflow must "
-                 "succeed on the third; got " (pr-str result)))
+          (str "attempts of 150ms each fit a 400ms timeout, so the workflow must "
+               "succeed on the third; got " (pr-str result)))
       (is (= [:ok 7] (:result result)) "and returns the successful attempt's result")
       (is (= 3 (count @slow-attempt-log)) "it took three attempts"))))

@@ -1,10 +1,13 @@
 (ns intemporal.internal.macros
-  (:require [cljs.analyzer.api :as api]
-            [intemporal.internal.context :as ctx]
-            [intemporal.internal.activity :as act]
-            [intemporal.internal.workflow-registry :as wreg])
-  #?(:clj  (:require [net.cgrand.macrovich :as macros])
-     :cljs (:require-macros [net.cgrand.macrovich :as macros])))
+  #?(:cljs
+     (:require-macros
+      [net.cgrand.macrovich :as macros]))
+  (:require
+   [cljs.analyzer.api :as api]
+   [intemporal.internal.activity :as act]
+   [intemporal.internal.context :as ctx]
+   [intemporal.internal.workflow-registry :as wreg]
+   #?(:clj [net.cgrand.macrovich :as macros])))
 
 (def cljs-available?
   #?(:cljs
@@ -101,7 +104,6 @@
              `(~sname [this# ~@args]
                 (let [f# (intemporal.core/stub (var ~qname))]
                   (f# ~@args))))))))
-
 
 ;;;;
 ;; ctx-aware macros

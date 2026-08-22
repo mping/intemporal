@@ -1,7 +1,8 @@
 (ns intemporal.tests.bench.memory-test
-  (:require [clojure.test :refer [deftest testing]]
-            [intemporal.store :as store]
-            [intemporal.tests.bench.test-suite :as suite]))
+  (:require
+   [clojure.test :refer [deftest testing]]
+   [intemporal.store :as store]
+   [intemporal.tests.bench.test-suite :as suite]))
 
 (deftest memory-store-test
   (testing "In-Memory Store Implementation"

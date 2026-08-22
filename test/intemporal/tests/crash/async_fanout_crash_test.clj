@@ -1,4 +1,4 @@
-(ns ^:crash intemporal.tests.crash.async-fanout-crash-test
+(ns intemporal.tests.crash.async-fanout-crash-test
   "Regression test for kimi.md improvement #1 / bug X1: `handle-suspension`
    only forwards pending asyncs to the engine for the :activity,
    :join-pending, :join-any-pending, and :child-workflow suspension branches.
@@ -22,10 +22,12 @@
    workflow completes, and the seq counter stays stable across passes (no
    duplicate-seq :timer-scheduled events). It currently FAILS against the
    unfixed engine."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.store :as store]
-            [intemporal.protocol :as p]
-            [clojure.test :refer [deftest is testing]]))
+  {:crash true}
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]))
 
 ;; ============================================================================
 ;; Test Infrastructure
@@ -129,15 +131,14 @@
           "sanity check: async-started must have been persisted before the crash")
 
       ;; Simulate a process restart: fresh engine, same store. Send the signal
-      ;; the crash point was waiting on, then resume. run-workflow-internal
+      ;; the crash point was waiting on, then resume. drive-workflow!
       ;; loops internally on :continue, so a single resume-workflow call
       ;; drives all the way through re-queueing the async's activity, joining
       ;; it, and finalizing -- no need to call it more than once when the
       ;; engine is correct.
       (intemporal/send-signal persistent-store workflow-id "resume" {})
       (let [engine-2 (intemporal/make-workflow-engine :store persistent-store :threads 2)
-            result   (intemporal/resume-workflow engine-2 workflow-id
-                                                 async-then-crash-point-workflow [7])]
+            result   (intemporal/resume-workflow engine-2 workflow-id)]
         (is (= :completed (:status result))
             "resume must re-queue and run the never-executed activity, then complete the workflow")
         (is (= 14 (:result result))

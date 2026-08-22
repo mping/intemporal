@@ -2,13 +2,14 @@
   "Regression (A4): under WORKER drive, cancelling a workflow must re-drive it so
    the body observes the cancel flag, the user's catch runs saga compensations,
    and the terminal :workflow-cancelled event is written. Previously every store
-   excluded cancelled workflows from list-pending, so a worker-driven workflow
+   excluded cancelled workflows from worker scans, so a worker-driven workflow
    was never re-entered and compensations silently never ran.
    Runs against InMemory (always) plus JDBC and FDB (^:integration)."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.tests.child-workflow-util :as u]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.tests.child-workflow-util :as u]))
 
 ;; Plain global atoms: activities run on executor threads.
 (defonce step-calls (atom 0))

@@ -9,7 +9,9 @@
    functions it can resolve (Temporal's model). start-workflow auto-registers
    the function it is given, which covers same-process resume; for cross-process
    resume the application must register its workflow vars at startup."
-  #?(:cljs (:require [clojure.string :as str])))
+  #?(:cljs
+     (:require
+      [clojure.string :as str])))
 
 (defonce ^{:doc "Process-global name -> workflow-fn registry."}
   registry
@@ -26,7 +28,7 @@
      (if (var? f)
        (subs (str f) 2)                      ; #'ns/name -> "ns/name"
        (clojure.lang.Compiler/demunge        ; ns$fn_name -> "ns/fn-name"
-        (.getName (class f))))
+         (.getName (class f))))
      :cljs
      (cond
        ;; A CLJS var: derive "ns/name" from its metadata. (str of a var does not

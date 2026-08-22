@@ -6,7 +6,7 @@
    whose `.submit` calls sit OUTSIDE any try; only the later `.get` phase is
    wrapped. A rejection on the Nth submit therefore propagates straight out of
    `process-pending-asyncs-parallel` -> `handle-suspension` ->
-   `run-workflow-internal` — none of which catch it — and out of
+   `drive-workflow!` — none of which catch it — and out of
    `start-workflow` itself. Consequences (kimi.md X4):
 
      (a) no rescheduling: unlike the SEQUENTIAL path, which classifies a
@@ -32,14 +32,15 @@
         pass, and every activity executes exactly once.
 
    Both currently FAIL against the unfixed runtime (the exception escapes)."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.store :as store]
-            [intemporal.protocol :as p]
-            [intemporal.internal.activity :as a]
-            [intemporal.internal.runtime :as runtime]
-            [clojure.test :refer [deftest is testing]])
-  (:import (java.util.concurrent AbstractExecutorService ExecutorService Executors
-                                 RejectedExecutionException TimeUnit)))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.internal.activity :as a]
+   [intemporal.internal.runtime :as runtime]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store])
+  (:import
+   (java.util.concurrent AbstractExecutorService ExecutorService Executors RejectedExecutionException TimeUnit)))
 
 ;; ============================================================================
 ;; Test Infrastructure

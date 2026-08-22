@@ -1,7 +1,9 @@
 (ns intemporal.tests.bench.test-suite
-  (:require [intemporal.core :as intemporal]
-            [clojure.test :refer [is testing]])
-  (:import (java.util.concurrent Executors)))
+  (:require
+   [clojure.test :refer [is testing]]
+   [intemporal.core :as intemporal])
+  (:import
+   (java.util.concurrent Executors)))
 
 (defn test-activity [x]
   x)
@@ -17,7 +19,8 @@
     (with-open [exec (Executors/newVirtualThreadPerTaskExecutor)]
       (intemporal/with-workflow-engine [engine {:store store :threads (.availableProcessors (Runtime/getRuntime))}]
 
-        (let [tasks   (mapv (fn [i] (reify Callable (call [_] (intemporal/start-workflow engine basic-workflow [5] :workflow-id (str i)))))
+        (let [prefix  (str "bench-" (random-uuid) "-")
+              tasks   (mapv (fn [i] (reify Callable (call [_] (intemporal/start-workflow engine basic-workflow [5] :workflow-id (str prefix i)))))
                             (range wf-count))
               futures (.invokeAll exec tasks)
               results (mapv #(.get %) futures)]

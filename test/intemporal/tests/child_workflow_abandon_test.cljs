@@ -1,12 +1,14 @@
 (ns intemporal.tests.child-workflow-abandon-test
   "Tier 2 child workflows — :parent-close-policy :abandon (ClojureScript)."
-  (:require [cljs.test :as t :refer [deftest is testing async]]
-            [matcher-combinators.test :refer [match?]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.tests.child-workflow-util :as u]
-            [promesa.core :as prom])
-  (:require-macros [intemporal.core :as intemporal]))
+  (:require-macros
+   [intemporal.core :as intemporal])
+  (:require
+   [cljs.test :as t :refer [async deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.tests.child-workflow-util :as u]
+   [matcher-combinators.test :refer [match?]]
+   [promesa.core :as prom]))
 
 ;; ── activities ──────────────────────────────────────────────────────────────────
 

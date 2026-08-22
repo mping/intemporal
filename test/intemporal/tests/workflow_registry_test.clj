@@ -5,10 +5,11 @@
   both the workflow function and its original arguments from the :workflow-started
   event via the process-global registry, and resume to completion without
   re-running already-completed activities."
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [intemporal.core :as intemporal]
-            [intemporal.store :as store]
-            [intemporal.internal.workflow-registry :as wreg]))
+  (:require
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [intemporal.core :as intemporal]
+   [intemporal.internal.workflow-registry :as wreg]
+   [intemporal.store :as store]))
 
 ;; This namespace is the only one that calls clear-registry! — it directly tests
 ;; the raw registry API. Now that `defn-workflow` registers workflows at load

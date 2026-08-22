@@ -1,6 +1,7 @@
 (ns intemporal.observer
-  (:require [intemporal.protocol :as p]
-            [intemporal.utils :as utils]))
+  (:require
+   [intemporal.protocol :as p]
+   [intemporal.utils :as utils]))
 
 ;; ============================================================================
 ;; Default Observer (Logging)

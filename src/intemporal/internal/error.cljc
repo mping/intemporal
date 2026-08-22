@@ -1,6 +1,10 @@
 (ns intemporal.internal.error
-  #?(:cljs (:require [clojure.string :as str]))
-  #?(:clj (:import (clojure.lang IExceptionInfo))))
+  #?(:cljs
+     (:require
+      [clojure.string :as str]))
+  #?(:clj
+     (:import
+      (clojure.lang IExceptionInfo))))
 
 ;; ============================================================================
 ;; Exceptions and Error Handling
@@ -94,7 +98,6 @@
            {::rejected     true
             :cause         cause
             :activity-name activity-name}))
-
 
 (defn activity-timeout-exception [activity-name timeout-ms]
   (ex-info "Activity timed out"

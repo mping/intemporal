@@ -24,13 +24,13 @@
       controls. `intemporal.tests.store.value-fidelity-test` guards the payloads.
    4. `:seq` is `int?`, not `nat-int?` — `:workflow-started` uses a -1 sentinel.
 
-   The InMemoryStore state atom is deliberately NOT spec'd: it holds live
-   callback closures (and transitively futures), and asserting it would put a
-   full-map walk inside every `swap!`. The per-method specs below already cover
-   every value that *leaves* it."
+   The InMemoryStore state atom is deliberately NOT spec'd because asserting it
+   would put a full-map walk inside every `swap!`. The per-method specs below
+   already cover every value that *leaves* it."
   ;; cljs.analyzer/rewrite-cljs-aliases rewrites clojure.spec.alpha ->
   ;; cljs.spec.alpha automatically, so no reader conditional is needed here.
-  (:require [clojure.spec.alpha :as s]))
+  (:require
+   [clojure.spec.alpha :as s]))
 
 ;; ============================================================================
 ;; Canonical event-type registry
@@ -60,6 +60,11 @@
   "Values `get-workflow-status` may return, on every implementation."
   #{:not-found :running :completed :failed :cancelled :terminated})
 
+(def workflow-run-states
+  "Durable scheduler states. These are intentionally independent from the
+   public workflow status, where all non-terminal states still read :running."
+  #{:runnable :running :waiting :terminal})
+
 (def parent-close-policies
   "Values a child workflow's parent-close-policy may take."
   #{:cascade-cancel :abandon :terminate})
@@ -70,6 +75,8 @@
 
 (s/def ::workflow-id       string?)
 (s/def ::owner-id          string?)
+(s/def ::run-state         workflow-run-states)
+(s/def ::wake-version      nat-int?)
 
 ;; int?, NOT nat-int? — :workflow-started uses the -1 sentinel.
 (s/def ::seq               int?)
@@ -85,7 +92,7 @@
 (s/def ::timeout-ms        (s/nilable number?))
 (s/def ::fire-at           number?)
 (s/def ::deadline          number?)
-(s/def ::wake-at-ms        (s/nilable number?))
+(s/def ::next-run-at-ms    (s/nilable number?))
 (s/def ::attempts          (s/nilable pos-int?))
 (s/def ::will-retry        boolean?)
 ;; number?, not int?, for the same reason as ::fire-at: CLJS clocks are doubles.
@@ -156,13 +163,13 @@
 
 (s/def ::error
   (s/nilable
-   (s/keys :opt-un [:intemporal.spec.error/type
-                    :intemporal.spec.error/message
-                    :intemporal.spec.error/status
-                    :intemporal.spec.error/data
-                    :intemporal.spec.error/stack-trace
-                    :intemporal.spec.error/exception-kind
-                    :intemporal.spec.error/cause])))
+    (s/keys :opt-un [:intemporal.spec.error/type
+                     :intemporal.spec.error/message
+                     :intemporal.spec.error/status
+                     :intemporal.spec.error/data
+                     :intemporal.spec.error/stack-trace
+                     :intemporal.spec.error/exception-kind
+                     :intemporal.spec.error/cause])))
 
 ;; Declared after ::error so the recursive reference resolves; the spec
 ;; registry is late-bound, so ordering only matters for readability.
@@ -334,6 +341,17 @@
 (s/def ::children    (s/coll-of ::child-entry :kind sequential?))
 
 (s/def ::pending-ids (s/coll-of ::workflow-id :kind sequential?))
+
+(s/def ::drive-claim (s/keys :req-un [::workflow-id ::wake-version]))
+(s/def ::drive-claims (s/coll-of ::drive-claim :kind sequential?))
+(s/def ::park-status #{:parked :wake-raced :not-running :terminal})
+(s/def ::park-result
+  (s/and (s/keys :req-un [::park-status]
+                 :opt-un [::wake-version])
+         #(if (= :wake-raced (:park-status %))
+            (contains? % :wake-version)
+            true)))
+(s/def ::count-result nat-int?)
 
 ;; number?, not int? — the MAX(seq) numeric type is driver-specific and MariaDB
 ;; is not covered by the existing max-seq regression test.

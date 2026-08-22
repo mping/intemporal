@@ -4,11 +4,12 @@
    When the parent closes, an :abandon child keeps running independently and can
    finish on its own. Modelled as an order whose fulfilment child outlives the
    parent order workflow and completes once it is packed."
-  (:require [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.tests.child-workflow-util :as u]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.tests.child-workflow-util :as u]
+   [matcher-combinators.test :refer [match?]]))
 
 ;; ── activities ──────────────────────────────────────────────────────────────────
 

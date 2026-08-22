@@ -13,9 +13,10 @@
   The negative tests are the load-bearing half: they prove the assertions are
   actually WIRED, not merely compiled. Without them a misconfigured toggle
   would leave the whole validation layer silently inert."
-  (:require [clojure.spec.alpha :as s]
-            [clojure.test :refer [deftest is testing use-fixtures]]
-            [intemporal.spec :as spec]))
+  (:require
+   [clojure.spec.alpha :as s]
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [intemporal.spec :as spec]))
 
 ;; Captured at namespace load, BEFORE the fixture below flips the flag, so
 ;; `toggle-is-enabled-in-ci` can see how the JVM was actually launched.

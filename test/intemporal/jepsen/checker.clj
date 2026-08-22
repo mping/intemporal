@@ -21,10 +21,11 @@
     checker 2 (signal-consumed)       -> FAIL  (if race is hit; intermittent)
     checker 3 (history-integrity)     -> FAIL  (if concurrent-start ran)
     checker 4 (cancellation-liveness) -> FAIL  (cancelled sleepers never wake)"
-  (:require [next.jdbc :as jdbc]
-            [next.jdbc.result-set :as rs]
-            [clojure.string :as str]
-            [taoensso.telemere :as log]))
+  (:require
+   [clojure.string :as str]
+   [next.jdbc :as jdbc]
+   [next.jdbc.result-set :as rs]
+   [taoensso.telemere :as log]))
 
 (def ^:private jdbc-opts {:builder-fn rs/as-unqualified-maps})
 

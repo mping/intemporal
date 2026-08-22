@@ -8,10 +8,11 @@
 
    Everything is driven by the recovery worker (see intemporal.tests.child-workflow-util).
    Each scenario runs against InMemory (always) plus JDBC and FDB (^:integration)."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.tests.child-workflow-util :as u]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.tests.child-workflow-util :as u]))
 
 ;; ── activities / workflows ──────────────────────────────────────────────────────
 

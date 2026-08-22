@@ -10,9 +10,10 @@
     W2 (activity-chain)  — bug 1.3: no recovery poller; activities not re-run
     W3 (cancel-sleep)    — bug 2.3: cancellation can't reach a sleeping workflow
     W4 (rapid-signal)    — bug 2.1: register-then-consume signal race"
-  (:require [intemporal.core :as intemporal]
-            [next.jdbc :as jdbc]
-            [taoensso.telemere :as log]))
+  (:require
+   [intemporal.core :as intemporal]
+   [next.jdbc :as jdbc]
+   [taoensso.telemere :as log]))
 
 ;; ---------------------------------------------------------------------------
 ;; Dynamic bindings set by the worker before calling start-workflow / resume-workflow.

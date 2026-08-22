@@ -1,15 +1,15 @@
 (ns intemporal.tests.protocol-test
-  (:require [intemporal.core :as intemporal]
-            [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [matcher-combinators.test :refer [match?]]))
 
 (defprotocol MyActivities
   (foo [this a]))
 
 (defrecord MyActivitiesImpl []
   MyActivities
-  (foo [this a] (println "record was called:" ) [a :child]))
-
+  (foo [this a] (println "record was called:") [a :child]))
 
 ;; Parallel workflow
 (defn my-proto-flow [id]
@@ -20,7 +20,6 @@
      :results (foo res 1)
      :id      id}))
 
-
 (deftest test-stub-protocol-workflow
   (testing "Async workflow"
     (intemporal/with-workflow-engine [engine {:threads 4 :enable-logging true}]
@@ -30,4 +29,3 @@
         (is (match? {:status :completed
                      :result {:args 999, :results [1 :child], :id 999}}
                     result))))))
-

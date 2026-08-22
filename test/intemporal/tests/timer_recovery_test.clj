@@ -6,15 +6,16 @@
       (the persisted :timer-scheduled fire-at is reused, not recomputed);
    2. timer recovery — a workflow that sleeps, then loses its engine, is driven
       to completion by a worker on a fresh engine when the timer comes due;
-   3. wake_at filtering — list-pending skips a workflow whose wake-at is still in
-      the future, and returns it once due."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.store :as store]
-            [intemporal.store.jdbc :as jdbc-store]
-            [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]))
+   3. deadline filtering — claim-runnable! skips a workflow whose next-run-at is
+      still in the future, and claims it once due."
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [intemporal.store.fdb :as fdb-store]
+   [intemporal.store.jdbc :as jdbc-store]
+   [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (defn t-act [x] (* x 3))
 
@@ -53,7 +54,7 @@
       (is (some? fire-at-1) "a :timer-scheduled fire-at was persisted")
       ;; Resume on a fresh engine; it re-suspends on the same timer.
       (let [e2 (intemporal/make-workflow-engine :store store :threads 2)
-            f2 (future (intemporal/resume-workflow e2 wid sleeper-wf [7 60000]))]
+            f2 (future (intemporal/resume-workflow e2 wid))]
         (Thread/sleep 300)
         (future-cancel f2)
         (intemporal/shutdown-engine e2))
@@ -118,38 +119,60 @@
           store (fdb-store/create-store db root)]
       (check-timer-recovery store))))
 
-;; ── 3. wake_at filtering: list-pending skips not-yet-due workflows ──────────────
+;; ── 3. durable WAITING filtering and due promotion ─────────────────────────────
 
-(defn- check-wake-at-filter [store]
+(defn- check-next-run-at-filter [store]
   (let [wid (str "wake-" (random-uuid))]
-    (p/save-event store wid {:event-type :workflow-started :seq -1 :workflow-id wid :args []})
-    ;; Far-future wake-at -> not due -> excluded from list-pending.
-    (p/set-wake-at store wid (+ (System/currentTimeMillis) 3600000))
-    (is (not (contains? (set (p/list-pending store "any-owner" 1000)) wid))
-        "a workflow whose wake-at is in the future is skipped (C2 filtering)")
-    ;; Past wake-at -> due -> included.
-    (p/set-wake-at store wid (- (System/currentTimeMillis) 1000))
-    (is (contains? (set (p/list-pending store "any-owner" 1000)) wid)
-        "a workflow whose wake-at has passed is returned")
-    ;; nil wake-at -> always eligible -> included.
-    (p/set-wake-at store wid nil)
-    (is (contains? (set (p/list-pending store "any-owner" 1000)) wid)
-        "a workflow with nil wake-at is always eligible")))
+    (try
+      (p/save-event store wid {:event-type :workflow-started :seq -1 :workflow-id wid :args []})
+      (let [{:keys [wake-version]}
+            (some #(when (= wid (:workflow-id %)) %)
+                  (p/claim-runnable! store "timer-owner" 10000
+                                     (System/currentTimeMillis)))]
+        ;; Persistent integration stores may contain unrelated runnable rows from
+        ;; earlier test runs, so assertions below inspect only this workflow.
+        (p/park-workflow! store wid wake-version []
+                          (+ (System/currentTimeMillis) 3600000))
+        (is (not-any? #(= wid (:workflow-id %))
+                      (p/claim-runnable! store "timer-owner" 10000
+                                         (System/currentTimeMillis)))
+            "a workflow waiting on a future deadline is skipped")
+        ;; Waking and parking with a past deadline makes it due.
+        (p/wake-workflow store wid)
+        (let [{version-2 :wake-version}
+              (some #(when (= wid (:workflow-id %)) %)
+                    (p/claim-runnable! store "timer-owner" 10000
+                                       (System/currentTimeMillis)))]
+          (p/park-workflow! store wid version-2 []
+                            (- (System/currentTimeMillis) 1000)))
+        (let [claim (some #(when (= wid (:workflow-id %)) %)
+                          (p/claim-runnable! store "timer-owner" 10000
+                                             (System/currentTimeMillis)))]
+          (is (some? claim)
+              "a workflow whose deadline has passed is atomically claimed")
+          ;; An indefinite WAITING workflow is not runnable until explicitly woken.
+          (p/park-workflow! store wid (:wake-version claim) [] nil)
+          (is (not-any? #(= wid (:workflow-id %))
+                        (p/claim-runnable! store "timer-owner" 10000
+                                           (System/currentTimeMillis)))
+              "next-run-at nil means wait indefinitely, not poll continuously")))
+      (finally
+        (p/release-owner store "timer-owner")))))
 
-(deftest wake-at-filter-in-memory
+(deftest next-run-at-filter-in-memory
   (testing "InMemoryStore"
-    (check-wake-at-filter (store/create-store))))
+    (check-next-run-at-filter (store/create-store))))
 
-(deftest ^:integration wake-at-filter-jdbc
+(deftest ^:integration next-run-at-filter-jdbc
   (testing "JdbcStore"
     (let [url   (jdbc-store/resolve-jdbc-url)
           store (jdbc-store/create-store url)]
-      (try (check-wake-at-filter store) (finally (.close store))))))
+      (try (check-next-run-at-filter store) (finally (.close store))))))
 
-(deftest ^:integration wake-at-filter-fdb
+(deftest ^:integration next-run-at-filter-fdb
   (testing "FDBStore"
     (let [root  (str "wake-" (random-uuid))
           fdb   (cfdb/select-api-version 710)
           db    (.open fdb "docker/fdb.cluster")
           store (fdb-store/create-store db root)]
-      (check-wake-at-filter store))))
+      (check-next-run-at-filter store))))

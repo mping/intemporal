@@ -6,19 +6,20 @@
     ON CONFLICT DO UPDATE silently overwrote, FDB produced duplicate-seq rows.
     Nothing stopped two concurrent writers.
 
-    The fix: an ownership column. claim-owner atomically stamps
-    `owner WHERE owner IS NULL OR owner = me`, so exactly one pod can own (and
-    therefore run) a workflow; the worker resumes owned workflows one at a time.
+    The fix: a durable scheduling state. claim-runnable! atomically changes
+    RUNNABLE to RUNNING and stamps the owner, so exactly one pod can drive a
+    workflow at a time.
     No two writers execute concurrently, so history cannot be corrupted.
 
   These tests assert the FIXED behaviour: of two pods racing to claim one
   unowned workflow, exactly one succeeds; the loser cannot run it."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.protocol :as p]
-            [intemporal.store :as mem]
-            [intemporal.store.jdbc :as jdbc-store]
-            [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.protocol :as p]
+   [intemporal.store :as mem]
+   [intemporal.store.fdb :as fdb-store]
+   [intemporal.store.jdbc :as jdbc-store]
+   [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (defn- run-scenario
   "Two owners race to claim one unowned workflow. Returns
@@ -26,12 +27,13 @@
   [store]
   (let [wid (str "bug12-" (random-uuid))]
     (p/save-event store wid {:event-type :workflow-started :seq -1 :workflow-id wid :args []})
-    (let [a (p/claim-owner store wid "owner-A")
-          b (p/claim-owner store wid "owner-B")]   ; A already owns it -> B must fail
-      {:a-claimed? a
-       :b-claimed? b
-       ;; scope to this wid — the shared DB may hold unowned rows from prior runs
-       :wid-pending-for-b? (contains? (set (p/list-pending store "owner-B" 1000)) wid)})))
+    (let [a (some #(when (= wid (:workflow-id %)) %)
+                  (p/claim-runnable! store "owner-A" 1000 (System/currentTimeMillis)))
+          b (some #(when (= wid (:workflow-id %)) %)
+                  (p/claim-runnable! store "owner-B" 1000 (System/currentTimeMillis)))]
+      {:a-claimed? (some? a)
+       :b-claimed? (some? b)
+       :wid-pending-for-b? (some? b)})))
 
 (defn- assert-fixed [{:keys [a-claimed? b-claimed? wid-pending-for-b?]}]
   (is a-claimed?            "owner-A claimed the unowned workflow")

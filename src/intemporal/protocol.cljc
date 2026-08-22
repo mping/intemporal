@@ -1,6 +1,5 @@
 (ns intemporal.protocol)
 
-
 ;; ============================================================================
 ;; Protocols
 ;; ============================================================================
@@ -10,6 +9,9 @@
   (load-history [store workflow-id] "Load history for a workflow")
   (save-event [store workflow-id event] "Append an event to workflow history")
   (save-events [store workflow-id events] "Append multiple events atomically")
+  (save-events-and-wake! [store workflow-id events]
+    "Atomically append events and durably wake a non-terminal workflow. Used
+     when another workflow completes work that makes this workflow runnable.")
   (find-event [store workflow-id event-type seq-num] "Finds the given event type by its sequence number")
   (max-seq [store workflow-id]
     "Return the highest :seq recorded in this workflow's history, or nil if it
@@ -20,30 +22,36 @@
   (get-pending-signals [store workflow-id] "Get pending signals for workflow")
   (add-signal [store workflow-id signal-name signal-data] "Add a signal to workflow")
   (consume-signal [store workflow-id signal-name] "Consume and remove a signal")
-  (register-signal-callback [store workflow-id signal-name callback] "Register callback to be invoked when signal arrives")
-  (unregister-signal-callback [store workflow-id signal-name] "Unregister signal callback")
-  (register-wake-callback [store workflow-id callback] "Register a generic wake callback, fired by wake-workflow to force the workflow to re-enter its execution loop (e.g. to observe cancellation)")
-  (wake-workflow [store workflow-id] "Fire the registered wake callback for a workflow, forcing it to re-enter its loop and re-evaluate state such as the cancellation flag. No-op if none registered.")
+  (wake-workflow [store workflow-id]
+    "Durably wake a non-terminal workflow. WAITING becomes RUNNABLE; RUNNING
+     stays RUNNING but advances wake-version so
+     a concurrent park cannot lose the wake. Returns true when the workflow exists
+     and is non-terminal, false otherwise.")
   (is-cancelled? [store workflow-id] "Check if workflow is cancelled")
   (mark-cancelled [store workflow-id] "Mark workflow as cancelled")
   (get-workflow-status [store workflow-id] "Get current workflow status")
 
-  ;; --- Phase C: ownership-based recovery (opt-in; single-process callers ignore) ---
-  (claim-owner [store workflow-id owner-id]
-    "Atomically stamp ownership: UPDATE owner=owner-id WHERE owner IS NULL OR
-     owner=owner-id. Returns true iff the workflow is now owned by owner-id. The
-     exclusivity gate — only one pod can claim an unowned workflow.")
-  (list-pending [store owner-id limit]
-    "Return up to `limit` workflow-ids that are NON-TERMINAL, DUE (wake-at is null
-     or in the past), and (owner=owner-id OR owner IS NULL): the workflows this
-     owner may resume right now. Used for both the live poll and startup recovery.")
+  ;; --- Durable scheduling + ownership-based recovery ---
+  (claim-runnable! [store owner-id limit now-ms]
+    "Atomically claim up to `limit` eligible workflows owned by owner-id or
+     unowned. RUNNABLE and due WAITING workflows become RUNNING. Returns maps
+     containing :workflow-id and the :wake-version captured by the drive.")
+  (park-workflow! [store workflow-id expected-wake-version events next-run-at-ms]
+    "Atomically append `events` and park RUNNING as WAITING. Returns a map with
+     :park-status. A stale version returns
+     {:park-status :wake-raced :wake-version current}; the workflow stays
+     RUNNING and the same claimed drive continues.")
+  (requeue-running! [store workflow-id]
+    "Move a non-terminal RUNNING workflow back to RUNNABLE after an interrupted
+     or failed drive. Returns true when a row changed.")
+  (recover-running! [store owner-id]
+    "At worker startup, requeue RUNNING workflows owned by owner-id.
+     Returns the number of workflows recovered. Requires the existing invariant
+     that a stable owner-id identifies only one live worker process.")
   (release-owner [store owner-id]
     "Clear ownership (owner=NULL) for this owner's non-terminal workflows, so
-     other pods may pick them up. Called on clean shutdown.")
-  (set-wake-at [store workflow-id wake-at-ms]
-    "Record the earliest time (epoch ms) this workflow next needs attention, or
-     nil for 'always eligible' (waiting on an external event, not the clock).
-     list-pending skips workflows whose wake-at is still in the future (C2).")
+     other pods may pick them up. Any RUNNING rows are requeued first. Called on
+     clean shutdown.")
 
   ;; --- Tier 2: independent child workflows ---
   (link-child! [store parent-id parent-seq child-id policy]
@@ -76,20 +84,6 @@
     "Shutdown the executor and release resources")
   (shutdown? [executor]
     "Indicates if the executor has shut down"))
-
-(defprotocol IScheduler
-  "Protocol for scheduling timers"
-  (schedule-timer [scheduler workflow-id seq-num fire-at callback]
-    "Schedule a timer to fire at given time, calls callback when ready.
-     Timers are identified by [workflow-id seq-num] and scheduling is idempotent.
-     A seq is only ever one kind of operation, so sleeps, signal timeouts and
-     activity retry backoffs share this keyspace without colliding.")
-  (cancel-timer [scheduler workflow-id seq-num]
-    "Cancel a scheduled timer")
-  (shutdown-scheduler [scheduler grace-period-secs]
-    "Shutdown the scheduler")
-  (shutdown-scheduler? [scheduler]
-    "Indicates if the scheduler has shut down"))
 
 (defprotocol IWorkflowObserver
   "Protocol for observing workflow execution events.

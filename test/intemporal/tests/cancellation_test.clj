@@ -1,10 +1,11 @@
 (ns intemporal.tests.cancellation-test
-  (:require [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.tests.utils :refer [wait-until]]
-            [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-            [matcher-combinators.matchers :as m]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.tests.utils :refer [wait-until]]
+   [matcher-combinators.matchers :as m]
+   [matcher-combinators.test :refer [match?]]))
 
 (defn slow-activity [x]
   (Thread/sleep 100)

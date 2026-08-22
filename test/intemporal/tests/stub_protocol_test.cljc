@@ -1,10 +1,13 @@
 (ns intemporal.tests.stub-protocol-test
-  (:require [intemporal.core :as intemporal]
-            [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-            [intemporal.tests.utils :refer [with-result]])
-  #?(:cljs (:require-macros [intemporal.core :as intemporal]
-                            [intemporal.tests.utils :refer [with-result]])))
+  #?(:cljs
+     (:require-macros
+      [intemporal.core :as intemporal]
+      [intemporal.tests.utils :refer [with-result]]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.tests.utils :refer [with-result]]
+   [matcher-combinators.test :refer [match?]]))
 
 (defprotocol MyProto
   (my-method [this x]))

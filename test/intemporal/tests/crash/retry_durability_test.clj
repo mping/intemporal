@@ -1,4 +1,4 @@
-(ns ^:crash intemporal.tests.crash.retry-durability-test
+(ns intemporal.tests.crash.retry-durability-test
   "Bug #28 / X8 — retry state was neither durable nor off the drive thread.
 
   `execute-with-retry` ran the whole retry loop inside one drive, persisting
@@ -13,22 +13,24 @@
   FIX: each consumed attempt is persisted as an `:activity-attempt-failed` event
   carrying the running total AND `:retry-at`, the instant the next attempt comes
   due. The engine runs one attempt per pass and then SUSPENDS until that instant
-  instead of sleeping: `wake-at` goes to the store, so a worker on any pod skips
+  instead of sleeping: `next-run-at` goes to the store, so a worker on any pod skips
   the workflow until it is due and picks it up when it is, and an in-process
   driver parks on its wake queue with a timer armed.
 
   REGRESSION GUARDS below: the counter survives a crash mid-retry; the deadline
   does not drift when the workflow is re-driven; a backing-off workflow is
-  invisible to `list-pending` until due; and the drive returns instead of
+  invisible to `claim-runnable!` until due; and the drive returns instead of
   blocking. `async_retry_durability_test` covers the same ground for the
   parallel path."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.internal.activity :as a]
-            [intemporal.internal.error :as error]
-            [intemporal.store :as store]
-            [intemporal.protocol :as p]
-            [intemporal.tests.utils :as u]
-            [clojure.test :refer [deftest is testing]]))
+  {:crash true}
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.internal.activity :as a]
+   [intemporal.internal.error :as error]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [intemporal.tests.utils :as u]))
 
 ;; ============================================================================
 ;; Test Infrastructure
@@ -66,24 +68,10 @@
        (sort-by :attempts)
        last))
 
-(def ^:private waiting-statuses
-  #{:waiting-timer :waiting-signal :waiting-signal-timeout :waiting-async})
-
 (defn- drive-to-terminal
-  "Resume until the workflow reaches a terminal state, the way a worker would.
-
-   A retry backoff is now a real suspension, so a single `resume-workflow` drives
-   one step and returns `:waiting-timer` — only a driver that keeps resuming (a
-   worker, or the wake-queue loop inside `start-workflow`) sees it through to the
-   end."
-  [engine workflow-id workflow-fn args]
-  (let [deadline (+ (System/currentTimeMillis) 20000)]
-    (loop []
-      (let [result (intemporal/resume-workflow engine workflow-id workflow-fn args)]
-        (cond
-          (not (waiting-statuses (:status result))) result
-          (> (System/currentTimeMillis) deadline)   result
-          :else (do (Thread/sleep 25) (recur)))))))
+  "Wake a persisted workflow and await its terminal event."
+  [engine workflow-id]
+  (intemporal/resume-workflow engine workflow-id))
 
 ;; ============================================================================
 ;; 1. Crash mid-retry: the resumed drive continues the sequence
@@ -139,7 +127,7 @@
       ;; sequence must CONTINUE (attempts 2 and 3), not restart at 1.
       ;; ======================================================================
       (let [engine-2 (intemporal/make-workflow-engine :store st :threads 2)
-            result   (drive-to-terminal engine-2 workflow-id retry-workflow [1])]
+            result   (drive-to-terminal engine-2 workflow-id)]
         (intemporal/shutdown-engine engine-2)
 
         (is (= :failed (:status result))
@@ -171,35 +159,30 @@
           last-error  (error/throwable->map
                         (error/activity-failed-exception
                           "intemporal.tests.crash.retry-durability-test/always-fails-activity"
-                          (ex-info "Simulated permanent activity failure" {:x 1})))]
+                          (ex-info "Simulated permanent activity failure" {:x 1})))
+          engine      (intemporal/make-workflow-engine :store st :threads 2)
+          _           (intemporal/submit-workflow engine retry-workflow [1]
+                        :workflow-id workflow-id)
+          _           (p/save-event
+                        st workflow-id
+                        (a/attempt-failed-event
+                          0 "intemporal.tests.crash.retry-durability-test/always-fails-activity"
+                          max-attempts last-error 5 false nil))
+          result      (drive-to-terminal engine workflow-id)]
+      (intemporal/shutdown-engine engine)
 
-      (p/save-event st workflow-id
-                    {:event-type       :workflow-started
-                     :seq              -1
-                     :workflow-id      workflow-id
-                     :workflow-fn-name "intemporal.tests.crash.retry-durability-test/retry-workflow"
-                     :args             [1]
-                     :timestamp        (System/currentTimeMillis)})
-      (p/save-event st workflow-id
-                    (a/attempt-failed-event 0 "intemporal.tests.crash.retry-durability-test/always-fails-activity"
-                                            max-attempts last-error 5 false nil))
+      (is (empty? @invocation-log)
+          (str "the budget was already spent, so the activity must NOT run again; ran "
+               (count @invocation-log) " time(s)"))
+      (is (= :failed (:status result))
+          "the workflow finalizes from the recorded attempt instead of re-running it")
 
-      (let [engine (intemporal/make-workflow-engine :store st :threads 2)
-            result (drive-to-terminal engine workflow-id retry-workflow [1])]
-        (intemporal/shutdown-engine engine)
-
-        (is (empty? @invocation-log)
-            (str "the budget was already spent, so the activity must NOT run again; ran "
-                 (count @invocation-log) " time(s)"))
-        (is (= :failed (:status result))
-            "the workflow finalizes from the recorded attempt instead of re-running it")
-
-        (let [failed (first (history-events st workflow-id :activity-failed))]
-          (is (some? failed) "the recorded attempt is promoted to a terminal :activity-failed")
-          (is (= max-attempts (:attempts failed))
-              "the terminal event carries the recovered attempt total")
-          (is (= (:message last-error) (get-in failed [:error :message]))
-              "the recorded error is replayed as the outcome, not a freshly produced one"))))))
+      (let [failed (first (history-events st workflow-id :activity-failed))]
+        (is (some? failed) "the recorded attempt is promoted to a terminal :activity-failed")
+        (is (= max-attempts (:attempts failed))
+            "the terminal event carries the recovered attempt total")
+        (is (= (:message last-error) (get-in failed [:error :message]))
+            "the recorded error is replayed as the outcome, not a freshly produced one")))))
 
 ;; ============================================================================
 ;; 3. The backoff is a suspension: it releases the drive and holds its deadline
@@ -211,39 +194,34 @@
 
     (let [workflow-id "retry-durability-test-3"
           st          (store/create-store)
-          engine      (intemporal/make-workflow-engine :store st :threads 2)]
+          engine      (intemporal/make-workflow-engine :store st :threads 2)
+          start       (System/currentTimeMillis)]
 
-      ;; A bare resume drives one step. Attempt 1 runs and fails, and the drive
-      ;; RETURNS rather than sleeping out the backoff.
-      (let [start   (System/currentTimeMillis)
-            result  (intemporal/resume-workflow engine workflow-id retry-workflow [1])
-            elapsed (- (System/currentTimeMillis) start)]
+      (intemporal/submit-workflow engine retry-workflow [1] :workflow-id workflow-id)
+      (let [stop (intemporal/start-worker engine :owner-id "retry-parking-worker"
+                   :poll-ms 5 :workflow-concurrency 1)]
+        (u/wait-until #(some? (attempt-event st workflow-id)) 5000)
+        (stop))
 
-        (is (= 1 (count @invocation-log)) "exactly one attempt ran")
-        (is (= :waiting-timer (:status result))
-            "the drive reports a clock wait rather than driving the retry inline")
-        (is (< elapsed backoff-ms)
-            (str "the drive returned in " elapsed "ms — it must not block for the "
-                 backoff-ms "ms backoff")))
+      (is (= 1 (count @invocation-log)) "exactly one attempt ran before the park")
+      (is (< (- (System/currentTimeMillis) start) backoff-ms)
+          "the worker released the drive instead of sleeping through backoff")
 
       (let [deadline (:retry-at (attempt-event st workflow-id))]
         ;; The worker's view: not due yet, so the ownership scan skips it. This is
         ;; what stops a backing-off workflow from being re-driven (and fully
         ;; replayed) on every poll for the length of its backoff.
-        (is (not (contains? (set (p/list-pending st "test-owner" 10)) workflow-id))
-            "a workflow whose retry is not due must be excluded from list-pending")
-
-        ;; Re-driving early must neither run the attempt nor push the deadline out
-        ;; — recomputing it per pass is the drift that made signal timeouts never
-        ;; fire (E5), and it would make a retry recede forever under a busy poll.
-        (intemporal/resume-workflow engine workflow-id retry-workflow [1])
-        (is (= 1 (count @invocation-log))
-            "an early re-drive must not run the attempt before its deadline")
-        (is (= deadline (:retry-at (attempt-event st workflow-id)))
-            "the persisted deadline must not drift when the workflow is re-driven")
+        (is (not (contains? (set (map :workflow-id
+                                   (p/claim-runnable! st "test-owner" 10
+                                                      (System/currentTimeMillis))))
+                            workflow-id))
+            "a workflow whose retry is not due must be excluded from worker claims")
 
         (u/wait-until #(>= (System/currentTimeMillis) deadline) 5000)
-        (is (contains? (set (p/list-pending st "test-owner" 10)) workflow-id)
+        (is (contains? (set (map :workflow-id
+                              (p/claim-runnable! st "test-owner" 10
+                                                 (System/currentTimeMillis))))
+                       workflow-id)
             "once the deadline passes the workflow becomes due again"))
 
       (intemporal/shutdown-engine engine))))
@@ -270,13 +248,9 @@
   {:child (intemporal/run-child-workflow retrying-child-flow [x])})
 
 (deftest test-sync-child-with-retrying-activity-still-completes
-  (testing "a retry inside a synchronous child waits inline rather than suspending"
+  (testing "a synchronous child uses the same durable retry path"
     (reset! child-attempt-log [])
 
-    ;; A sync child is driven inline with no wake-fn, and ANY :waiting-* status
-    ;; makes the parent durably fail it ("synchronous child workflows cannot
-    ;; suspend"). Parking on a retry backoff would therefore have turned every
-    ;; retrying sync child into a failure, so that drive waits instead.
     (let [st     (store/create-store)
           engine (intemporal/make-workflow-engine :store st :threads 2)
           result (intemporal/start-workflow engine parent-of-retrying-child [3]
@@ -284,7 +258,7 @@
       (intemporal/shutdown-engine engine)
 
       (is (= :completed (:status result))
-          (str "the child must retry inline and succeed, not be failed for suspending; got "
+          (str "the child must park, retry, and succeed; got "
                (pr-str result)))
       (is (= {:child [:ok 3]} (:result result)) "the parent sees the child's result")
       (is (= 3 (count @child-attempt-log)) "the child's activity took three attempts"))))

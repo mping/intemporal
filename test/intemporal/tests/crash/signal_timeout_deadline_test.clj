@@ -1,4 +1,4 @@
-(ns ^:crash intemporal.tests.crash.signal-timeout-deadline-test
+(ns intemporal.tests.crash.signal-timeout-deadline-test
   "Bug #14 / E5 — wait-for-signal-with-timeout recomputed its deadline
   (`(+ (current-time-ms) timeout-ms)`) on EVERY pass, unlike `sleep`, which
   persists and reuses its :timer-scheduled fire-at. Nothing anchored the first
@@ -15,10 +15,12 @@
   sent). The resumed drive must observe the timeout immediately — resuming
   fast, not waiting out a freshly-pushed deadline — and the persisted deadline
   must be byte-identical before and after the crash."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.store :as store]
-            [intemporal.protocol :as p]
-            [clojure.test :refer [deftest is testing]]))
+  {:crash true}
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]))
 
 (defn timeout-workflow
   "Whole workflow body is a single signal-wait-with-timeout call; never sent,
@@ -82,9 +84,7 @@
                 start    (System/currentTimeMillis)
                 result-2 (intemporal/resume-workflow
                            engine-2
-                           workflow-id
-                           timeout-workflow
-                           [timeout-ms])
+                           workflow-id)
                 elapsed  (- (System/currentTimeMillis) start)]
 
             (is (= :completed (:status result-2))

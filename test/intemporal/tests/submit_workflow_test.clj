@@ -4,9 +4,10 @@
   submit-workflow returns {:workflow-id …} immediately without running the workflow
   (a worker drives it); await-workflow waits until the workflow reaches a terminal
   state and returns its result."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.store :as store]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.store :as store]))
 
 (defn dbl [x] (* x 2))
 

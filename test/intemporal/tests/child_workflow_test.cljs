@@ -1,9 +1,11 @@
 (ns intemporal.tests.child-workflow-test
-  (:require [intemporal.core :as intemporal]
-            [intemporal.tests.utils :refer [with-result]]
-            [cljs.test :as t :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]])
-  (:require-macros [intemporal.tests.utils :refer [with-result]]))
+  (:require-macros
+   [intemporal.tests.utils :refer [with-result]])
+  (:require
+   [cljs.test :as t :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.tests.utils :refer [with-result]]
+   [matcher-combinators.test :refer [match?]]))
 
 (defn activity-fn [arg]
   [:processed arg])

@@ -1,14 +1,22 @@
 (ns intemporal.tests.utils
-  #?(:cljs (:require [promesa.core :as p]
-                     [taoensso.telemere :as telemere]
-                     [taoensso.telemere.utils :as tutils]))
-  #?(:clj (:require [promesa.core :as p]
-                    [net.cgrand.macrovich :as macros]
-                    [taoensso.telemere :as telemere]
-                    [taoensso.telemere.utils :as tutils]))
-  #?(:cljs (:require-macros [net.cgrand.macrovich :as macros]
-                            [intemporal.tests.utils :refer [with-result]]))
-  #?(:clj (:import [java.util.concurrent TimeoutException])))
+  #?(:cljs
+     (:require-macros
+      [intemporal.tests.utils :refer [with-result]]
+      [net.cgrand.macrovich :as macros]))
+  (:require
+   #?@(:clj
+       [[net.cgrand.macrovich :as macros]
+        [promesa.core :as p]
+        [taoensso.telemere :as telemere]
+        [taoensso.telemere.utils :as tutils]]
+
+       :cljs
+       [[promesa.core :as p]
+        [taoensso.telemere :as telemere]
+        [taoensso.telemere.utils :as tutils]]))
+  #?(:clj
+     (:import
+      (java.util.concurrent TimeoutException))))
 
 (def ^:dynamic with-result-default-timeout 10000)
 (def ^:dynamic wait-default-timeout 3000)
@@ -44,7 +52,7 @@
                (p/finally (fn [] (~done)))))))))
 
 (defn setup-telemere []
-  ;#?(:clj (clojure.pprint/pprint (telemere/check-interop)))
+  ; #?(:clj (clojure.pprint/pprint (telemere/check-interop)))
   (telemere/set-min-level! :trace)
   (telemere/remove-handler! ::custom)
   (telemere/add-handler! ::custom

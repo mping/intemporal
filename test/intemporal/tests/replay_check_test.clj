@@ -1,8 +1,9 @@
 (ns intemporal.tests.replay-check-test
-  (:require [intemporal.core :as intemporal]
-            [intemporal.internal.execution :as e]
-            [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.internal.execution :as e]
+   [matcher-combinators.test :refer [match?]]))
 
 (defn activity [x]
   (* x 2))
@@ -34,4 +35,3 @@
                                               my-parallel-flow [999])]
         (is (match? {:status :completed} result))
         (is (= 1 @total))))))
-

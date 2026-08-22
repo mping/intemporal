@@ -1,9 +1,10 @@
 (ns intemporal.tests.child-workflow-test
-  (:require [intemporal.core :as intemporal]
-            [intemporal.tests.utils :refer [with-result]]
-            [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]))
+  (:require
+   [clojure.string :as str]
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.tests.utils :refer [with-result]]
+   [matcher-combinators.test :refer [match?]]))
 
 (defn activity-fn [arg]
   [:processed arg])
@@ -70,7 +71,7 @@
                                   {:success true}
                                   (catch Exception e
                                     {:error (ex-message e)})))]
-            ;; Parent should catch and handle child error
+        ;; Parent should catch and handle child error
 
         (with-result [result (intemporal/start-workflow engine
                                                         parent-with-error [42])]

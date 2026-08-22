@@ -1,7 +1,8 @@
 (ns intemporal.internal.activity
-  (:require [intemporal.internal.error :as error]
-            [intemporal.utils :as utils]
-            #?(:cljs [clojure.string :as str])))
+  (:require
+   [intemporal.internal.error :as error]
+   [intemporal.utils :as utils]
+   #?(:cljs [clojure.string :as str])))
 
 ;; ============================================================================
 ;; Activity Registry
@@ -218,4 +219,3 @@
   [e]
   (boolean (and e (or (error/interruption? e)
                       (error/rejection? e)))))
-

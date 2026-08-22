@@ -1,8 +1,10 @@
-(ns ^:integration intemporal.tests.store.fdb-test
-  (:require [clojure.test :refer [deftest testing]]
-            [intemporal.store.fdb :as fdb-store]
-            [intemporal.tests.store.test-suite :as suite]
-            [me.vedang.clj-fdb.FDB :as cfdb]))
+(ns intemporal.tests.store.fdb-test
+  {:integration true}
+  (:require
+   [clojure.test :refer [deftest testing]]
+   [intemporal.store.fdb :as fdb-store]
+   [intemporal.tests.store.test-suite :as suite]
+   [me.vedang.clj-fdb.FDB :as cfdb]))
 
 (deftest fdb-store-test
   (testing "FoundationDB Store Implementation"

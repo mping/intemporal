@@ -1,8 +1,10 @@
-(ns ^:integration intemporal.tests.bench.jdbc-test
-  (:require [clojure.test :refer [deftest testing]]
-            [intemporal.store.jdbc :as jdbc-store]
-            [intemporal.tests.bench.test-suite :as suite]
-            [next.jdbc :as jdbc]))
+(ns intemporal.tests.bench.jdbc-test
+  {:integration true}
+  (:require
+   [clojure.test :refer [deftest testing]]
+   [intemporal.store.jdbc :as jdbc-store]
+   [intemporal.tests.bench.test-suite :as suite]
+   [next.jdbc :as jdbc]))
 
 (def db-spec (jdbc-store/resolve-jdbc-url "jdbc:postgresql://localhost:5432/intemporal_test?user=root&password=root"))
 

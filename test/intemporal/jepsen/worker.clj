@@ -15,13 +15,14 @@
 
   The worker does NOT call resume-workflow for previously-running workflows
   on restart — this reproduces bug 1.3 (no recovery poller)."
-  (:require [intemporal.core :as intemporal]
-            [intemporal.store.jdbc :as jdbc-store]
-            [intemporal.store.checked :as checked]
-            [intemporal.jepsen.workflows :as wf]
-            [next.jdbc :as jdbc]
-            [hikari-cp.core :as hikari]
-            [taoensso.telemere :as log])
+  (:require
+   [hikari-cp.core :as hikari]
+   [intemporal.core :as intemporal]
+   [intemporal.jepsen.workflows :as wf]
+   [intemporal.store.checked :as checked]
+   [intemporal.store.jdbc :as jdbc-store]
+   [next.jdbc :as jdbc]
+   [taoensso.telemere :as log])
   (:gen-class))
 
 ;; ---------------------------------------------------------------------------

@@ -1,12 +1,14 @@
 (ns intemporal.tests.error-test
-  (:require [intemporal.core :as intemporal]
-            [intemporal.internal.activity :as a]
-            [intemporal.tests.utils :refer [with-result]]
-            [intemporal.utils :as utils]
-            [cljs.test :as t :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-            [matcher-combinators.matchers :as m])
-  (:require-macros [intemporal.tests.utils :refer [with-result]]))
+  (:require-macros
+   [intemporal.tests.utils :refer [with-result]])
+  (:require
+   [cljs.test :as t :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.internal.activity :as a]
+   [intemporal.tests.utils :refer [with-result]]
+   [intemporal.utils :as utils]
+   [matcher-combinators.matchers :as m]
+   [matcher-combinators.test :refer [match?]]))
 
 (def attempt-counter (atom 0))
 
@@ -54,7 +56,6 @@
                                              :data    (m/embeds {:activity-name string?})})}
                     result))))))
 
-
 ;; Workflow that catches errors
 (defn error-handling-flow [id]
   (let [failing (intemporal/stub #'always-fails-activity)]
@@ -83,7 +84,6 @@
                      :error       (m/embeds {:message "Activity failed"
                                              :data    (m/embeds {:activity-name string?})})}
                     result))))))
-
 
 ;; Workflow with retry
 (defn retry-flow2 [id]

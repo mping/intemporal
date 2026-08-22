@@ -7,11 +7,9 @@
     check-cancelled! never fired and the cancellation was silently ignored —
     the workflow (and its thread) stayed alive forever.
 
-    The fix adds IStore/wake-workflow plus a generic wake callback registered
-    whenever a workflow suspends (execution.clj/.cljs run-workflow-internal).
-    cancel-workflow now calls mark-cancelled THEN wake-workflow, forcing the
-    sleeper to re-enter, observe the flag at the loop-top cancel check, and
-    finalize.
+    The fix makes mark-cancelled atomically persist the request and change a
+    WAITING workflow to RUNNABLE. The next claimed drive observes the flag and
+    finalizes cancellation.
 
   These tests assert the FIXED behaviour:
     • the workflow TERMINATES (start-workflow returns; no longer stuck)
@@ -19,13 +17,14 @@
     • get-workflow-status is :cancelled (finalize-cancelled writes a first-class
       :workflow-cancelled terminal event)
   They will fail again if cancel stops waking sleepers."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.store :as mem]
-            [intemporal.store.jdbc :as jdbc-store]
-            [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as mem]
+   [intemporal.store.fdb :as fdb-store]
+   [intemporal.store.jdbc :as jdbc-store]
+   [me.vedang.clj-fdb.FDB :as cfdb]))
 
 ;; ── Shared workflow ───────────────────────────────────────────────────────────
 
@@ -48,7 +47,7 @@
         (deliver result (intemporal/start-workflow engine cancel-sleep-wf []
                                                    :workflow-id wf-id))
         (catch Exception e (deliver result {:error (str e)}))))
-    ;; Wait for the workflow to suspend and register its wake callback
+    ;; Wait for the workflow to park durably.
     (Thread/sleep 400)
     ;; Cancel: sets the flag AND wakes the sleeper (Phase A2)
     (intemporal/cancel-workflow store wf-id)

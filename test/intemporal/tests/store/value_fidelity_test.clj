@@ -13,14 +13,15 @@
   persisted history must carry keyword values exactly as returned by the
   activity/workflow fn — on all three stores.  Signal payloads consumed via
   `p/consume-signal` must likewise preserve keyword values."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.store :as store]
-            [intemporal.store.jdbc :as jdbc-store]
-            [intemporal.store.fdb :as fdb-store]
-            [me.vedang.clj-fdb.FDB :as cfdb]
-            [next.jdbc :as jdbc]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [intemporal.store.fdb :as fdb-store]
+   [intemporal.store.jdbc :as jdbc-store]
+   [me.vedang.clj-fdb.FDB :as cfdb]
+   [next.jdbc :as jdbc]))
 
 ;; ---------------------------------------------------------------------------
 ;; Workflow fixtures
@@ -79,7 +80,7 @@
     (let [wf-id (str "vf-wf-" (random-uuid))]
       (intemporal/with-workflow-engine [engine {:store store :threads 2}]
         (let [result (intemporal/start-workflow engine kw-workflow [5]
-                                               :workflow-id wf-id)]
+                       :workflow-id wf-id)]
           (is (= :completed (:status result))
               "workflow completed successfully")))
 

@@ -1,21 +1,21 @@
 (ns intemporal.tracing
   "Minimal OpenTelemetry tracing helpers for the workflow engine (JVM only).
 
-   A workflow advances through many separate executions (a blocking start loop,
-   or repeated worker-driven `resume-workflow` calls). To represent each workflow
-   as ONE span across those executions, the live root span is held in a
+   A workflow advances through many separately claimed replay passes. To represent
+   each workflow as ONE span across those passes, the live root span is held in a
    process-level registry keyed by workflow-id (`live-spans`): the first executor
-   in this process creates+registers it, every subsequent resume reuses it, and
+   in this process creates+registers it, every subsequent drive reuses it, and
    the terminal finalizer ends it with OK/ERROR status. The W3C tracecontext
    persisted on the :workflow-started event links the trace across processes — a
-   resume in a fresh process (registry miss) rehydrates from it and opens one
+   drive in a fresh process (registry miss) rehydrates from it and opens one
    linked span for that process's portion of the work.
 
    Every helper here is BEST-EFFORT: a tracing/SDK failure must never affect
    workflow execution, so all OpenTelemetry calls are guarded and degrade to a
    no-op (mirroring the observer's error isolation)."
-  (:require [steffan-westcott.clj-otel.api.trace.span :as span]
-            [steffan-westcott.clj-otel.context :as octx]))
+  (:require
+   [steffan-westcott.clj-otel.api.trace.span :as span]
+   [steffan-westcott.clj-otel.context :as octx]))
 
 (defmacro ^:private safe
   "Evaluates body, returning nil (never throwing) if any tracing call fails."
@@ -46,12 +46,12 @@
   [workflow-id span-name parent-ctx]
   (or (get @live-spans workflow-id)
       (safe
-       (let [ctx (span/new-span! {:name       (str "workflow:" (str span-name))
-                                  :parent     parent-ctx
-                                  :tracer     (workflow-tracer)
-                                  :attributes {:intemporal.workflow/id workflow-id}})]
-         (swap! live-spans assoc workflow-id ctx)
-         ctx))))
+        (let [ctx (span/new-span! {:name       (str "workflow:" (str span-name))
+                                   :parent     parent-ctx
+                                   :tracer     (workflow-tracer)
+                                   :attributes {:intemporal.workflow/id workflow-id}})]
+          (swap! live-spans assoc workflow-id ctx)
+          ctx))))
 
 (defn- end-span!
   [ctx error]
@@ -97,7 +97,6 @@
         (when span-ctx (safe (span/end-span! {:context span-ctx})))
         (when span-scope (safe (octx/close-scope! span-scope)))
         (when parent-scope (safe (octx/close-scope! parent-scope)))))))
-
 
 ;; --- W3C tracecontext persistence / rehydration -----------------------------
 

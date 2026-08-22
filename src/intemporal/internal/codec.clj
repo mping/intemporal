@@ -15,7 +15,7 @@
 
    It is also *faithful* in the other direction, which matters as much: a string
    stays a string. The FDB store puts non-event values through this same codec —
-   the cached `\"completed\"` status, the owner-id, the `{:wake-at ..}` index
+   the cached `\"completed\"` status, owner and scheduling maps, and child-index
    entries — and compares them against string sets. A codec that keywordized
    indiscriminately on read would quietly make terminal workflows claimable again.
 
@@ -23,7 +23,8 @@
    `#my.ns.Rec{:a 1}` and `edn/read-string` rejects the unknown tag. Records in
    activity results / workflow args / signal payloads are therefore unsupported;
    use plain maps."
-  (:require [clojure.edn :as edn]))
+  (:require
+   [clojure.edn :as edn]))
 
 (defn encode
   "Serialize `x` to an EDN string.

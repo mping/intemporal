@@ -1,9 +1,11 @@
 (ns intemporal.internal.runtime
-  (:require [intemporal.internal.error :as error]
-            [intemporal.internal.logging :as log]
-            [intemporal.protocol :as p]
-            [intemporal.utils :as utils])
-  (:require-macros [intemporal.internal.logging :as log]))
+  (:require-macros
+   [intemporal.internal.logging :as log])
+  (:require
+   [intemporal.internal.error :as error]
+   [intemporal.internal.logging :as log]
+   [intemporal.protocol :as p]
+   [intemporal.utils :as utils]))
 
 ;; ============================================================================
 ;; Helper Functions
@@ -29,50 +31,6 @@
                     (when-let [id @timer-id] (js/clearTimeout id))
                     (throw err)))))
     promise-fn))
-
-;; ============================================================================
-;; Default Scheduler Implementation
-;; ============================================================================
-
-(defrecord DefaultScheduler [pending-timers]
-  p/IScheduler
-
-  (schedule-timer [_ workflow-id seq-num fire-at callback]
-    (let [timer-key [workflow-id seq-num]]
-      ;; Idempotent: a re-resumed timer workflow may call schedule-timer again
-      ;; for the same [wf,seq]; keep the already-armed timer rather than arming
-      ;; a second one (which would risk a duplicate :timer-fired).
-      (if (contains? @pending-timers timer-key)
-        timer-key
-        (let [delay-ms (max 0 (- fire-at (utils/current-time-ms)))
-              timer-id (js/setTimeout
-                         (fn []
-                           (swap! pending-timers dissoc timer-key)
-                           (callback))
-                         delay-ms)]
-          (swap! pending-timers assoc timer-key timer-id)
-          timer-key))))
-
-  (cancel-timer [_ workflow-id seq-num]
-    (let [timer-key [workflow-id seq-num]]
-      (when-let [timer-id (get @pending-timers timer-key)]
-        (js/clearTimeout timer-id)
-        (swap! pending-timers dissoc timer-key))))
-
-  (shutdown-scheduler [_ grace-period-secs]
-    ;; Cancel all pending timers
-    (doseq [[_ timer-id] @pending-timers]
-      (js/clearTimeout timer-id))
-    (reset! pending-timers {}))
-
-  (shutdown-scheduler? [_]
-    ;; In ClojureScript, scheduler is "terminated" when no timers pending
-    (empty? @pending-timers)))
-
-(defn make-scheduler
-  "Create a new scheduler (threads option ignored in ClojureScript)"
-  [& {:keys [threads] :or {threads 2}}]
-  (->DefaultScheduler (atom {})))
 
 ;; ============================================================================
 ;; Activity Execution with Retry

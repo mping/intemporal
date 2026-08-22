@@ -9,8 +9,9 @@
 
    Enforcement is still gated by intemporal.spec/check! itself — a no-op
    unless clojure.spec.check-asserts is enabled. See intemporal.spec."
-  (:require [intemporal.protocol :as p]
-            [intemporal.spec :as spec]))
+  (:require
+   [intemporal.protocol :as p]
+   [intemporal.spec :as spec]))
 
 (defrecord CheckedStore [inner]
   p/IStore
@@ -25,6 +26,11 @@
   (save-events [_ workflow-id events]
     (spec/check! ::spec/events events)
     (p/save-events inner workflow-id events))
+
+  (save-events-and-wake! [_ workflow-id events]
+    (spec/check! ::spec/events events)
+    (->> (p/save-events-and-wake! inner workflow-id events)
+         (spec/check! ::spec/boolean-result)))
 
   (find-event [_ workflow-id event-type seq-num]
     (spec/check! ::spec/event-type event-type)
@@ -46,17 +52,9 @@
   (consume-signal [_ workflow-id signal-name]
     (p/consume-signal inner workflow-id signal-name))
 
-  (register-signal-callback [_ workflow-id signal-name callback]
-    (p/register-signal-callback inner workflow-id signal-name callback))
-
-  (unregister-signal-callback [_ workflow-id signal-name]
-    (p/unregister-signal-callback inner workflow-id signal-name))
-
-  (register-wake-callback [_ workflow-id callback]
-    (p/register-wake-callback inner workflow-id callback))
-
   (wake-workflow [_ workflow-id]
-    (p/wake-workflow inner workflow-id))
+    (->> (p/wake-workflow inner workflow-id)
+         (spec/check! ::spec/boolean-result)))
 
   (is-cancelled? [_ workflow-id]
     (->> (p/is-cancelled? inner workflow-id)
@@ -69,21 +67,29 @@
     (->> (p/get-workflow-status inner workflow-id)
          (spec/check! ::spec/workflow-status)))
 
-  (claim-owner [_ workflow-id owner-id]
-    (->> (p/claim-owner inner workflow-id owner-id)
+  (claim-runnable! [_ owner-id limit now-ms]
+    (spec/check! ::spec/limit limit)
+    (spec/check! ::spec/timestamp now-ms)
+    (->> (p/claim-runnable! inner owner-id limit now-ms)
+         (spec/check! ::spec/drive-claims)))
+
+  (park-workflow! [_ workflow-id expected-wake-version events next-run-at-ms]
+    (spec/check! ::spec/wake-version expected-wake-version)
+    (spec/check! ::spec/events events)
+    (spec/check! ::spec/next-run-at-ms next-run-at-ms)
+    (->> (p/park-workflow! inner workflow-id expected-wake-version events next-run-at-ms)
+         (spec/check! ::spec/park-result)))
+
+  (requeue-running! [_ workflow-id]
+    (->> (p/requeue-running! inner workflow-id)
          (spec/check! ::spec/boolean-result)))
 
-  (list-pending [_ owner-id limit]
-    (spec/check! ::spec/limit limit)
-    (->> (p/list-pending inner owner-id limit)
-         (spec/check! ::spec/pending-ids)))
+  (recover-running! [_ owner-id]
+    (->> (p/recover-running! inner owner-id)
+         (spec/check! ::spec/count-result)))
 
   (release-owner [_ owner-id]
     (p/release-owner inner owner-id))
-
-  (set-wake-at [_ workflow-id wake-at-ms]
-    (spec/check! ::spec/wake-at-ms wake-at-ms)
-    (p/set-wake-at inner workflow-id wake-at-ms))
 
   (link-child! [_ parent-id parent-seq child-id policy]
     (spec/check! ::spec/parent-seq parent-seq)

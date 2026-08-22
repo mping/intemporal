@@ -1,7 +1,8 @@
 (ns intemporal.tests.async-test
-  (:require [intemporal.core :as intemporal]
-            [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [matcher-combinators.test :refer [match?]]))
 
 (defn slow-activity [x]
   (println (str "slow activity START with " x " on thread " (.getName (Thread/currentThread))))
@@ -40,17 +41,15 @@
     {:race-result (intemporal/join-any [prom1 prom2])
      :id          id}))
 
-
 (deftest test-async-workflow
   (testing "Async workflow"
     (intemporal/with-workflow-engine [engine {:threads 4 :enable-logging true}]
       ;; Activities are automatically registered via stub call
       (let [result (intemporal/start-workflow engine
-                                            my-parallel-flow [999])]
+                     my-parallel-flow [999])]
         (is (match? {:status :completed
                      :result {:args 999, :slow 0, :prom4 4, :results [2 4 6 4], :id 999}}
                     result))))))
-
 
 (deftest test-race-workflow
   (testing "Async race workflow"
@@ -62,4 +61,3 @@
                      :result {:race-result {:index 0, :result 200}
                               :id 999}}
                     result))))))
-

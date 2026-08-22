@@ -3,11 +3,12 @@
    - Signal FIFO ordering
    - Cancellation arriving while an activity is in-flight
    - Replay budget (max-iterations) enforcement"
-  (:require [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.tests.utils :refer [wait-until with-result]]
-            [clojure.test :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.tests.utils :refer [wait-until with-result]]
+   [matcher-combinators.test :refer [match?]]))
 
 ;; ============================================================================
 ;; Signal FIFO ordering

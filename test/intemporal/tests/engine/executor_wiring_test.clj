@@ -28,15 +28,17 @@
         task and hanging until the activity timeout.
 
    Tests 1-3 and 5 fail against the unfixed runtime."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.internal.activity :as a]
-            [intemporal.internal.error :as error]
-            [intemporal.internal.runtime :as runtime]
-            [intemporal.protocol :as p]
-            [intemporal.store :as store]
-            [intemporal.tests.utils :as u])
-  (:import (java.util.concurrent CountDownLatch RejectedExecutionException ThreadPoolExecutor TimeUnit)))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.internal.activity :as a]
+   [intemporal.internal.error :as error]
+   [intemporal.internal.runtime :as runtime]
+   [intemporal.protocol :as p]
+   [intemporal.store :as store]
+   [intemporal.tests.utils :as u])
+  (:import
+   (java.util.concurrent CountDownLatch RejectedExecutionException ThreadPoolExecutor TimeUnit)))
 
 ;; ============================================================================
 ;; Test Infrastructure

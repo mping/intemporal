@@ -1,26 +1,19 @@
 (ns intemporal.tests.engine.cascade-cancel-wake-test
   "Regression test for kimi.md finding E6 (test plan #15): `enforce-close-
-   policies!`'s :cascade-cancel case never clears the child's wake-at.
+   policies!`'s :cascade-cancel case failed to make the child runnable.
 
    `cancel-workflow` (core.cljc:~884-890) does the right three things when
-   cancelling a workflow directly: mark-cancelled + set-wake-at nil +
-   wake-workflow. The :cascade-cancel branch of `enforce-close-policies!`
-   (execution.clj:624-627), fired when a parent with a :cascade-cancel child
-   closes, only does mark-cancelled + wake-workflow -- it never clears wake-at.
+   cancelling a workflow directly atomically records cancellation and wakes the
+   workflow. The former :cascade-cancel branch did not durably make a timed
+   child eligible for another drive.
 
    That omission is invisible for a child parked on a signal: `wait-for-signal`
-   never sets wake-at (always nil = always eligible), so `list-pending`'s C2
-   filter never excludes it and the very next poll picks it up regardless. That
+   parks indefinitely, so the old scan still picked it up on the next poll. That
    is why the existing child-workflow-cascade-cancel-test (whose child waits on
    a signal) never catches this. It bites a child parked on a TIMER: `sleep`
-   sets wake-at to the timer's own fire-at (execution.clj's :wait-timer case).
-   Cascade-cancelling that child leaves wake-at pointed at the ORIGINAL timer
-   deadline, so list-pending's `wake_at IS NULL OR wake_at <= now()` filter
-   (store.cljc / jdbc.clj) keeps excluding it from every poll. Worker-mode
-   resumes pass no :wake-fn (core.cljc's `resume-workflow` 1-arity, used by
-   start-worker's ownership scan), so `wake-workflow`'s direct callback fire is
-   also a no-op there -- the child never re-executes to observe
-   `is-cancelled?`, run saga compensation, or write its terminal
+   persists the timer's fire-at. Cascade-cancelling that child used to leave the
+   original timer deadline in place, so worker scans kept excluding it. The
+   child never re-executed to observe `is-cancelled?`, run saga compensation, or write its terminal
    :workflow-cancelled event, until its original (here: far-future) deadline
    arrives.
 
@@ -30,7 +23,7 @@
 
    Correct behavior: cascade-cancelling a timer-sleeping child must make it due
    immediately, so the worker's very next poll drives it to :cancelled -- not
-   stuck until the original wake-at.
+   stuck until the original deadline.
 
    Fixing E6 alone does NOT make this pass: getting the child re-driven only
    exposed a second defect on the same path, which this test also covers.
@@ -50,10 +43,11 @@
    :workflow-cancelled event does not appear within the short bound below
    (`far-future-sleep-ms` is chosen so the only way to observe it that fast is
    prompt re-drive, never the timer firing on its own)."
-  (:require [clojure.test :refer [deftest is testing]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.tests.child-workflow-util :as u]))
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.tests.child-workflow-util :as u]))
 
 ;; ── workflows ───────────────────────────────────────────────────────────────────
 
@@ -72,8 +66,8 @@
                                           :child-id child-id
                                           :parent-close-policy :cascade-cancel)
   ;; Stay open on purpose: lets the test confirm the child already suspended on
-  ;; its far-future sleep (wake-at set) BEFORE closing the parent, so the
-  ;; assertion below is actually exercising the wake-at gate, not a lucky race.
+  ;; its far-future sleep (next-run-at set) BEFORE closing the parent, so the
+  ;; assertion below is actually exercising the deadline gate, not a lucky race.
   (intemporal/wait-for-signal "close")
   :parent-done)
 
@@ -97,9 +91,9 @@
       (let [pid (str "casc-wake-" (random-uuid))
             cid (str pid "/child")]
         (intemporal/submit-workflow engine #'cascade-parent [cid] :workflow-id pid)
-        ;; The child must actually reach its sleep (wake-at recorded, pointing
+        ;; The child must actually reach its sleep (next-run-at recorded, pointing
         ;; far into the future) before the parent closes -- only then is the
-        ;; wake-at gate the thing standing between cascade-cancel and a prompt
+        ;; deadline gate the thing standing between cascade-cancel and a prompt
         ;; :workflow-cancelled.
         (is (await-event store cid :timer-scheduled 3000)
             "child reaches its long sleep (timer-scheduled) before the parent closes")
@@ -111,7 +105,7 @@
         (is (await-event store cid :workflow-cancelled 3000)
             (str "cascade-cancelled child must be re-driven to write its terminal "
                  ":workflow-cancelled event promptly -- not stuck until its original "
-                 far-future-sleep-ms "ms wake-at"))))))
+                 far-future-sleep-ms "ms next-run-at"))))))
 
 ;; ── tests ───────────────────────────────────────────────────────────────────────
 

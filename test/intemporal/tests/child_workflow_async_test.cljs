@@ -5,12 +5,14 @@
    that sleeps (suspends on a timer), and one tree exercising ALL THREE
    :parent-close-policy values + recursion. Single-policy behaviours live in the
    dedicated per-policy namespaces (cascade-cancel / abandon / terminate)."
-  (:require [cljs.test :as t :refer [deftest is testing async]]
-            [intemporal.core :as intemporal]
-            [intemporal.protocol :as p]
-            [intemporal.tests.child-workflow-util :as u]
-            [promesa.core :as prom])
-  (:require-macros [intemporal.core :as intemporal]))
+  (:require-macros
+   [intemporal.core :as intemporal])
+  (:require
+   [cljs.test :as t :refer [async deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.protocol :as p]
+   [intemporal.tests.child-workflow-util :as u]
+   [promesa.core :as prom]))
 
 ;; ── activities / workflows ──────────────────────────────────────────────────────
 

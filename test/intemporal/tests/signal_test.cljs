@@ -1,11 +1,12 @@
 (ns intemporal.tests.signal-test
-  (:require [intemporal.core :as intemporal]
-            [intemporal.tests.utils :refer [with-result]]
-            [cljs.test :as t :refer [deftest is testing]]
-            [matcher-combinators.test :refer [match?]]
-)
-  (:require-macros [intemporal.tests.utils :refer [with-result]]
-                   [intemporal.internal.context :refer [blet]]))
+  (:require-macros
+   [intemporal.internal.context :refer [blet]]
+   [intemporal.tests.utils :refer [with-result]])
+  (:require
+   [cljs.test :as t :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.tests.utils :refer [with-result]]
+   [matcher-combinators.test :refer [match?]]))
 
 (defn activity-fn [arg]
   [:processed arg])
@@ -77,9 +78,9 @@
       (with-result [[result1 result2]
                     (blet [r1 (intemporal/start-workflow engine signal-flow [100]
                                                          :workflow-id wf-id-1)
-                            _  (js/setTimeout #(intemporal/send-signal (:store engine) wf-id-2 "approval" {:user "bob"}) 100)
-                            r2 (intemporal/start-workflow engine signal-flow [200]
-                                                          :workflow-id wf-id-2)]
+                           _  (js/setTimeout #(intemporal/send-signal (:store engine) wf-id-2 "approval" {:user "bob"}) 100)
+                           r2 (intemporal/start-workflow engine signal-flow [200]
+                                                         :workflow-id wf-id-2)]
                       [r1 r2])]
         (is (match? {:result {:approved {:user "alice"}}} result1))
         (is (match? {:result {:approved {:user "bob"}}} result2))))))

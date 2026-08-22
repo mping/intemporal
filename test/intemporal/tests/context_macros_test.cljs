@@ -1,11 +1,13 @@
 (ns intemporal.tests.context-macros-test
-  (:require [intemporal.core :as intemporal]
-            [cljs.test :refer [deftest is testing]]
-            [intemporal.internal.context :as ctx]
-            [intemporal.tests.utils :as utils]
-            [promesa.core :as p])
-  (:require-macros [intemporal.internal.context :as ctx :refer [blet bthen bfinally]]
-                   [intemporal.tests.utils :refer [with-result]]))
+  (:require-macros
+   [intemporal.internal.context :as ctx :refer [bfinally blet bthen]]
+   [intemporal.tests.utils :refer [with-result]])
+  (:require
+   [cljs.test :refer [deftest is testing]]
+   [intemporal.core :as intemporal]
+   [intemporal.internal.context :as ctx]
+   [intemporal.tests.utils :as utils]
+   [promesa.core :as p]))
 
 (deftest test-bthen-bfinally-propagation
   (testing "bthen and bfinally propagate context"
