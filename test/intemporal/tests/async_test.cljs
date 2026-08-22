@@ -17,6 +17,17 @@
   (println (str "slow activity END with " x))
   (* x 2))
 
+(defn timeout-shaped-result []
+  {:intemporal.internal.runtime/timeout true})
+
+(defn timeout-shaped-result-flow []
+  (let [activity (intemporal/stub #'timeout-shaped-result :timeout-ms 1000)]
+    (activity)))
+
+(defn parallel-timeout-shaped-result-flow []
+  (let [activity (intemporal/stub #'timeout-shaped-result :timeout-ms 1000)]
+    (intemporal/join (intemporal/async #(activity)))))
+
 ;; Parallel workflow
 (defn my-parallel-flow [id]
   (println "Workflow start with id:" id)
@@ -58,3 +69,12 @@
                      :result {:race-result {:index 0, :result 200}
                               :id 999}}
                     result))))))
+
+(deftest activity-result-cannot-collide-with-timeout-sentinel
+  (let [engine (intemporal/make-workflow-engine :threads 2)]
+    (with-result [sequential-result (intemporal/start-workflow engine timeout-shaped-result-flow [])]
+      (is (= {:intemporal.internal.runtime/timeout true}
+             (:result sequential-result)))
+      (with-result [parallel-result (intemporal/start-workflow engine parallel-timeout-shaped-result-flow [])]
+        (is (= {:intemporal.internal.runtime/timeout true}
+               (:result parallel-result)))))))

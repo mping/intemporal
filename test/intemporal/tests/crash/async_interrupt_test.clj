@@ -1,35 +1,11 @@
 (ns intemporal.tests.crash.async-interrupt-test
-  "Regression test for kimi.md improvement #5 / bugs X6 + E4: an interrupt landing
-   inside an in-flight `async` batch durably FAILS the workflow.
+  "Regression coverage for shutdown landing inside an in-flight `async` batch.
 
-   Two cooperating gaps:
-
-   E4 — the single-activity path wraps interruption explicitly
-   (`runtime.clj` `execute-activity` throws `activity-interrupted-exception`, and
-   `stub` re-schedules rather than replaying the failure). The PARALLEL path does
-   neither: `execute-activities-parallel` lets `InterruptedException` fall into
-   its generic `(catch Exception e)` and serializes a plain error map with no
-   `:exception-kind`. The engine then persists `:activity-failed` + `:async-failed`.
-
-   X6 — the re-execution guard in `async` is explicitly disabled: `core.cljc`
-   reads `existing-failed #_(not interrupted?)`, so even a correctly classified
-   interruption is replayed as a durable failure. `join` then rethrows it and the
-   workflow is finalized `:failed`. `interrupt-error?` (execution.clj) cannot
-   save it either: the drive thread's interrupt flag is already clear and the
-   cause chain holds a serialized map, not an `InterruptedException`.
-
-   Net effect: a routine `stop-worker` / `shutdown-engine` landing inside an
-   async batch permanently fails the workflow — contradicting the engine's own
-   \"interruptions are infrastructure, never finalize\" policy.
-
-   Reproducer: fan out two slow asyncs, wait until both are actually running on
-   pool threads, then `shutdown-engine` (which calls `.shutdownNow` and thus
-   interrupts them). Resume on a fresh engine against the same store.
-
-   Correct behavior once fixed: the interrupted activities are recorded as
-   `:activity-interrupted` (infrastructure), re-enqueued on resume, executed
-   again, and the workflow completes with the right result. Against the unfixed
-   engine the resume finalizes `:failed`."
+   The engine-owned worker must stop claiming first and give an active drive its
+   shutdown grace period while the activity executor remains available. A batch
+   that finishes within that period therefore commits its results exactly once;
+   shutdown must not interrupt the collector early, persist infrastructure
+   failures, or replay completed side effects on a fresh engine."
   {:crash true}
   (:require
    [clojure.test :refer [deftest is testing]]
@@ -46,8 +22,7 @@
 (def completed-log (atom []))
 
 (defn slow-tracked-activity
-  "Logs its start, then sleeps long enough that the test can interrupt it
-   mid-flight. Only logs completion if it was NOT interrupted."
+  "Logs its start, then sleeps long enough for shutdown to begin mid-flight."
   [x]
   (swap! started-log conj x)
   (Thread/sleep 3000)
@@ -83,7 +58,7 @@
           st          (store/create-store)]
 
       ;; ======================================================================
-      ;; Phase 1: interrupt the batch mid-flight
+      ;; Phase 1: begin shutdown while the batch is in flight
       ;; ======================================================================
       (let [engine-1 (intemporal/make-workflow-engine :store st)
             fut      (future
@@ -91,8 +66,7 @@
                          (intemporal/start-workflow engine-1 async-batch-workflow [1]
                                                     :workflow-id workflow-id)
                          (catch Throwable t t)))]
-        ;; Wait until BOTH activities are genuinely running on pool threads, so
-        ;; shutdownNow interrupts an in-flight batch rather than racing it.
+        ;; Wait until BOTH activities are genuinely running on pool threads.
         (u/wait-until #(= 2 (count @started-log)) 5000)
         ;; The managed worker drains an in-flight drive before the activity
         ;; executor closes.

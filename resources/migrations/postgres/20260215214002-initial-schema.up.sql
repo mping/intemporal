@@ -2,10 +2,9 @@ CREATE TABLE IF NOT EXISTS intemporal_workflows (
     id TEXT PRIMARY KEY,
     cancelled BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    -- Phase B2: O(1) workflow status, instead of scanning intemporal_history to
-    -- derive it. Also gives the Phase C recovery poller a cheap predicate.
+    -- O(1) workflow status, instead of scanning intemporal_history to derive it.
     status TEXT NOT NULL DEFAULT 'running',
-    -- Phase C: ownership-based recovery. A workflow is owned by at most one pod
+    -- Ownership-based recovery. A workflow is owned by at most one process
     -- (a stable owner-id). A worker resumes the non-terminal workflows it
     -- owns-or-null; a crashed pod's work is reclaimed when it restarts with the
     -- same owner-id. No time-based leases.
@@ -19,7 +18,7 @@ CREATE TABLE IF NOT EXISTS intemporal_workflows (
     -- (parent_workflow_id), at which parent sequence number (parent_seq, used
     -- to write the parent's :child-workflow-* completion event), and what
     -- should happen to it if the parent closes first (parent_close_policy:
-    -- cascade-cancel | abandon | require-join). NULL columns = a top-level
+    -- cascade-cancel | abandon | terminate). NULL columns = a top-level
     -- workflow with no parent.
     parent_workflow_id   TEXT,
     parent_seq           INTEGER,
@@ -38,12 +37,12 @@ CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_parent
     ON intemporal_workflows (parent_workflow_id)
     WHERE parent_workflow_id IS NOT NULL;
 --;;
--- A1: the engine intentionally records multiple event types at the same seq
+-- The engine intentionally records multiple event types at the same seq
 -- (:activity-scheduled + :activity-completed, :timer-scheduled + :timer-fired,
 -- :child-workflow-scheduled + :child-workflow-completed + the :async-completed
 -- alias, ...), so history is keyed per event type rather than per seq alone.
 --
--- A8: seq is NOT NULL — the engine assigns every event a deterministic seq
+-- seq is NOT NULL — the engine assigns every event a deterministic seq
 -- (:workflow-started = -1, terminal events = one past the last real op seq —
 -- see execution.clj's next-terminal-seq / core.cljc).
 --

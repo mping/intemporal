@@ -1,9 +1,8 @@
 (ns intemporal.internal.workflow-registry
   "Maps a stable workflow name -> workflow function so a workflow can be resumed
    knowing only its id (the name + args are recorded in the :workflow-started
-   event). This is what lets a restarted process — or, in a multi-pod
-   deployment, a different pod — resume a workflow it did not itself start
-   (improvements.md §B3, load-bearing for the Phase C worker loop).
+   event). This lets a restarted process — or another process using the shared
+   store — resume a workflow it did not itself start.
 
    The registry is a process-global atom: each process registers the workflow
    functions it can resolve (Temporal's model). start-workflow auto-registers

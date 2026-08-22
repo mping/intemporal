@@ -1,13 +1,13 @@
 (ns intemporal.tests.runtime.parallel-rejection-test
-  "Regression test for kimi.md improvement #4 / bug X4: `RejectedExecutionException`
-   escapes the parallel activity path.
+  "Regression test: `RejectedExecutionException` must not escape the parallel
+   activity path.
 
    `execute-activities-parallel` (runtime.clj) builds its futures with a `mapv`
    whose `.submit` calls sit OUTSIDE any try; only the later `.get` phase is
    wrapped. A rejection on the Nth submit therefore propagates straight out of
    `process-pending-asyncs-parallel` -> `handle-suspension` ->
    `drive-workflow!` — none of which catch it — and out of
-   `start-workflow` itself. Consequences (kimi.md X4):
+   `start-workflow` itself. Consequences:
 
      (a) no rescheduling: unlike the SEQUENTIAL path, which classifies a
          rejection as :rejected and re-executes it on the next pass
@@ -137,15 +137,17 @@
     (reset! exec-log [])
     (let [workflow-id "parallel-rejection-wf"
           st          (store/create-store)
-          base        (intemporal/make-workflow-engine :store st)
           inner       (Executors/newVirtualThreadPerTaskExecutor)
           ;; Reject submits #2 and #3 — i.e. the 2nd and 3rd members of the very
           ;; first async batch. Every later submit (the reschedules) is accepted,
           ;; so a correct engine converges instead of hot-looping.
-          engine      (assoc base :executor (runtime/->ParallelActivityExecutor
-                                              (rejecting-pool inner #{2 3})
-                                              (:registry base)
-                                              30000))
+          engine      (with-redefs [runtime/make-vthreads-executor
+                                    (fn [registry & _]
+                                      (runtime/->ParallelActivityExecutor
+                                        (rejecting-pool inner #{2 3})
+                                        registry
+                                        30000))]
+                        (intemporal/make-workflow-engine :store st))
           fut         (future
                         (try
                           (intemporal/start-workflow engine three-async-workflow [1]
@@ -155,7 +157,6 @@
 
       (when (= ::timed-out result)
         (future-cancel fut))
-      (p/shutdown-executor (:executor base) 0)
       (intemporal/shutdown-engine engine)
 
       (is (not= ::timed-out result)

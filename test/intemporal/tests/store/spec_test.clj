@@ -5,7 +5,7 @@
   Deliberately store-free: it needs no database, no FDB cluster and no engine,
   so it runs in milliseconds and is where spec typos die. It also covers the
   three event types a happy-path workflow never produces
-  (:workflow-cancelling, :workflow-terminated, :run-once-completed) and the
+  (:workflow-cancelling, :workflow-terminated, and :run-once-completed) and the
   ragged variants (a nil :result on a failed activity, an :activity-completed
   with no :attempts, the minimal hand-built :workflow-started fixtures, and all
   three mutually incompatible :error shapes).
@@ -16,7 +16,10 @@
   (:require
    [clojure.spec.alpha :as s]
    [clojure.test :refer [deftest is testing use-fixtures]]
-   [intemporal.spec :as spec]))
+   [intemporal.protocol :as p]
+   [intemporal.spec :as spec]
+   [intemporal.store :as store]
+   [intemporal.store.checked :as checked]))
 
 ;; Captured at namespace load, BEFORE the fixture below flips the flag, so
 ;; `toggle-is-enabled-in-ci` can see how the JVM was actually launched.
@@ -257,10 +260,7 @@
     (is (not (s/valid? ::spec/children [{:child-id "c" :parent-seq 4
                                          :policy :bogus :status :running}]))))
 
-  (testing "::pending-ids and ::max-seq-result"
-    (is (s/valid? ::spec/pending-ids []))
-    (is (s/valid? ::spec/pending-ids ["wf-1" "wf-2"]))
-    (is (not (s/valid? ::spec/pending-ids [:wf-1])))
+  (testing "::max-seq-result"
     (is (s/valid? ::spec/max-seq-result nil))
     (is (s/valid? ::spec/max-seq-result 7))
     ;; MariaDB's MAX(seq) numeric type is not covered by mandatory_seq_test
@@ -314,3 +314,32 @@
         (s/check-asserts false)
         (is (= {:bogus true} (spec/check! ::spec/event {:bogus true})))
         (finally (s/check-asserts prev))))))
+
+(deftest checked-store-construction-policy
+  (testing ":auto follows the assertion flag at construction"
+    (let [prev (s/check-asserts?)]
+      (try
+        (s/check-asserts true)
+        (let [checked-store (store/create-store)]
+          (is (checked/checked-store? checked-store))
+          (is (thrown? clojure.lang.ExceptionInfo
+                       (p/save-event checked-store "wf" {:event-type :bogus :seq 0}))))
+        (s/check-asserts false)
+        (is (not (checked/checked-store? (store/create-store))))
+        (finally (s/check-asserts prev)))))
+
+  (testing "explicit modes override construction-time wrapping"
+    (let [prev (s/check-asserts?)]
+      (try
+        (s/check-asserts false)
+        (is (checked/checked-store? (store/create-store :checked? true)))
+        (s/check-asserts true)
+        (is (not (checked/checked-store? (store/create-store :checked? false))))
+        (finally (s/check-asserts prev)))))
+
+  (testing "CheckedStore closes a closeable inner store"
+    (let [closed? (atom false)
+          inner   (reify java.lang.AutoCloseable
+                    (close [_] (reset! closed? true)))]
+      (.close ^java.lang.AutoCloseable (checked/->CheckedStore inner))
+      (is @closed?))))

@@ -1,26 +1,15 @@
 (ns intemporal.store
   (:require
+   [intemporal.internal.domain :as domain]
    [intemporal.protocol :as p]
    [intemporal.store.checked :as checked]))
-
-(def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
-
-(defn- terminal-status-in
-  [events]
-  (some #(case (:event-type %)
-           :workflow-completed  :completed
-           :workflow-failed     :failed
-           :workflow-cancelled  :cancelled
-           :workflow-terminated :terminated
-           nil)
-        events))
 
 (defn- normalize-workflow
   "Keep terminal scheduling fields aligned with terminal public status."
   [wf]
   (when wf
     (cond-> wf
-      (terminal-status? (:status wf))
+      (domain/terminal-status? (:status wf))
       (assoc :run-state :terminal :next-run-at nil))))
 
 (defn- append-workflow-events
@@ -28,8 +17,17 @@
   (let [wf   (or (normalize-workflow wf)
                  {:history [] :status :running :run-state :runnable
                   :next-run-at nil :wake-version 0})
+        seen (into #{} (map domain/event-identity) (:history wf))
+        events (second
+                 (reduce (fn [[ids accepted] event]
+                           (let [identity (domain/event-identity event)]
+                             (if (contains? ids identity)
+                               [ids accepted]
+                               [(conj ids identity) (conj accepted event)])))
+                         [seen []]
+                         events))
         wf'  (update wf :history (fnil into []) events)
-        term (terminal-status-in events)]
+        term (domain/terminal-status-in events)]
     (if term
       (assoc wf' :status term :run-state :terminal :next-run-at nil)
       wf')))
@@ -37,7 +35,7 @@
 (defn- wake-workflow-state
   [wf]
   (let [wf (normalize-workflow wf)]
-    (if (or (nil? wf) (terminal-status? (:status wf)))
+    (if (or (nil? wf) (domain/terminal-status? (:status wf)))
       wf
       (cond-> (update wf :wake-version (fnil inc 0))
         (= :waiting (:run-state wf))
@@ -56,7 +54,7 @@
        (keep (fn [[workflow-id raw-wf]]
                (let [wf (normalize-workflow raw-wf)]
                  (when (and (seq (:history wf))
-                            (not (terminal-status? (:status wf)))
+                            (not (domain/terminal-status? (:status wf)))
                             (runnable-or-due? wf now-ms)
                             (or (nil? (:owner wf)) (= owner-id (:owner wf))))
                    [workflow-id wf]))))
@@ -76,10 +74,6 @@
   (load-history [_ workflow-id]
     (get-in @state [:workflows workflow-id :history] []))
 
-  (save-event [this workflow-id event]
-    (p/save-events this workflow-id [event])
-    event)
-
   (save-events [_ workflow-id events]
     (when (seq events)
       (swap! state update-in [:workflows workflow-id]
@@ -93,7 +87,7 @@
                                 (-> (append-workflow-events wf events)
                                     wake-workflow-state)))
           wf      (normalize-workflow (get-in old path))
-          active? (boolean (and wf (not (terminal-status? (:status wf)))))]
+          active? (boolean (and wf (not (domain/terminal-status? (:status wf)))))]
       active?))
 
   (find-event [this workflow-id event-type seq-num]
@@ -127,7 +121,7 @@
     ;; swap-vals! applies the (pure, retry-safe) update atomically and returns
     ;; [old new]; read the consumed signal from `old`. Avoids the previous
     ;; reset!-into-an-external-atom side effect inside the swap fn, which re-fires
-    ;; on every CAS retry under contention (deepseek code §5).
+    ;; on every CAS retry under contention.
     (let [path    [:workflows workflow-id :signals signal-name]
           [old _] (swap-vals! state
                               (fn [s]
@@ -140,7 +134,7 @@
     (let [path    [:workflows workflow-id]
           [old _] (swap-vals! state update-in path wake-workflow-state)
           wf      (normalize-workflow (get-in old path))
-          active? (boolean (and wf (not (terminal-status? (:status wf)))))]
+          active? (boolean (and wf (not (domain/terminal-status? (:status wf)))))]
       active?))
 
   (is-cancelled? [_ workflow-id]
@@ -159,7 +153,7 @@
     (let [wf (get-in @state [:workflows workflow-id])]
       (cond
         (nil? wf) :not-found
-        (terminal-status? (:status wf)) (:status wf)
+        (domain/terminal-status? (:status wf)) (:status wf)
         (:cancelled wf) :cancelled
         (empty? (:history wf)) :not-found
         :else :running)))
@@ -189,10 +183,10 @@
                     state
                     (fn [s]
                       (let [before (normalize-workflow (get-in s path))
-                            terminal-event? (terminal-status-in events)]
+                            terminal-event? (domain/terminal-status-in events)]
                         (assoc-in s path
                                   (cond
-                                    (terminal-status? (:status before)) before
+                                    (domain/terminal-status? (:status before)) before
                                     terminal-event? (append-workflow-events before events)
                                     (not= :running (:run-state before)) before
                                     (not= expected-wake-version (:wake-version before))
@@ -203,8 +197,8 @@
                                            :next-run-at next-run-at-ms))))))
           before  (normalize-workflow (get-in old path))]
       (cond
-        (terminal-status? (:status before)) {:park-status :terminal}
-        (terminal-status-in events) {:park-status :terminal}
+        (domain/terminal-status? (:status before)) {:park-status :terminal}
+        (domain/terminal-status-in events) {:park-status :terminal}
         (not= :running (:run-state before)) {:park-status :not-running}
         (not= expected-wake-version (:wake-version before))
         {:park-status :wake-raced :wake-version (:wake-version before)}
@@ -216,20 +210,20 @@
                               (fn [raw-wf]
                                 (let [wf (normalize-workflow raw-wf)]
                                   (if (and wf
-                                           (not (terminal-status? (:status wf)))
+                                           (not (domain/terminal-status? (:status wf)))
                                            (= :running (:run-state wf)))
                                     (assoc wf :run-state :runnable :next-run-at nil)
                                     wf))))
           wf      (normalize-workflow (get-in old path))]
       (boolean (and wf
-                    (not (terminal-status? (:status wf)))
+                    (not (domain/terminal-status? (:status wf)))
                     (= :running (:run-state wf))))))
 
   (recover-running! [_ owner-id]
     (let [recover? (fn [raw-wf]
                      (let [wf (normalize-workflow raw-wf)]
                        (and (= :running (:run-state wf))
-                            (not (terminal-status? (:status wf)))
+                            (not (domain/terminal-status? (:status wf)))
                             (= owner-id (:owner wf)))))
           [old _] (swap-vals!
                     state
@@ -253,7 +247,7 @@
            (fn [s]
              (reduce (fn [s [wid wf]]
                        (if (and (= owner-id (:owner wf))
-                                (not (terminal-status? (:status wf))))
+                                (not (domain/terminal-status? (:status wf))))
                          (assoc-in s [:workflows wid]
                                    (cond-> (dissoc (normalize-workflow wf) :owner)
                                      (= :running (:run-state (normalize-workflow wf)))
@@ -266,11 +260,16 @@
   ;; --- Tier 2: independent child workflows ---
   (link-child! [_ parent-id parent-seq child-id policy]
     ;; Idempotent: re-linking the same child (parent replay / crash) is a no-op.
-    (swap! state update-in [:workflows parent-id :children]
-           (fn [children]
-             (if (contains? children child-id)
-               children
-               (assoc children child-id {:parent-seq parent-seq :policy policy}))))
+    (swap! state
+           (fn [s]
+             (if (seq (get-in s [:workflows child-id :history]))
+               (update-in s [:workflows parent-id :children]
+                          (fn [children]
+                            (if (contains? children child-id)
+                              children
+                              (assoc children child-id
+                                     {:parent-seq parent-seq :policy policy}))))
+               s)))
     nil)
 
   (list-children [this parent-id]
@@ -283,14 +282,14 @@
 
 (defn create-store
   "Creates the default IStore implementation: an in-memory, atom-backed store
-   wrapped with intemporal.spec assertions (intemporal.store.checked/CheckedStore).
+   optionally wrapped with intemporal.spec assertions.
 
    Options:
    - :state    - an existing atom to back the store, e.g. to share state
                  between two store instances (simulating two processes/pods
                  over the same backing). Defaults to a fresh (atom {}).
-   - :checked? - wrap with spec assertions (default true). Pass false for a
-                 raw, unwrapped store."
-  [& {:keys [state checked?] :or {checked? true}}]
+   - :checked? - :auto (default), true, or false. :auto installs CheckedStore
+                 only when clojure.spec assertions are enabled."
+  [& {:keys [state checked?] :or {checked? :auto}}]
   (let [store (->InMemoryStore (or state (atom {})))]
-    (if checked? (checked/->CheckedStore store) store)))
+    (checked/wrap store checked?)))

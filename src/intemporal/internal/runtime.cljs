@@ -5,11 +5,18 @@
    [intemporal.internal.error :as error]
    [intemporal.internal.logging :as log]
    [intemporal.protocol :as p]
-   [intemporal.utils :as utils]))
+   [intemporal.internal.clock :as clock]))
 
 ;; ============================================================================
 ;; Helper Functions
 ;; ============================================================================
+
+(def ^:private timeout-sentinel
+  ;; A private identity token cannot collide with an ordinary activity result.
+  (js-obj))
+
+(defn- timeout-result? [result]
+  (identical? timeout-sentinel result))
 
 (defn- promise-with-timeout
   "Execute promise-fn with optional timeout. If timeout-ms is provided,
@@ -22,7 +29,7 @@
           timeout-p (js/Promise.
                       (fn [resolve _]
                         (reset! timer-id
-                          (js/setTimeout #(resolve {::timeout true}) timeout-ms))))]
+                          (js/setTimeout #(resolve timeout-sentinel) timeout-ms))))]
       (-> (js/Promise.race #js [promise-fn timeout-p])
           (.then (fn [result]
                    (when-let [id @timer-id] (js/clearTimeout id))
@@ -42,10 +49,10 @@
 
    Retrying used to live here, invisibly to the engine: this code has no store,
    workflow-id or seq in scope, so nothing about an attempt could be recorded and
-   every crash restarted the count at 1 (kimi.md X8). The engine owns the retry
+   every crash restarted the count at 1. The engine owns the retry
    loop now."
   [activity-fn args timeout-ms activity-name]
-  (let [start-time (utils/current-time-ms)]
+  (let [start-time (clock/now-ms)]
     (-> (promise-with-timeout
           (js/Promise.
             (fn [resolve reject]
@@ -60,11 +67,11 @@
           timeout-ms)
         (.then
           (fn [result]
-            (if (::timeout result)
+            (if (timeout-result? result)
               (throw (error/activity-timeout-exception
                        activity-name timeout-ms))
               {:result result
-               :duration (- (utils/current-time-ms) start-time)}))))))
+               :duration (- (clock/now-ms) start-time)}))))))
 
 ;; ============================================================================
 ;; Parallel Activity Executor
@@ -93,7 +100,7 @@
             timeout)
           (.then
             (fn [result]
-              (if (::timeout result)
+              (if (timeout-result? result)
                 (throw (error/activity-timeout-exception activity-name timeout))
                 result)))
           (.catch

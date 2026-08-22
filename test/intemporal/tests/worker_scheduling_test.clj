@@ -32,8 +32,8 @@
 (deftest indefinite-waiters-do-not-crowd-out-runnable-work
   (testing "more WAITING workflows than batch-size disappear from scans"
     (let [store       (store/create-store)
-          engine      (intemporal/make-workflow-engine :store store :threads 4)
-          stop-worker (intemporal/start-worker engine
+          engine      (intemporal/make-workflow-engine
+                        :store store :threads 4
                         :owner-id "waiting-scan-worker"
                         :poll-ms 20
                         :batch-size 2
@@ -65,7 +65,6 @@
             (is (= parked-loads (select-keys @loads waiter-ids))
                 "indefinite waiter histories stop loading after park")))
         (finally
-          (stop-worker)
           (intemporal/shutdown-engine engine))))))
 
 (deftest bounded-drive-pool-does-not-serialize-workflows
@@ -75,8 +74,8 @@
           _           (reset! activity-gate gate)
           _           (reset! activity-entered entered)
           store       (store/create-store)
-          engine      (intemporal/make-workflow-engine :store store :threads 2)
-          stop-worker (intemporal/start-worker engine
+          engine      (intemporal/make-workflow-engine
+                        :store store :threads 2
                         :owner-id "bounded-drive-worker"
                         :poll-ms 20
                         :batch-size 10
@@ -93,5 +92,4 @@
         (is (await-pred #(= :completed (p/get-workflow-status store blocked-id)) 2000))
         (finally
           (deliver gate :stop)
-          (stop-worker)
           (intemporal/shutdown-engine engine))))))

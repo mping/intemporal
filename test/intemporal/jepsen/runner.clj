@@ -6,8 +6,8 @@
     2. active   — generator submits/cancels/signals workflows;
                   nemesis kills & restarts workers;
                   nemesis also fires signals at dead workers (bug 1.1 probe)
-    3. quiesce  — nemesis stops; all workers restarted (proves bug 1.3: no
-                  auto-resume on restart); grace period elapses
+    3. quiesce  — nemesis stops; all stable-owner workers restart and recover;
+                  grace period elapses
     4. check    — run all four invariant checkers against final DB state
     5. teardown — kill all workers
 
@@ -19,13 +19,7 @@
     clojure -X:dev:jdbc:jepsen intemporal.jepsen.runner/run \\
       :workers 4 :duration 60 :no-kill true
 
-  Expected outcome with the current (unfixed) codebase:
-    checker liveness              -> FAIL  (bug 1.1 / 1.3)
-    checker signal-consumed       -> FAIL  (bug 2.1, intermittent)
-    checker history-integrity     -> FAIL  (bug 1.2, if concurrent-start runs)
-    checker cancellation-liveness -> FAIL  (bug 2.3)
-
-  After the Phase A + B + C fixes from improvements.md, all four should PASS."
+  Both the no-kill baseline and the kill/restart run must pass all invariants."
   (:require
    [clojure.pprint :as pp]
    [intemporal.jepsen.checker :as checker]
@@ -52,7 +46,7 @@
 (defn- start-generator!
   "Launches 3 submit threads + 1 cancel thread + 1 observe thread.
   Returns a 0-arity stop fn."
-  [{:keys [db-spec history test-run submit-rps]
+  [{:keys [store db-spec history test-run submit-rps]
     :or   {submit-rps 5}}]
   (let [pool          (Executors/newFixedThreadPool 5)
         running?      (atom true)
@@ -83,29 +77,41 @@
                                   seq)]
               (when candidates
                 (let [wf-id (rand-nth candidates)
-                      op    (client/invoke-cancel db-spec test-run wf-id)]
+                      op    (client/invoke-cancel store db-spec test-run wf-id)]
                   (client/record-op! history (assoc op :process 98 :f :cancel)))))
             (catch Throwable t (log/log! :warn (str "cancel failed: " t))))
           (Thread/sleep 3000))))
 
-    ;; 1 rapid-signal thread — immediately signals rapid-signal workflows
+    ;; 1 signal thread — sends each signal-wait/rapid-signal workflow exactly
+    ;; once. Repeated sends would legitimately leave surplus inbox rows after a
+    ;; workflow consumes its one expected signal and terminates.
     (.submit pool ^Runnable
       (fn []
         (while @running?
           (try
-            (let [candidates (->> @history
+            (let [already-signalled (->> @history
+                                         (filter #(and (= :signal (:f %))
+                                                       (= :ok (:type %))))
+                                         (keep #(get-in % [:value :workflow-id]))
+                                         set)
+                  candidates (->> @history
                                   (filter #(and (= :submit (:f %))
                                                 (= :ok (:type %))
-                                                (= :rapid-signal
-                                                   (get-in % [:value :wf-type]))))
-                                  (keep #(get-in % [:value :workflow-id]))
+                                                (#{:signal-wait :rapid-signal}
+                                                  (get-in % [:value :wf-type]))))
+                                  (remove #(already-signalled
+                                             (get-in % [:value :workflow-id])))
                                   seq)]
               (when candidates
-                (let [wf-id (rand-nth candidates)
-                      op    (client/invoke-signal db-spec test-run wf-id "immediate")]
+                (let [candidate (rand-nth candidates)
+                      wf-id     (get-in candidate [:value :workflow-id])
+                      signal    (case (get-in candidate [:value :wf-type])
+                                  :signal-wait "go"
+                                  :rapid-signal "immediate")
+                      op        (client/invoke-signal store db-spec test-run wf-id signal)]
                   (client/record-op! history (assoc op :process 97 :f :signal)))))
-            (catch Throwable t (log/log! :warn (str "rapid-signal failed: " t))))
-          ;; Very short sleep to maximise chance of hitting the race window.
+            (catch Throwable t (log/log! :warn (str "signal failed: " t))))
+          ;; A short interval still exercises signal/park overlap.
           (Thread/sleep 50))))
 
     (fn stop-gen []
@@ -118,7 +124,7 @@
 ;; Nemesis loop
 
 (defn- start-nemesis!
-  [{:keys [owners history db-url db-spec test-run repo-root no-kill?
+  [{:keys [store owners history db-url db-spec test-run repo-root no-kill?
            nemesis-min-ms nemesis-jitter-ms min-alive]
     :or   {nemesis-min-ms 3000 nemesis-jitter-ms 6000 min-alive 2}}]
   (let [running? (atom (not no-kill?))
@@ -142,7 +148,8 @@
                                            :repo-root    repo-root
                                            :min-alive    min-alive})
                            ;; After any kill, signal the dead workflows (bug 1.1 probe).
-                           (nemesis/signal-dead-workflows! {:db-spec  db-spec
+                           (nemesis/signal-dead-workflows! {:store    store
+                                                            :db-spec  db-spec
                                                             :test-run test-run
                                                             :owners   owners
                                                             :history  history}))
@@ -177,7 +184,8 @@
   (let [test-run (str "run-" (System/currentTimeMillis))
         owners   (mapv #(format "jepsen-%02d-%s" % test-run) (range workers))
         db-spec  (jdbc-spec db-url)
-        history  (atom [])]
+        history  (atom [])
+        client-store (jdbc-store/create-store db-url :checked? false)]
 
     (println "\n=== intemporal Jepsen run" test-run "===")
     (println (format "workers=%d  duration=%ds  no-kill=%s  grace=%ds"
@@ -195,11 +203,13 @@
     (try
       ;; --- 2. active phase ---
       (println (format "[active] running %ds with chaos=%s" duration (not no-kill)))
-      (let [stop-gen (start-generator! {:db-spec    db-spec
+      (let [stop-gen (start-generator! {:store      client-store
+                                        :db-spec    db-spec
                                         :history    history
                                         :test-run   test-run
                                         :submit-rps submit-rps})
-            stop-nem (start-nemesis!   {:owners          owners
+            stop-nem (start-nemesis!   {:store           client-store
+                                        :owners          owners
                                         :history         history
                                         :db-url          db-url
                                         :db-spec         db-spec
@@ -215,9 +225,9 @@
         (stop-nem))
 
       ;; --- 3. quiesce ---
-      ;; Restart every worker.  This proves bug 1.3: restarting does NOT
-      ;; auto-resume workflows — no recovery poller exists.
-      (println "[quiesce] restarting all workers (proves no auto-resume on restart)")
+      ;; Restart every stable owner. Engine construction performs recovery before
+      ;; its normal claim loop begins.
+      (println "[quiesce] restarting all stable-owner workers for recovery")
       (nemesis/ensure-all-alive! {:owners owners :db-url db-url
                                   :test-run test-run :repo-root repo-root})
       (println (format "[quiesce] grace period: %ds" grace-s))
@@ -244,7 +254,8 @@
       (finally
         ;; --- 5. teardown ---
         (println "[teardown] killing workers")
-        (db/kill-all!)))))
+        (db/kill-all!)
+        (.close ^java.lang.AutoCloseable client-store)))))
 
 (defn -main [& args]
   (let [opts (when (seq args) (read-string (first args)))

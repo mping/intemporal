@@ -1,7 +1,7 @@
 (ns intemporal.tests.jepsen.bug-2-3-test
   "Bug 2.3 — Cancellation reaching a workflow sleeping in wait-for-signal.  REGRESSION GUARD.
 
-  Root cause (improvements.md §2.3) — now FIXED (Phase A2):
+  Former root cause, now fixed:
     cancel-workflow set the cancelled flag but did nothing to wake a workflow
     parked on wait-for-signal.  Such a workflow never re-entered its loop, so
     check-cancelled! never fired and the cancellation was silently ignored —

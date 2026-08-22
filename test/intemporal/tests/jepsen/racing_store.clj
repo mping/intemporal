@@ -25,7 +25,6 @@
 (defrecord RacingStore [inner gate-nil gate-sent armed?]
   p/IStore
   (load-history            [_ wf-id]         (p/load-history inner wf-id))
-  (save-event              [_ wf-id ev]      (p/save-event inner wf-id ev))
   (save-events             [_ wf-id evs]     (p/save-events inner wf-id evs))
   (save-events-and-wake!   [_ wf-id evs]     (p/save-events-and-wake! inner wf-id evs))
   (find-event              [_ wf-id et sq]   (p/find-event inner wf-id et sq))
@@ -57,7 +56,6 @@
 (defrecord ParkRacingStore [inner fired? signal-name signal-data]
   p/IStore
   (load-history             [_ wf-id]       (p/load-history inner wf-id))
-  (save-event               [_ wf-id ev]    (p/save-event inner wf-id ev))
   (save-events              [_ wf-id evs]   (p/save-events inner wf-id evs))
   (save-events-and-wake!    [_ wf-id evs]   (p/save-events-and-wake! inner wf-id evs))
   (find-event               [_ wf-id et sq] (p/find-event inner wf-id et sq))

@@ -1,5 +1,5 @@
 (ns intemporal.tests.engine.executor-wiring-test
-  "Regression test for kimi.md improvement #17 (bugs E7 + E8): executor wiring.
+  "Regression tests for bounded executor wiring and backpressure.
 
    E7 — the `:threads` option never reached the executor. `make-workflow-engine`
    passed `:threads`, but `make-vthreads-executor` destructures `:max-concurrent`
@@ -110,6 +110,26 @@
                           (.await release)
                           :released)
                         :name "blocker"))
+
+(deftest test-submit-timeout-option-reaches-runtime
+  (testing ":submit-timeout-ms is a real public engine option"
+    (let [seen (atom nil)
+          fake-executor (reify p/IActivityExecutor
+                          (execute-activity [_ _ _ _])
+                          (execute-activities-parallel [_ _])
+                          (shutdown-executor [_ _])
+                          (shutdown? [_] false))]
+      (with-redefs [runtime/make-vthreads-executor
+                    (fn [_registry & opts]
+                      (reset! seen (apply hash-map opts))
+                      fake-executor)]
+        (let [engine (intemporal/make-workflow-engine
+                       :worker? false
+                       :submit-timeout-ms 1234)]
+          (try
+            (is (= 1234 (:submit-timeout-ms @seen)))
+            (finally
+              (intemporal/shutdown-engine engine))))))))
 
 ;; ============================================================================
 ;; E7 — the :threads option reaches the executor

@@ -30,52 +30,29 @@
   ;; cljs.analyzer/rewrite-cljs-aliases rewrites clojure.spec.alpha ->
   ;; cljs.spec.alpha automatically, so no reader conditional is needed here.
   (:require
-   [clojure.spec.alpha :as s]))
+   [clojure.spec.alpha :as s]
+   [intemporal.internal.domain :as domain]))
 
 ;; ============================================================================
 ;; Canonical event-type registry
 ;; ============================================================================
 
-(def event-types
-  "The canonical set of event-type keywords used in workflow history.
-
-   Supersedes the (dead, incomplete) `intemporal.internal.events` namespace.
-   Unlike that one, this set is load-bearing — it is the `::event-type`
-   predicate — so it cannot silently drift out of date."
-  #{:activity-scheduled :activity-completed :activity-failed :activity-attempt-failed
-    :async-started :async-completed :async-failed :join-any-completed
-    :timer-scheduled :timer-fired
-    :signal-wait-scheduled :signal-received :signal-wait-completed
-    :child-workflow-scheduled :child-workflow-completed :child-workflow-failed
-    :workflow-started :workflow-completed :workflow-failed
-    :workflow-cancelled :workflow-cancelling :workflow-terminated
-    :run-once-completed})
+(def event-types domain/event-types)
 
 (def exception-kinds
   "Stable exception classifications written by `intemporal.internal.error/exception-kind`."
   #{:cancelled :rejected :activity-timeout :activity-interrupted
     :activity-failed :async-failed :suspension})
 
-(def workflow-statuses
-  "Values `get-workflow-status` may return, on every implementation."
-  #{:not-found :running :completed :failed :cancelled :terminated})
+(def workflow-statuses domain/workflow-statuses)
 
-(def workflow-run-states
-  "Durable scheduler states. These are intentionally independent from the
-   public workflow status, where all non-terminal states still read :running."
-  #{:runnable :running :waiting :terminal})
-
-(def parent-close-policies
-  "Values a child workflow's parent-close-policy may take."
-  #{:cascade-cancel :abandon :terminate})
+(def parent-close-policies domain/parent-close-policies)
 
 ;; ============================================================================
 ;; Scalars
 ;; ============================================================================
 
 (s/def ::workflow-id       string?)
-(s/def ::owner-id          string?)
-(s/def ::run-state         workflow-run-states)
 (s/def ::wake-version      nat-int?)
 
 ;; int?, NOT nat-int? — :workflow-started uses the -1 sentinel.
@@ -104,7 +81,6 @@
 (s/def ::child-workflow-id string?)
 (s/def ::child-id          string?)
 (s/def ::parent-id         string?)
-(s/def ::id                string?)
 (s/def ::signal-id         (s/nilable string?))
 (s/def ::tracecontext      any?)
 
@@ -115,7 +91,6 @@
 ;; User payloads: deliberately unconstrained. See rule 3.
 (s/def ::result            any?)
 (s/def ::payload           any?)
-(s/def ::data              any?)
 (s/def ::args              (s/nilable sequential?))
 
 (s/def ::event-type        event-types)
@@ -207,7 +182,7 @@
           :opt-un [::result ::duration-ms ::attempts ::timestamp]))
 
 (defmethod event-spec :activity-attempt-failed [_]
-  ;; Durable retry state (X8): one per consumed attempt, written before the
+  ;; Durable retry state: one per consumed attempt, written before the
   ;; backoff. :attempts is the running total across drives — not a per-attempt
   ;; marker — and :will-retry records whether the policy granted another, which
   ;; is what lets a resume tell an exhausted budget from an interrupted one.
@@ -305,8 +280,6 @@
   (s/keys :req-un [::event-type ::seq]
           :opt-un [::workflow-id ::timestamp]))
 
-;; --- Internal utility events ---
-
 (defmethod event-spec :run-once-completed [_]
   (s/keys :req-un [::event-type ::seq]
           :opt-un [::result ::timestamp]))
@@ -326,11 +299,8 @@
 
 ;; `add-signal` accepts an arbitrary payload at the store boundary: only
 ;; core/send-signal applies the {:id :payload} envelope, and tests call
-;; p/add-signal directly with bare maps. So the envelope is a *core*
-;; convention, not a *store* contract — ::signal-envelope is defined for
-;; documentation and deliberately not asserted by any implementation.
+;; p/add-signal directly with bare maps.
 (s/def ::signal-data any?)
-(s/def ::signal-envelope (s/keys :req-un [::id ::payload]))
 
 ;; Keys are signal names, normalized to strings at the API boundary (see
 ;; ::signal-name), so all three implementations agree.
@@ -339,8 +309,6 @@
 
 (s/def ::child-entry (s/keys :req-un [::child-id ::parent-seq ::policy ::status]))
 (s/def ::children    (s/coll-of ::child-entry :kind sequential?))
-
-(s/def ::pending-ids (s/coll-of ::workflow-id :kind sequential?))
 
 (s/def ::drive-claim (s/keys :req-un [::workflow-id ::wake-version]))
 (s/def ::drive-claims (s/coll-of ::drive-claim :kind sequential?))
@@ -376,10 +344,8 @@
    The value comes last so a check reads as the final step of a `->>` pipeline,
    which is how the store implementations use it:
 
-       (->> (:workflows @state)
-            (filter due?)
-            (mapv first)
-            (check! ::pending-ids))
+       (->> events
+            (check! ::events))
 
    A no-op unless assertions are enabled — see the namespace docstring. On
    violation the thrown ex-info carries `s/explain-data` plus the spec keyword.

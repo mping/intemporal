@@ -119,15 +119,16 @@
 
     (let [workflow-id "async-retry-durability-2"
           st          (store/create-store)
-          engine      (intemporal/make-workflow-engine :store st :threads 2)
+          engine      (intemporal/make-workflow-engine
+                        :store st :threads 2
+                        :owner-id "async-retry-parking-worker"
+                        :poll-ms 5 :workflow-concurrency 1)
           start       (System/currentTimeMillis)]
 
       (intemporal/submit-workflow engine async-retry-workflow [1]
                                   :workflow-id workflow-id)
-      (let [stop (intemporal/start-worker engine :owner-id "async-retry-parking-worker"
-                   :poll-ms 5 :workflow-concurrency 1)]
-        (u/wait-until #(seq (history-events st workflow-id :activity-attempt-failed)) 5000)
-        (stop))
+      (u/wait-until #(seq (history-events st workflow-id :activity-attempt-failed)) 5000)
+      (intemporal/shutdown-engine engine)
 
       (is (= 1 (count @invocation-log)) "exactly one attempt ran before the park")
       (is (< (- (System/currentTimeMillis) start) backoff-ms)
@@ -142,7 +143,7 @@
                           workflow-id))
           "a workflow whose async retry is not due must be excluded from worker claims")
 
-      (intemporal/shutdown-engine engine))))
+      )))
 
 ;; ============================================================================
 ;; 3. The async timeout now bounds ONE attempt, not the whole sequence

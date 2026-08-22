@@ -1,5 +1,5 @@
 -- Jepsen test side-channel tables.
--- Applied by the Jepsen runner (not by make-jdbc-store) against the same
+-- Applied by the Jepsen runner (not by the main JDBC store factory) against the same
 -- Postgres instance as intemporal itself.
 
 -- Work queue: the test client inserts workflow specs here; worker JVMs poll and

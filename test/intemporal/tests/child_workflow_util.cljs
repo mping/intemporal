@@ -26,9 +26,8 @@
   "Run `body-fn` (1-arg: the engine -> promise) with a worker driving `store`; tear
    down when the promise settles. Returns the promise."
   [store body-fn]
-  (let [engine (intemporal/make-workflow-engine :store store :threads 2)
-        stop   (intemporal/start-worker engine :poll-ms 20)]
+  (let [engine (intemporal/make-workflow-engine :store store :threads 2 :poll-ms 20)]
     (-> (body-fn engine)
-        (prom/finally (fn [_ _] (stop) (intemporal/shutdown-engine engine))))))
+        (prom/finally (fn [_ _] (intemporal/shutdown-engine engine))))))
 
 (defn in-memory [] (store/create-store))

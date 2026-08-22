@@ -12,7 +12,9 @@
   (:require
    [cljs.test :refer-macros [deftest is testing]]
    [clojure.spec.alpha :as s]
-   [intemporal.spec :as spec]))
+   [intemporal.spec :as spec]
+   [intemporal.store :as store]
+   [intemporal.store.checked :as checked]))
 
 (s/check-asserts true)
 
@@ -77,3 +79,12 @@
     (s/check-asserts false)
     (is (= {:bogus true} (spec/check! ::spec/event {:bogus true})))
     (s/check-asserts true)))
+
+(deftest checked-store-construction-policy
+  (s/check-asserts true)
+  (is (checked/checked-store? (store/create-store)))
+  (is (not (checked/checked-store? (store/create-store :checked? false))))
+  (s/check-asserts false)
+  (is (not (checked/checked-store? (store/create-store))))
+  (is (checked/checked-store? (store/create-store :checked? true)))
+  (s/check-asserts true))

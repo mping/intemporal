@@ -19,7 +19,7 @@ Key mechanisms:
 - **Sequence numbers**: each activity/operation gets a monotonic sequence number for deterministic replay.
 - **Suspensions**: workflows suspend (waiting for a signal or timer) and resume later; suspension control flow uses `Error` subclasses on the JVM (bypasses `catch Exception`) and plain `deftype`s on CLJS (bypasses `catch js/Error`).
 - **Pending events**: during execution, events are buffered in the workflow context and atomically saved to the store.
-- **Ownership / workers**: two execution models — `start-workflow` (caller-driven, blocking) and `start-worker` + `submit-workflow` (worker-driven, ownership claims in the store). Never mix both on the same workflow id (double-driving).
+- **Ownership / engine**: `make-workflow-engine` actively starts one recovery worker. Both blocking `start-workflow` and non-blocking `submit-workflow` go through durable ownership claims; `start-worker` is not a public API. Use a stable `:owner-id` for restart recovery and never run two live processes with the same identity.
 
 ## Technology Stack
 
@@ -46,29 +46,31 @@ intemporal/
 ├── src/intemporal/            # Main source (dual CLJ/CLJS where possible)
 │   ├── core.cljc              # Public API: stub, stub-protocol, defn-workflow,
 │   │                          # start-workflow, resume-workflow, submit-workflow,
-│   │                          # start-worker, make-workflow-engine, with-workflow-engine,
+│   │                          # make-workflow-engine, shutdown-engine, with-workflow-engine,
 │   │                          # wait-for-signal, send-signal, sleep, async, join,
 │   │                          # run-child-workflow(-async/-detached), saga, compensate
-│   ├── protocol.cljc          # IStore, IActivityExecutor, IScheduler, IWorkflowObserver
+│   ├── protocol.cljc          # IStore, IActivityExecutor, IWorkflowObserver
 │   ├── spec.cljc              # clojure.spec definitions for the IStore boundary
 │   ├── store.cljc             # InMemoryStore + create-store factory
 │   ├── store/checked.cljc     # CheckedStore decorator validating IStore values against spec
 │   ├── store/jdbc.clj         # PostgreSQL/MariaDB store (:jdbc alias; Migratus migrations)
 │   ├── store/fdb.clj          # FoundationDB store (:fdb alias)
-│   ├── observer.cljc          # Observer factories (noop, logging); observer/otel on JVM
+│   ├── observer.cljc          # Single-event observer factories (noop, logging, composite)
 │   ├── tracing.clj            # OpenTelemetry tracing (JVM only)
-│   ├── utils.cljc
+│   ├── utils.cljc             # Compatibility time helper
 │   └── internal/              # Implementation — do not depend on this from outside
 │       ├── context.cljc       # Dynamic workflow context, seq counters, blet/bthen macros
-│       ├── execution.clj/.cljs    # Workflow execution engine (platform-specific)
-│       ├── runtime.clj/.cljs      # Default IActivityExecutor + IScheduler (platform-specific)
+│       ├── clock.cljc         # Engine wall-clock boundary
+│       ├── domain.cljc        # Shared event/status/close-policy semantics
+│       ├── execution/common.cljc  # Cross-platform synchronous execution helpers
+│       ├── execution.clj/.cljs    # Platform-specific execution mechanics
+│       ├── runtime.clj/.cljs      # Default IActivityExecutor (platform-specific)
 │       ├── activity.cljc      # Activity registration/metadata
 │       ├── error.cljc         # Suspensions, interruptions, rejections, cancellations
 │       ├── logging.cljc       # Structured logging via telemere
 │       ├── macros.cljc        # stub-protocol macro
 │       ├── workflow_registry.cljc
 │       ├── codec.clj          # Store value encoding/decoding
-│       └── fns/start_workflow.clj/.cljs  # Workflow start logic (platform-specific)
 ├── test/
 │   ├── intemporal/tests/           # Main test suites (many in .clj + .cljs pairs)
 │   │   ├── crash/                  # Crash-recovery scenario tests
@@ -76,24 +78,20 @@ intemporal/
 │   │   ├── runtime/                # Runtime-level tests
 │   │   ├── store/                  # Store conformance suite (store_test.clj, test_suite.clj)
 │   │   ├── jepsen/                 # Deterministic per-scenario bug guard tests
-│   │   ├── bench/                  # Store benchmarks
 │   │   └── utils.cljc              # Test utilities
 │   └── intemporal/jepsen/          # Forked-JVM chaos harness (runner, worker, nemesis…)
-├── dev/verify_bugs.clj        # Standalone bug reproducer (JDBC + FDB)
 ├── build/build.clj            # tools.build tasks
-├── doc/                       # Browser demo sources (shadow-cljs :doc build → public/)
-├── public/                    # Static demo site (deployed to GitHub Pages)
+├── doc/                       # Browser demo sources + handwritten static HTML
 ├── resources/migrations/      # Migratus migrations (postgres/, mariadb/)
 ├── docker/                    # OTel collector config, FDB init scripts
 ├── deps.edn                   # Dependencies and aliases
 ├── tests.edn                  # Kaocha configuration
-├── shadow-cljs.edn            # CLJS builds: :doc (browser), :node (tests), :dev
+├── shadow-cljs.edn            # CLJS builds: :doc (browser), :node (tests)
 ├── docker-compose.yaml        # Local infra: jaeger, otel-collector, foundationdb, postgres, mariadb
 ├── Earthfile                  # CI build (Earthly)
 ├── architecture.md            # Deep-dive design doc (lifecycle, engine internals)
 ├── DEVELOPMENT.md             # Contributor setup guide
-├── README.md                  # Usage documentation
-└── CLAUDE.md                  # Agent guidance (kept in sync with this file)
+└── README.md                  # Usage documentation
 ```
 
 ## Build and Test Commands
@@ -138,17 +136,15 @@ clojure -M:nrepl          # nREPL server on port 7888
 
 ```bash
 clojure -T:build compile-main   # AOT-compile main namespaces
-clojure -T:build compile-dev    # AOT-compile dev namespaces
 clojure -T:build jar            # Build target/intemporal.jar
 npx shadow-cljs compile node    # Compile CLJS test build
-npx shadow-cljs watch doc       # Local browser demo at http://localhost:8000
+bin/build-doc                   # Rebuild generated public/ demo output
 ```
 
 ### Linting
 
 ```bash
-clj-kondo --parallel --lint src
-clj-kondo --parallel --lint test
+clj-kondo --parallel --lint src test build dev deps.edn resources
 ```
 
 CI also lints `deps.edn` and `resources`. Config is in `.clj-kondo/config.edn` (custom `lint-as` mappings for project macros).
@@ -175,7 +171,7 @@ docker compose up -d postgresql foundation   # PG on 5432, FDB on 4500
 
 Two distinct things live under the "jepsen" name:
 
-1. **Per-scenario bug guard tests** — `test/intemporal/tests/jepsen/`: deterministic single-JVM tests, one namespace per known failure mode, each exercising InMemory + JDBC + FDB stores. Fixed bugs assert correct behaviour; unfixed bugs assert the buggy behaviour they still exhibit. `racing_store.clj` is a shared `IStore` wrapper that deterministically reproduces a signal race.
+1. **Per-scenario bug guard tests** — `test/intemporal/tests/jepsen/`: deterministic single-JVM regression tests, one namespace per former failure mode, each exercising InMemory + JDBC + FDB stores. `racing_store.clj` is a shared `IStore` wrapper that deterministically reproduces a signal race.
 
    ```bash
    bin/kaocha :in-memory --focus intemporal.tests.jepsen.bug-2-1-test
@@ -188,8 +184,6 @@ Two distinct things live under the "jepsen" name:
    docker compose up -d postgresql
    clojure -X:dev:jdbc:jepsen intemporal.jepsen.runner/run :workers 4 :duration 120
    ```
-
-Standalone reproducer: `clojure -X:dev:jdbc:fdb verify-bugs/run` (`dev/verify_bugs.clj`).
 
 ### deps.edn aliases
 
@@ -211,7 +205,7 @@ Standalone reproducer: `clojure -X:dev:jdbc:fdb verify-bugs/run` (`dev/verify_bu
 - File names use **underscores** (`signal_test.clj`); namespaces use **hyphens** (`signal-test`). When focusing tests by namespace, always use hyphens.
 - Dual-target design: share code in `.cljc` where possible; platform-specific code lives in paired `.clj`/`.cljs` files (e.g. `internal/execution.clj` vs `execution.cljs`).
 - Cross-platform macros use `net.cgrand/macrovich`.
-- JVM execution uses virtual threads with blocking calls; CLJS uses promise chains (promesa). On CLJS, use the internal context macros `blet`/`bthen`/`bfinally`/`bloop` (from `intemporal.internal.context`) to restore the dynamic `*workflow-context*` binding inside promise callbacks.
+- JVM execution uses virtual threads with blocking calls; CLJS uses promise chains (promesa). On CLJS, use the internal context macros `blet`/`bthen`/`bfinally` (from `intemporal.internal.context`) to restore the dynamic `*workflow-context*` binding inside promise callbacks.
 - CLJS sagas must `(catch :default e …)` and explicitly rethrow engine suspensions: `(when (intemporal/suspension? e) (throw e))`.
 - When adding clj-kondo noise for new macros, extend `.clj-kondo/config.edn` `lint-as` mappings.
 
@@ -228,7 +222,7 @@ Standalone reproducer: `clojure -X:dev:jdbc:fdb verify-bugs/run` (`dev/verify_bu
 ## Deployment / CI
 
 - **CI** (`.github/workflows/ci.yaml`): runs `earthly -P +test` (see `Earthfile`) with docker-compose services, then posts LCOV coverage comments. The Earthfile also has `+lint`, `+build-main`, `+build-jar`, `+build-cljs` targets.
-- **Demo site**: `.github/workflows/static.yml` deploys `public/` to GitHub Pages on pushes to `main`/`doc` (https://mping.github.io/intemporal/). Rebuild JS with `npx shadow-cljs release doc` before relying on changed demo code (note: the Pages workflow does not build JS — a known TODO).
+- **Demo site**: `.github/workflows/static.yml` runs `bin/build-doc` and deploys its generated `public/` output to GitHub Pages on pushes to `main`/`doc` (https://mping.github.io/intemporal/). Do not commit `public/`.
 - **JAR**: `clojure -T:build jar` → `target/intemporal.jar`.
 
 ## Security Considerations
@@ -242,4 +236,3 @@ Standalone reproducer: `clojure -X:dev:jdbc:fdb verify-bugs/run` (`dev/verify_bu
 
 - Always run `grep` with `--color=never`.
 - `architecture.md` is the authoritative deep-dive on the engine internals (lifecycle states, run-workflow-internal loop, store protocols) — read it before making engine changes.
-- `kimi.md`, `fable.md`, `sonnet.md`, `issues.md` are working notes from previous AI-agent sessions; treat them as historical context, not ground truth.

@@ -93,13 +93,13 @@
     (is (= :running (p/get-workflow-status store wid))
         "workflow is durably suspended on the timer after the crash")
     ;; A worker on a fresh engine picks it up once the timer is due.
-    (let [e2   (intemporal/make-workflow-engine :store store :threads 2)
-          stop (intemporal/start-worker e2 :poll-ms 50 :owner-id "trec-w")]
+    (let [e2 (intemporal/make-workflow-engine :store store :threads 2
+                                              :poll-ms 50 :owner-id "trec-w")]
       (try
         (is (= :completed (await-status store wid :completed 5000))
             "worker resumed the crashed timer workflow once it came due (C2 recovery)")
         (is (= 25 (intemporal/get-workflow-result store wid)) "8*3 + 1 = 25")
-        (finally (stop) (intemporal/shutdown-engine e2))))))
+        (finally (intemporal/shutdown-engine e2))))))
 
 (deftest timer-recovery-in-memory
   (testing "InMemoryStore"

@@ -160,29 +160,37 @@
                         (error/activity-failed-exception
                           "intemporal.tests.crash.retry-durability-test/always-fails-activity"
                           (ex-info "Simulated permanent activity failure" {:x 1})))
-          engine      (intemporal/make-workflow-engine :store st :threads 2)
-          _           (intemporal/submit-workflow engine retry-workflow [1]
+          client      (intemporal/make-workflow-engine
+                        :store st :threads 2 :worker? false)
+          _           (intemporal/submit-workflow client retry-workflow [1]
                         :workflow-id workflow-id)
           _           (p/save-event
                         st workflow-id
                         (a/attempt-failed-event
                           0 "intemporal.tests.crash.retry-durability-test/always-fails-activity"
                           max-attempts last-error 5 false nil))
-          result      (drive-to-terminal engine workflow-id)]
-      (intemporal/shutdown-engine engine)
+          engine      (intemporal/make-workflow-engine
+                        :store st :threads 2
+                        :owner-id "spent-budget-worker"
+                        :poll-ms 5 :workflow-concurrency 1)]
+      (try
+        (let [result (intemporal/await-workflow engine workflow-id :timeout-ms 5000)]
 
-      (is (empty? @invocation-log)
-          (str "the budget was already spent, so the activity must NOT run again; ran "
-               (count @invocation-log) " time(s)"))
-      (is (= :failed (:status result))
-          "the workflow finalizes from the recorded attempt instead of re-running it")
+          (is (empty? @invocation-log)
+              (str "the budget was already spent, so the activity must NOT run again; ran "
+                   (count @invocation-log) " time(s)"))
+          (is (= :failed (:status result))
+              "the workflow finalizes from the recorded attempt instead of re-running it")
 
-      (let [failed (first (history-events st workflow-id :activity-failed))]
-        (is (some? failed) "the recorded attempt is promoted to a terminal :activity-failed")
-        (is (= max-attempts (:attempts failed))
-            "the terminal event carries the recovered attempt total")
-        (is (= (:message last-error) (get-in failed [:error :message]))
-            "the recorded error is replayed as the outcome, not a freshly produced one")))))
+          (let [failed (first (history-events st workflow-id :activity-failed))]
+            (is (some? failed) "the recorded attempt is promoted to a terminal :activity-failed")
+            (is (= max-attempts (:attempts failed))
+                "the terminal event carries the recovered attempt total")
+            (is (= (:message last-error) (get-in failed [:error :message]))
+                "the recorded error is replayed as the outcome, not a freshly produced one")))
+        (finally
+          (intemporal/shutdown-engine engine)
+          (intemporal/shutdown-engine client))))))
 
 ;; ============================================================================
 ;; 3. The backoff is a suspension: it releases the drive and holds its deadline
@@ -194,14 +202,15 @@
 
     (let [workflow-id "retry-durability-test-3"
           st          (store/create-store)
-          engine      (intemporal/make-workflow-engine :store st :threads 2)
+          engine      (intemporal/make-workflow-engine
+                        :store st :threads 2
+                        :owner-id "retry-parking-worker"
+                        :poll-ms 5 :workflow-concurrency 1)
           start       (System/currentTimeMillis)]
 
       (intemporal/submit-workflow engine retry-workflow [1] :workflow-id workflow-id)
-      (let [stop (intemporal/start-worker engine :owner-id "retry-parking-worker"
-                   :poll-ms 5 :workflow-concurrency 1)]
-        (u/wait-until #(some? (attempt-event st workflow-id)) 5000)
-        (stop))
+      (u/wait-until #(some? (attempt-event st workflow-id)) 5000)
+      (intemporal/shutdown-engine engine)
 
       (is (= 1 (count @invocation-log)) "exactly one attempt ran before the park")
       (is (< (- (System/currentTimeMillis) start) backoff-ms)
@@ -223,8 +232,7 @@
                                                  (System/currentTimeMillis))))
                        workflow-id)
             "once the deadline passes the workflow becomes due again"))
-
-      (intemporal/shutdown-engine engine))))
+      )))
 
 ;; ============================================================================
 ;; 4. Sync children keep the inline backoff

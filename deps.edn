@@ -1,9 +1,8 @@
-{:paths      ["src" "target" "resources"]
+{:paths      ["src" "resources"]
  :test-paths ["test"]
 
  :deps       {org.clojure/clojure                      {:mvn/version "1.12.1"}
               com.taoensso/telemere                    {:mvn/version "1.2.1"}
-              thheller/shadow-cljs                     {:mvn/version "2.28.11"}
               com.github.steffan-westcott/clj-otel-api {:mvn/version "0.2.10"}
               ;; cljs (TODO test only?)
               funcool/promesa                          {:mvn/version "11.0.678"}
@@ -27,8 +26,7 @@
                                     "-Dotel.javaagent.debug=false"
                                     "-Dotel.resource.attributes=service.name=intemporal"]
 
-                      :extra-deps  {exoscale/automata                        {:mvn/version "0.1.10"}
-                                    lambdaisland/kaocha                      {:mvn/version "1.91.1392"}
+                      :extra-deps  {lambdaisland/kaocha                      {:mvn/version "1.91.1392"}
                                     lambdaisland/kaocha-cloverage            {:mvn/version "1.1.89"}
                                     lambdaisland/kaocha-junit-xml            {:mvn/version "1.17.101"}
                                     com.lambdaisland/kaocha-cljs             {:mvn/version "1.5.154"}
@@ -54,6 +52,22 @@
               :build {:extra-paths ["build"]
                       :deps        {io.github.clojure/tools.build {:mvn/version "0.10.10"}}
                       :ns-default  build}
+
+              ;; These replace project source paths with tiny consumers and put
+              ;; the built jar on the classpath, proving the artifact is usable
+              ;; without accidentally falling back to src/.
+              :jar-smoke-jvm
+              {:replace-paths ["build/smoke/jvm"]
+               :extra-deps {intemporal/intemporal {:local/root "target/intemporal.jar"}}
+               :main-opts ["-m" "intemporal.build-smoke.jvm"]}
+
+              :jar-smoke-cljs
+              {:replace-paths ["build/smoke/cljs"]
+               :extra-deps {intemporal/intemporal {:local/root "target/intemporal.jar"}
+                            org.clojure/clojurescript {:mvn/version "1.12.42"}}
+               :main-opts ["-m" "cljs.main" "-O" "simple" "-t" "node"
+                           "-o" "target/jar-smoke.js"
+                           "-c" "intemporal.build-smoke.cljs"]}
 
               ;; clojure.spec.check-asserts turns on the inline `intemporal.spec/check!`
               ;; assertions in every IStore implementation, so each existing test

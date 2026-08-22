@@ -1,471 +1,666 @@
-# intemporal: simplification, cleanup & redesign
+# intemporal: simplification, cleanup, and redesign
 
-## Context
+## Goal
 
-`intemporal` is ~6,300 lines of `src/` and ~9,800 lines of `test/`. The engine works and the
-suites are green, but four kinds of drag have accumulated:
+Make the codebase smaller and easier to reason about without weakening the correctness properties
+that make a durable workflow engine useful.
 
-1. **Accidental duplication** — `execution.clj`/`execution.cljs` are 65% identical once
-   docstrings are stripped; the three `IStore` backends re-implement the same *pure* state
-   machine three times; one 383-line test file exists twice and runs twice.
-2. **Abstractions with a single implementation** — a 20-method `IWorkflowObserver` whose only
-   real consumer is two test assertions; a 21-method `IStore` where several methods have zero
-   engine callers.
-3. **Cost with no benefit in production** — every store is wrapped in a `CheckedStore` whose
-   assertions are compiled out unless `clojure.spec.check-asserts=true`, which only the `:test`
-   alias sets. In production it is a 21-method dispatch layer that validates nothing.
-4. **Dead weight** — a `build/build.clj` that cannot run, a chaos harness nothing invokes whose
-   SQL no longer matches the schema, a `dev/` scratch file that no longer compiles, 445 compiled
-   JS artifacts tracked in a gitignored directory, and 1,568 lines of AI review notes at the repo
-   root cited as design specs from 16 production comments.
+The cleanup may break public APIs and edit migrations because the library is not production-ready.
+That freedom is not a reason to remove useful façade functions or persistence guarantees merely to
+hit a line-count or protocol-method target. Every removal must either eliminate unused behaviour or
+replace it with a clearer contract.
 
-Goal: a smaller, more obvious codebase. Backwards compatibility, migrations, and CLJ/CLJS source
-duplication are explicitly **not** constraints.
+The non-negotiable invariants are:
 
-Every file:line below was verified against the working tree at `b400e87`.
+1. Workflow history and scheduling changes that prevent lost wakes remain atomic.
+2. A workflow is driven by at most one owner at a time.
+3. Replay sees one stable history snapshot per pass.
+4. Cancellation visibility does not become weaker accidentally.
+5. CLJ and CLJS keep equivalent workflow semantics where their runtimes permit it.
+6. All store backends implement one explicit ordering, idempotency, signal, child-link, and resource
+   lifecycle contract.
 
----
-
-## Phase 0 — Dead weight (pure deletion, no behaviour change)
-
-**Delete `test/intemporal/jepsen/` entirely** (7 files, 1,024 lines + a 190-line README).
-Nothing runs it: kaocha's `:ns-patterns ["-test$"]` never matches `intemporal.jepsen.*`; the
-Earthfile `test:` target runs only `bin/run-coverage`; CI runs only `earthly -P +test`. Its own
-[README.md:12](test/intemporal/jepsen/README.md#L12) says *"not in CI"*. It is also broken and
-stale: [client.clj:148](test/intemporal/jepsen/client.clj#L148) uses `ON CONFLICT (workflow_id,
-seq)` but the schema's constraint is `UNIQUE (workflow_id, seq, event_type)`, so that statement
-errors at runtime; [worker.clj:78](test/intemporal/jepsen/worker.clj#L78) calls `start-workflow`
-directly, bypassing `submit-workflow` + `start-worker`, so it does not exercise the current
-worker model at all. It is superseded by
-[test/intemporal/tests/jepsen/](test/intemporal/tests/jepsen/) — `bug_1_1`…`bug_2_3`,
-`racing_store.clj`, `wake_version_race_test.clj` — which do end in `-test` and do run.
-
-Also remove: `test/resources/migrations/jepsen/`, the `:jepsen` and `:jepsen-worker` aliases
-([deps.edn:70,75](deps.edn#L70)), and the vestigial `:kaocha.filter/skip-meta [:jepsen]` in
-[tests.edn](tests.edn) (`grep -rn '\^:jepsen' src test` returns zero hits — the comment above it
-already admits it is redundant).
-
-**Delete [dev/verify_bugs.clj](dev/verify_bugs.clj)** (422 lines). It no longer compiles —
-clj-kondo reports `Unresolved var: jdbc-store/make-jdbc-store` and `fdb-store/make-fdb-store`;
-both stores now expose `create-store` ([jdbc.clj:398](src/intemporal/store/jdbc.clj#L398),
-[fdb.clj:493](src/intemporal/store/fdb.clj#L493)). Its docstring points at `improvements.md`,
-deleted long ago. Its `RacingStore` is superseded by the maintained
-[test/intemporal/tests/jepsen/racing_store.clj](test/intemporal/tests/jepsen/racing_store.clj).
-
-**Delete `test/intemporal/tests/bench/`** (5 files, ~485 lines).
-[bench/store_test.clj](test/intemporal/tests/bench/store_test.clj) is **byte-identical** to
-[store/store_test.clj](test/intemporal/tests/store/store_test.clj) except the `ns` line — and it
-matches `-test$`, so the entire store conformance suite currently runs twice per kaocha run. The
-other three are copies of `store/{memory,jdbc,fdb}_test.clj` that call `run-store-tests store 1`;
-`wf-count 1` benchmarks nothing, and the real numbers live in `(comment ...)` blocks.
-
-**Fix [build/build.clj](build/build.clj).** `compile-main` references undefined `base-nses`
-(:12), `compile-dev` references undefined `dev-nses` (:20) — both clj-kondo *errors*. Since `jar`
-calls `compile-main`, both `clj -T:build compile-main` and `clj -T:build jar` fail today. Either
-define the ns lists or drop `:ns-compile` and let `:filter-nses ['intemporal]` do the work; delete
-the unused `clojure.pprint` require and the uncalled `compile-dev`. This is invisible because
-[Earthfile:39-40](Earthfile#L39) lints only `src` and `test`, and CI never invokes
-`+build-main`/`+build-jar`/`+build-all` — **add `build dev` to the lint target and make
-`+build-all` a CI job.**
-
-**Untrack build output.** `public/` is in `.gitignore` yet 445 files / 29 MB are tracked.
-[static.yml](.github/workflows/static.yml) deploys `public/` straight from the checkout and
-carries a `# TODO build js`. Pick one: build it in that workflow and `git rm -r --cached public`,
-or un-ignore it. The same contradiction applies to `bin/` (gitignored, 2 tracked files the
-Earthfile copies) and `.clj-kondo`.
-
-**Config fixes.** [shadow-cljs.edn:23](shadow-cljs.edn#L23) preloads
-`intemporal.tests.node-keepalive` — that namespace does not exist anywhere; :3 sets
-`:init-ns intemporal.dev` — also nonexistent. [deps.edn:1](deps.edn#L1) puts `"target"` on
-`:paths`, so stale AOT classes shadow source. Drop `exoscale/automata` from `:dev` (unused —
-[doc/intemporal/fsm.cljs](doc/intemporal/fsm.cljs) is a vendored 130-line copy).
+This plan was revalidated against `ad2672e`. The source tree is unchanged from the earlier
+`b400e87` audit; `ad2672e` adds the first version of this plan.
 
 ---
 
-## Phase 1 — Dead code and duplicated constants
+## Implementation outcome (2026-08-22)
 
-**Confirmed dead (zero references repo-wide):**
-[activity.cljc:79](src/intemporal/internal/activity.cljc#L79) `get-activity-fn` ·
-[context.cljc:273](src/intemporal/internal/context.cljc#L273) `bloop` ·
-[error.cljc:141](src/intemporal/internal/error.cljc#L141) `*capture-stack-traces?*` (16 lines of
-docstring for a var never `binding`-ed) · [runtime.clj:238](src/intemporal/internal/runtime.clj#L238)
-`:submit-timeout-ms` (unreachable — `make-workflow-engine` never passes it) ·
-[core.cljc:596-597](src/intemporal/core.cljc#L596) the `:protocols` engine key on the JVM
-(write-only; only `execution.cljs` and the `:cljs` branch of `macros.cljc` read it).
+All phases in this plan are implemented in the current worktree. In particular:
 
-**[logging.cljc](src/intemporal/internal/logging.cljc): 6 of 12 macros have zero call sites** —
-`trace`, `info`, `warn`, `fatal`, `errorf`, `fatalf`. Real usage is `infof` (25), `warnf` (15),
-`tracef` (9), `debugf` (7), `with-mdc` (7), `debug` (1), `error` (2). Reduce to what is used.
+- `make-workflow-engine` is now an active resource constructor that owns exactly one recovery
+  worker. The public `start-worker` API and the lazy second-worker path are gone.
+- `start-workflow`, `submit-workflow`, and `resume-workflow` all use durable claims. Supplying the
+  same stable `:owner-id` to a replacement engine recovers that owner's `RUNNING` work during
+  construction; `:worker? false` provides an explicit submission/status-only client mode.
+- Shutdown stops polling, drains claimed JVM drives for five seconds by default (or the supplied
+  grace period), interrupts overruns, releases durable ownership, and then closes the activity
+  executor.
+- Observer delivery is a one-method event protocol, CheckedStore wrapping is construction policy,
+  shared execution logic lives in `internal/execution/common.cljc`, and semantic constants live in
+  `internal/domain.cljc`.
+- The store contract is documented and enforced across InMemory, PostgreSQL, MariaDB, and FDB:
+  committed append order, first-write-wins event identity, durable retry attempts, strict signal
+  FIFO, exclusive claims, wake-version parking, and seeded-then-linked children.
+- The build, packaged JVM/CLJS consumers, demo generation, Pages workflow, and Earthly `+build-all`
+  target are reproducible. Generated `public/` output is no longer source-controlled and is rebuilt
+  with `bin/build-doc`.
+- The forked-JVM chaos harness uses the public store APIs and stable engine owners. Both its no-kill
+  baseline and a forced kill/restart run pass all invariants.
+- Verified remaining correctness and scalability boundaries are maintained in
+  `KNOWN_LIMITATIONS.md`; notably, stable owners still have no lease/fencing mechanism, so one owner
+  id must identify at most one live process.
 
-**Unreachable branches:** the `history-event` fallback at
-[context.cljc:92-94](src/intemporal/internal/context.cljc#L92) — `make-workflow-context` is the
-only context constructor and always sets `:history-index`, so the `if-let` else can never fire;
-collapses a 6-line fn to a `get`. The `(when observer ...)` guard inside `-notify`
-([execution.clj:17-21](src/intemporal/internal/execution.clj#L17)) — `make-composite-observer`
-never returns nil and `make-workflow-engine:1140` always sets `:observer`.
+Final verification:
 
-**Ignored parameters threaded through call sites:**
-[jdbc.clj:158,161](src/intemporal/store/jdbc.clj#L158) `->payload-param`/`<-payload-val` ignore
-`kind` (the comment at :151 says so) across 9 call sites · [fdb.clj:52](src/intemporal/store/fdb.clj#L52)
-`owner-index-key` ignores `root-subspace` across 6 sites · [runtime.clj:71](src/intemporal/internal/runtime.clj#L71)
-binds `retry-policy` and never reads it.
-
-**Dead specs** in [spec.cljc](src/intemporal/spec.cljc): `::owner-id` (:77), `::run-state` (:78),
-`::data` (:118), `::signal-envelope` (:333 — its own docstring admits it is never asserted),
-`::pending-ids` (:343 — no `IStore` method returns pending ids; the `check!` docstring example at
-:379-382 describes a pipeline that no longer exists).
-
-**Single-source the duplicated constants.** `max-iterations 1000` appears in 5 places
-(`core.cljc:592,615,712`, `execution.clj:682`, `execution.cljs:692`); `30000` in 4
-(`core.cljc:1103`, `runtime.clj:216,239`, `runtime.cljs:159` — and the `const` at :1103 is not
-read by either runtime); the parent-close-policy set in 2 (`core.cljc:473` private,
-`spec.cljc:69` public and unreferenced by core); the terminal-event set inline at
-`core.cljc:643,654` and `fdb.clj:113`. [spec.cljc:59-69](src/intemporal/spec.cljc#L59) already
-owns `workflow-statuses` and the policy set and **nothing references either** — make it the home.
+```text
+clj-kondo:                         0 errors, 0 warnings
+JVM full suite:                    178 tests, 1280 assertions, 0 failures
+MariaDB-focused integration:       48 tests, 420 assertions, 0 failures
+ClojureScript suite:               49 tests, 122 assertions, 0 failures
+merged coverage:                   94.6% lines (2484 / 2626)
+JVM and CLJS packaged consumers:   pass
+Earthly +build-all:                pass; demo build has 0 warnings
+chaos no-kill and kill/restart:    all invariants pass
+```
 
 ---
 
-## Phase 2 — Collapse single-implementation abstractions
+## Verified baseline
 
-### 2a. `IWorkflowObserver`: 20 methods → 1
+The following were run before editing the implementation:
 
-[protocol.cljc:88-142](src/intemporal/protocol.cljc#L88) declares 20 methods. There are exactly
-three implementations, all in [observer.cljc](src/intemporal/observer.cljc): `LoggingObserver`
-(135 lines that every one do `(swap! log-atom conj {...})`), `noop-observer` (24 lines of empty
-bodies), `make-composite-observer` (49 lines of `doseq` fan-out). Replace with a single
-`(on-event [observer event])` — or a plain fn, since there is no other state:
+```text
+bin/kaocha :in-memory
+  121 tests, 881 assertions, 0 failures
+
+bin/kaocha :test-cljs
+  42 tests, 103 assertions, 0 failures
+
+node_modules/.bin/shadow-cljs compile node
+  build completed, 0 warnings, tests green
+
+clj-kondo --parallel --lint src test build dev deps.edn
+  2 errors, 8 warnings
+
+clojure -T:build compile-main
+  fails: Unable to resolve symbol: base-nses
+```
+
+The database/FDB integration suites and built-jar smoke tests have not yet been run. Record their
+counts before changing store code.
+
+---
+
+## Phase 0 — Isolate and fix confirmed defects
+
+These are behavioural fixes, not cleanup. Land each with its regression test before moving code.
+
+### 0a. Synchronous child close policy
+
+`run-child-workflow` destructures only `:child-id` and silently drops
+`:parent-close-policy`. Forward both options to `run-child-workflow-async`.
+
+Add CLJ and CLJS tests in which a synchronous child is created with a non-default policy. The test
+must demonstrate the policy's observable effect rather than only inspect an argument.
+
+### 0b. CLJS timeout sentinel collision
+
+`runtime.cljs` races an activity result against `{::timeout true}` and identifies the timeout by
+looking for that key in the returned value. Replace the map sentinel with a unique object checked by
+identity, or reject the timeout promise with a private timeout type.
+
+Add sequential and parallel CLJS tests proving that an activity may return
+`{:intemporal.internal.runtime/timeout true}` unchanged.
+
+### 0c. Repair the build and package, not just AOT compilation
+
+`build/build.clj` references undefined `base-nses` and `dev-nses`. Remove `compile-dev` and the
+unused `clojure.pprint` require. Do not simply drop `:ns-compile` while retaining the current basis:
+that basis includes `:dev`, `test`, and `doc`, whose namespaces also begin with `intemporal`.
+
+Build requirements:
+
+- create a production basis without the `:dev` or `:doc` paths;
+- compile only `src` namespaces, with optional JDBC/FDB dependencies available to the compiler;
+- copy `src` and `resources` into the jar staging directory before AOT compilation;
+- include `.cljc`/`.cljs` sources so the jar remains consumable from CLJS;
+- include both migration trees;
+- avoid placing test or doc namespaces in the jar;
+- make `jar` invoke the compile/copy step exactly once.
+
+Add automated checks that:
+
+- `clojure -T:build compile-main` succeeds;
+- `clojure -T:build jar` succeeds;
+- the jar contains `intemporal/core.cljc` and both migration resources;
+- a fresh JVM using only the jar and published dependencies can run an in-memory workflow;
+- a small CLJS consumer can compile against the jar rather than `src`.
+
+Add `build`, `dev`, `deps.edn`, and `resources` to linting. Run `+build-all` as a CI job alongside
+`+test`; neither replaces the other.
+
+### 0d. Make the demo reproducible
+
+`public/` is ignored but contains 445 tracked files, mostly generated JavaScript. Move the
+handwritten HTML files to a source directory such as `doc/static/`, generate `public/` from those
+files plus `shadow-cljs release doc`, and build it in the Pages workflow before upload. Only then
+untrack generated `public/` output.
+
+Keep `bin/kaocha`, `bin/run-coverage`, and `.clj-kondo/config.edn` tracked. Remove their broad
+ignore rules or add explicit negations; do not untrack build scripts or lint configuration.
+
+---
+
+## Phase 1 — Low-risk hygiene
+
+Keep these changes small and reviewable. Although most are behaviour-preserving, they should not be
+described as a single "pure deletion" commit.
+
+### 1a. Remove duplicate and obsolete local test code
+
+- Delete `test/intemporal/tests/bench/`. `bench/store_test.clj` duplicates
+  `store/store_test.clj` except for its namespace, and the remaining `wf-count 1` tests are neither
+  useful benchmarks nor additional conformance coverage. Record the expected JVM test-count delta.
+- Delete `dev/verify_bugs.clj`; its store constructors no longer exist and its maintained race
+  reproductions live under `test/intemporal/tests/jepsen/`.
+
+Do not claim that `bench/store_test.clj` is the shared store conformance suite. The actual shared
+suite is `test/intemporal/tests/store/test_suite.clj`.
+
+### 1b. Decide the chaos harness explicitly
+
+Do not delete `test/intemporal/jepsen/` as dead code in this phase. It is manually invoked, and a
+forked multi-process chaos test provides coverage that deterministic single-process regression tests
+do not replace.
+
+Treat it as a separate decision and follow-up:
+
+- If multi-process correctness remains a project goal, repair the SQL conflict target, update its
+  ownership/worker model, update the stale expected outcomes, and give it a manual or scheduled CI
+  entry point.
+- If the project intentionally retires stochastic chaos testing, delete the harness, its migrations,
+  and aliases in one explicit commit whose message records the lost capability. Git history is the
+  archive; the deterministic tests are regression guards, not a substitute.
+
+Until that decision is made, label the harness unsupported and broken rather than implying that CI
+runs it. The current worker calls `start-workflow`, which now uses `submit-workflow` plus the managed
+worker; the real mismatch is that the harness does not deliberately exercise stable owner recovery.
+
+### 1c. Remove genuinely unused internals
+
+After a repo-wide reference check, remove:
+
+- `internal.activity/get-activity-fn`;
+- the unused `bloop` context macro;
+- unused logging macros (`trace`, `info`, `warn`, `fatal`, `errorf`, `fatalf`);
+- ignored `kind` parameters from JDBC payload encoding/decoding;
+- the ignored `root-subspace` parameter from `owner-index-key`;
+- the unused `retry-policy` binding in the JVM parallel executor;
+- unused specs such as `::owner-id`, `::run-state`, `::data`, `::signal-envelope`, and
+  `::pending-ids`, including the obsolete `check!` example.
+
+Keep `*capture-stack-traces?*`: it is an intentional debugging capability documented at its
+definition. Keep `:submit-timeout-ms`: it controls bounded-executor backpressure. Instead, expose it
+through `make-workflow-engine` so the public engine options match the runtime options, and test it.
+
+The JVM does not need `:protocols` in its workflow context because the JVM macro registers protocol
+implementations up front. Make the `:protocols` engine/context plumbing CLJS-only; do not describe
+the JVM branch as broken.
+
+### 1d. Simplify configuration
+
+- Remove `"target"` from top-level `:paths` so generated classes cannot shadow source.
+- Remove the unused `exoscale/automata` development dependency.
+- Remove or replace nonexistent shadow-cljs preload/init namespaces. The Node build currently
+  succeeds, so treat the preload as stale configuration rather than a proven build failure.
+- Fix `.gitignore` for the tracked `bin/` and `.clj-kondo` sources.
+
+### 1e. Centralize only semantic constants
+
+Put terminal statuses, terminal event types, and parent-close policies in a small internal domain
+namespace used by core, execution, stores, and specs. Do not make `intemporal.spec` the owner of
+runtime behaviour merely because it already repeats the values.
+
+Keep operational defaults near the component that owns them:
+
+- replay-budget default with the workflow driver;
+- activity timeout with runtime/engine construction;
+- worker poll defaults with worker construction.
+
+Share a default only when multiple call sites are required to mean the same thing.
+
+---
+
+## Phase 2 — Replace the observer surface with one event operation
+
+The existing 20-method observer protocol creates substantial fan-out boilerplate. Replace it with a
+single event-data operation, while preserving an explicit public extension point:
 
 ```clojure
-;; logging
-(fn [ev] (swap! log-atom conj (assoc ev :timestamp (utils/current-time-ms))))
-;; noop
-(constantly nil)
-;; composite
-(fn [ev] (run! #(% ev) obs))
+(defprotocol IWorkflowObserver
+  (on-event [observer event]))
 ```
 
-`observer.cljc` 222 → ~25 lines; `protocol.cljc` −52. The ~40 call sites become map literals,
-which also makes events *data* — serializable and directly matchable in tests.
+Observer events use one documented map schema with at least `:event`, `:workflow-id`, and
+`:timestamp`, plus event-specific fields. Construct the timestamp once at emission so every
+composed observer sees the same event.
 
-Delete `-notify` ([execution.clj:17-21](src/intemporal/internal/execution.clj#L17)) outright: its
-nil-guard is dead (above), and it is `^:private` yet `:refer`'d cross-file from
-[execution.cljs:4](src/intemporal/internal/execution.cljs#L4). Use `ctx/notify-observer`
-([context.cljc:216](src/intemporal/internal/context.cljc#L216)), which additionally catches
-observer exceptions — today a throwing observer breaks the engine at 27 `-notify` sites but not
-the workflow body at 8 `notify-observer` sites.
-
-While here: `make-workflow-engine` defaults `:enable-logging true`, which allocates `(atom [])`
-and appends **every** event forever with no trimming, exposed as `:log`. Its only consumers in the
-repo are two test assertions (`child_workflow_test.clj:112`, `saga_test.clj:233`). Default it off.
-
-### 2b. `CheckedStore`: stop paying for it in production
-
-`spec/check!` ([spec.cljc:373](src/intemporal/spec.cljc#L373)) is a no-op unless
-`(and s/*compile-asserts* (s/check-asserts?))`; only [deps.edn:65](deps.edn#L65) (`:test`) sets it.
-Yet all three factories default `:checked? true`
-([store.cljc:294](src/intemporal/store.cljc#L294), [jdbc.clj:407](src/intemporal/store/jdbc.clj#L407),
-[fdb.clj:500](src/intemporal/store/fdb.clj#L500)) and **nothing in `src/`, `test/` or `dev/` ever
-passes `false`**.
-
-Decide once at construction instead of per call — same CI guarantee, zero prod cost, no test
-changes:
+Introduce a context-independent helper such as:
 
 ```clojure
-(if (spec/asserts-on?) (checked/->CheckedStore store) store)
+(observer/notify! observer event)
 ```
 
-Then `checked/unwrap` ([checked.cljc:109](src/intemporal/store/checked.cljc#L109)) and the
-`AutoCloseable` re-implementation (:103-107) can go once callers stop needing to unwrap.
+It must isolate observer exceptions. `ctx/notify-observer` may obtain the observer from the current
+workflow context and delegate to it; engine code that runs outside the context binding must pass its
+observer explicitly. Do not replace all `-notify` calls directly with `ctx/notify-observer`, because
+suspension processing and finalization run after `replay-once` has left the dynamic binding.
+
+Implement logging, noop, and composite observers over `on-event`. Composite delivery should isolate
+each observer independently so one bad observer does not prevent later observers from receiving the
+event.
+
+Change `:enable-logging` to default `false`. The current logger stores every observer event in an
+unbounded atom; retaining it as an explicit debugging option is useful, but silently enabling it for
+every production engine is not.
+
+Tests must cover:
+
+- the documented shape of every emitted observer event;
+- delivery from both workflow-body and post-binding engine paths;
+- exception isolation at both paths;
+- composite delivery continuing after one observer throws;
+- explicit logging on/off and the `:log` engine value.
+
+Update README examples and option defaults in the same commit.
 
 ---
 
-## Phase 3 — `IStore` redesign: 21 methods → ~8
+## Phase 3 — Remove the no-op CheckedStore layer in normal production
 
-### 3a. Drop the methods that earn nothing
+Make wrapping a construction-time policy without breaking tests, explicit debugging, or resource
+closure:
 
-- **`get-pending-signals`** — **zero** `p/get-pending-signals` calls in `src/` outside the impls
-  themselves. Costs an implementation in each backend plus a spec plus a `CheckedStore` wrapper.
-  Test-only; rebuild it there over a raw scan.
-- **`save-event`** — memory ([store.cljc:79](src/intemporal/store.cljc#L79)) and JDBC
-  ([jdbc.clj:183](src/intemporal/store/jdbc.clj#L183)) are byte-identical
-  `(p/save-events this id [event])`; FDB wrote a *separate* 25-line implementation
-  ([fdb.clj:176-200](src/intemporal/store/fdb.clj#L176)) duplicating `save-events` including a
-  third copy of the terminal-status `case`. The return value is discarded at all 9 call sites.
-- **`find-event`** — memory ([store.cljc:99](src/intemporal/store.cljc#L99)) and FDB
-  ([fdb.clj:245](src/intemporal/store/fdb.clj#L245)) are character-identical `filter` over
-  `load-history`; only JDBC indexes. And [context.cljc:53](src/intemporal/internal/context.cljc#L53)
-  already has a *second* in-memory `find-event` over the loaded snapshot.
-- **`is-cancelled?`** — one engine caller,
-  [context.cljc:189-195](src/intemporal/internal/context.cljc#L189) inside `check-cancelled!`,
-  called from `next-seq!` → **a store round-trip per sequence-number allocation** (13 `next-seq!`
-  sites). On JDBC that is a `SELECT` per workflow operation. Fold into `get-workflow-status` plus a
-  per-drive cached flag.
-
-### 3b. Lift the pure scheduling machine out of the three backends
-
-The `run-state` / `wake-version` / `next-run-at` machine is *pure*, and is already written as pure
-functions in [store.cljc:8-68](src/intemporal/store.cljc#L8) — `normalize-workflow`,
-`wake-workflow-state`, `runnable-or-due?`, `claimable-ids`. Move them to a shared
-`intemporal.store.scheduling` ns. Backends then supply only:
-
-```
-load-history / append-events!   read-schedule / cas-schedule!   scan-eligible
-signals (add/consume)           children (link/list)
+```clojure
+:checked? :auto  ;; default: wrap only when spec/asserts-on?
+:checked? true   ;; always install the wrapper; checks follow the dynamic spec flag
+:checked? false  ;; always return the raw store
 ```
 
-and `save-events-and-wake!`, `park-workflow!`, `wake-workflow`, `requeue-running!`,
-`recover-running!`, `release-owner`, `claim-runnable!` all become backend-agnostic compositions.
+Keep `CheckedStore`'s `AutoCloseable` delegation. A wrapped JDBC store is used with `with-open`, and
+the wrapper must close its inner datasource. Keep `checked/unwrap` while the chaos harness needs the
+JDBC datasource; remove it only after all callers disappear.
 
-This is where the real duplication lives. Terminal-status derivation exists in **7 places**
-(`store.cljc:8`, `jdbc.clj:99`, and four inline `case`s at `fdb.clj:187,205,231,391`); the literal
-`#{"completed" "failed" "cancelled" "terminated"}` in **13** (7 Clojure + 6 SQL at
-`jdbc.clj:137,278,288,347,357,368`); the `{:run-state :runnable :next-run-at nil}` transition in
-**11** (`fdb.clj:66,117,132,141,150,431,446,459`, `store.cljc:44,221,260`). FDB additionally
-carries ~110 lines of hand-rolled index maintenance ([fdb.clj:49-152](src/intemporal/store/fdb.clj#L49))
-that re-derive what SQL gets from `ORDER BY … LIMIT … FOR UPDATE SKIP LOCKED`.
+Add factory-level tests for all three modes, including:
 
-### 3c. Bug — per-backend history ordering disagrees
+- invalid values are rejected in `:auto` mode under the test alias;
+- `:auto` returns a raw store when assertions are disabled;
+- explicit `true` retains the wrapper across a later `s/check-asserts` toggle;
+- explicit `false` bypasses validation;
+- closing a wrapped store closes its closeable inner store.
 
-JDBC orders by `id ASC` (insertion, [jdbc.clj:177](src/intemporal/store/jdbc.clj#L177)); FDB by
-`(sort-by :seq)` ([fdb.clj:173](src/intemporal/store/fdb.clj#L173)); memory by insertion
-([store.cljc:76](src/intemporal/store.cljc#L76)). These are **not** the same order, because
-terminal events use `max-seq + 1` and `:workflow-started` uses `-1`. Pick one contract — order by
-`(seq, event-type)` — and assert it in the shared conformance suite. If `seq` ordering wins,
-`intemporal_history.id SERIAL PRIMARY KEY` becomes pure overhead on top of the existing
-`UNIQUE (workflow_id, seq, event_type)`.
-
-### 3d. Bug — `link-child!` divergence hidden by a loosened spec
-
-[protocol.cljc:57-62](src/intemporal/protocol.cljc#L57) promises it *"create[s] the child as a
-claimable, non-terminal workflow row."* JDBC does ([jdbc.clj:378](src/intemporal/store/jdbc.clj#L378));
-memory ([store.cljc:267](src/intemporal/store.cljc#L267)) and FDB
-([fdb.clj:470](src/intemporal/store/fdb.clj#L470)) do not. The spec was widened to hide it —
-[spec_test.clj:255-257](test/intemporal/tests/store/spec_test.clj#L255) reads *"a just-linked child
-is `:running` on JDBC and `:not-found` elsewhere; both legal."* Make all three create the row,
-then **tighten that assertion back** so it can never silently re-diverge.
-
-### 3e. SQL cleanup (falls out of the above)
-
-- `detect-kind` ([jdbc.clj:46](src/intemporal/store/jdbc.clj#L46)) returns 3 values but every
-  consumer is `(case kind :postgres A B)` and `migrate!` maps `:mysql` and `:mariadb` to the same
-  directory. It is a boolean in disguise → `postgres?`.
-- The claim query is duplicated in full (10 lines each) at
-  [jdbc.clj:277-296](src/intemporal/store/jdbc.clj#L277) for a single `to_timestamp` vs
-  `FROM_UNIXTIME` token. Extract a `->ts` helper.
-- `row-value` ([jdbc.clj:108](src/intemporal/store/jdbc.clj#L108)) papers over
-  qualified-vs-unqualified result keys; `next.jdbc`'s `:builder-fn rs/as-unqualified-lower-maps`
-  removes the need.
-- Schema: `intemporal_signals.created_at` is never selected, ordered by, or written — dead column
-  in both dialects. `idx_intemporal_workflows_status` benefits no query (`get-workflow-status` is a
-  PK lookup; `claim-runnable!` is covered by `idx_..._schedule`, whose Postgres partial predicate
-  *is* the status filter). **Missing on Postgres:** an index on
-  `intemporal_signals(workflow_id, signal_name)` — MariaDB's inline `FOREIGN KEY` creates one
-  implicitly, so `consume-signal` is O(log n) there and a seq scan on Postgres. Migrations are
-  editable in place (explicitly not a constraint here).
-- FDB signal keys are `[currentTimeMillis, random-uuid]`
-  ([fdb.clj:277](src/intemporal/store/fdb.clj#L277)) → FIFO order is non-deterministic within a
-  millisecond, while JDBC pops by `id` and memory pops the vector head. Use a monotonic counter.
+The existing `toggle-is-enabled-in-ci` and `check!-is-wired` tests remain useful, but they do not by
+themselves cover construction-time gating.
 
 ---
 
-## Phase 4 — Engine: extract the verbatim third to `.cljc`
+## Phase 4 — Share the execution engine without mixing in semantic changes
 
-With docstrings, comments and blanks stripped, **356 of ~550 code lines per file are identical**
-between [execution.clj](src/intemporal/internal/execution.clj) (733) and
-[execution.cljs](src/intemporal/internal/execution.cljs) (741). The largest block —
-`execution.clj:428-545` vs `execution.cljs:473-569`, the terminal / parent-child / close-policy
-path (`terminal-status?`, `next-terminal-seq`, `parent-link`, `notify-parent-terminal`,
-`has-children?`, `enforce-close-policies!`, `finish-workflow!`) — differs **only** in 3
-`tracing/finish-workflow-span!` calls and reworded docstrings.
+First land Phase 0 bugs and Phase 2 observer changes. Then extract behaviourally identical,
+synchronous helpers from `execution.clj` and `execution.cljs` into
+`intemporal.internal.execution.common` (`.cljc`).
 
-Move to a shared `.cljc`, with reader conditionals for the tracing calls: `record-attempt!`,
-`continue-decision`/`park-decision`, `park-until-retry!`, `due-asyncs`, `earliest-async-retry`,
-`with-async-retry-deadline`, `async-terminal-failure-events`, `async-completion-events`,
-`spent-budget-events`, `process-timer`, `process-signal`, `process-signal-with-timeout`, the whole
-tier-2 block, `finalize-cancelled`/`finalize-failed`, `run-once`. These are pure event-map builders
-and synchronous store calls — no promise/blocking difference.
+Good initial candidates are:
 
-**Leave duplicated** (genuinely platform-specific, ~250 clj / ~300 cljs lines):
-`execute-workflow-fn`, `attempt-once`/`run-attempt`, `process-pending-activity`,
-`process-pending-asyncs-parallel`, `handle-suspension`, `finalize-completed`, `drive-workflow!`.
+- decision constructors;
+- retry-deadline calculations and async retry selection;
+- event-map constructors;
+- timer and signal store operations that are synchronous on both platforms;
+- terminal status, parent-link, close-policy, and parent-notification helpers;
+- cancellation/failure finalization with reader-conditional tracing;
+- `run-once`.
 
-**Fix the drift the split has already caused** — same state, two names or two behaviours:
+Keep platform-specific:
 
-| Divergence | clj | cljs |
-|---|---|---|
-| retry status keyword | `:retryable-error` (`execution.clj:77`) | `:retry-or-fail` (`execution.cljs:127`) |
-| `:rejected` status | exists, renamed to `:failed` one line later at :106, carries no `:exception` | absent; everything routes through `infrastructure-failure?` |
-| `:protocols` on context | not set (`execution.clj:407-422`) | set (`execution.cljs:452,466`) — yet `macros.cljc:67` reads it on **both** |
-| `start-worker` `:poll-ms` default | 500 (`core.cljc:762`) | 50 (`core.cljc:856`) — and `ensure-worker!` overrides both with a hardcoded 10 at :933,:939 |
-| poll-failure backoff | exponential (`core.cljc:796-798`) | none |
+- workflow function execution and throwable-catching syntax;
+- activity attempt execution;
+- pending activity and parallel async execution;
+- suspension chaining;
+- completed finalization while async work drains;
+- the drive loop and promise/loop mechanics.
 
-The drifted *docstrings* are themselves the hazard: identical code, two divergent explanations.
+Refactor without changing wire event shapes or park/continue decisions. Review the diff by comparing
+the before/after histories for representative workflows on both platforms.
 
-**Also in this phase:**
+Additional local cleanup:
 
-- `execute-workflow-fn` classifies a throwable with the same ~18-line `cond` **three times**
-  (`execution.cljs:43-62`, `:69-84`, `execution.clj:30-49`) → one `classify-failure`.
-- `execution.clj:23-49` calls `(ctx/current-context)` **7×** in one function; the cljs version
-  already binds it once.
-- `run-attempt` takes 10 positional params, and #10 is named `record-attempt!`, **shadowing the
-  ns-level fn defined 10 lines above** (`execution.clj:79`). The caller passes
-  `(partial record-attempt! store workflow-id seq activity-name)` even though `run-attempt`
-  already receives 3 of those 4 args. Pass `store`; delete the partial and the shadowing.
-- `runtime.clj:65-150` `execute-activities-parallel` is 86 lines — a `mapv` whose body is a 40-line
-  `if`/`try` with a fn nested 7 levels deep, then a second `mapv` with five catch clauses. Split
-  into `submit-activity!` / `collect-result`.
-- Three interruption predicates share the same cause-chain loop:
-  `execution.clj/interrupt-error?:574`, `runtime.clj/interrupted-cause?:25`,
-  `error/interruption?:50`. Consolidate to one.
-- `error.cljc` hand-rolls `(if (.-data e) … (ex-data e))` **six times** (`:50,59,68,74,87,158`) —
-  one `(defn- edata [e])` collapses all of them.
-- `RetryPolicy` defrecord ([activity.cljc:94-98](src/intemporal/internal/activity.cljc#L94)) is
-  never used as a type — no `instance?`, no protocol, every read is a keyword lookup. Plain map +
-  defaults.
-- `continue-decision` is a 0-arg fn returning a literal, called 9× per file → `def`.
-- 15 of 18 `defn`s per engine file are used only within the ns → `defn-` (prerequisite for freely
-  changing the signatures above).
-- **Bug:** [runtime.cljs](src/intemporal/internal/runtime.cljs) races `js/Promise` against a
-  `{::timeout true}` sentinel map (`:25,63,96`) and identifies the winner by looking for that key
-  **in the user's result** — an activity returning a map with that key is misread as a timeout. Use
-  a unique object identity or a rejected marker. Its `promise-with-timeout` `(atom nil)` timer cell
-  and the byte-identical promise-building blocks at `:50-59` / `:83-92` go at the same time
-  (~20 of the file's 167 lines).
+- bind the JVM workflow context once in `execute-workflow-fn`;
+- factor the repeated failure-result construction without hiding platform catch differences;
+- pass `store` to `run-attempt` instead of a shadowing `record-attempt!` positional callback;
+- split JVM parallel execution into submission and result-collection helpers;
+- share only the JVM cause-chain walker used by runtime and execution; retain the separate tagged
+  `error/interruption?` predicate;
+- factor CLJS exception-data access into one helper;
+- replace `RetryPolicy` with a plain map if tests confirm no record identity/type behaviour;
+- make namespace-private helpers private after cross-namespace extraction is complete.
+
+Worker defaults are not automatically drift: the JVM and JS scheduling primitives have different
+costs, while `ensure-worker!` intentionally passes an explicit low-latency poll interval. Document
+those roles. Add exponential poll-failure backoff to CLJS if external/remote CLJS stores are a
+supported direction; otherwise leave it out and state that the CLJS store is in-process only.
 
 ---
 
-## Phase 5 — Public API: 31 vars → ~20
+## Phase 5 — Redesign IStore contract-first
 
-[core.cljc](src/intemporal/core.cljc) exports 31 public vars. Reduce to the ~20 that carry weight.
+Do not target an arbitrary method count. The protocol is the atomic persistence boundary; reducing
+it is valuable only when the replacement keeps the same safety and performance properties.
 
-**Near-duplicates to collapse:**
+### 5a. Specify the contract before changing methods
 
-- `run-child-workflow-detached` (:560) vs `run-child-workflow-async` (:526) differ by **exactly one
-  line** — `(->AsyncHandle seq-num)` vs `child-wf-id`; the preceding 12 lines including the
-  `assert` are verbatim. Its docstring is also self-contradictory: *"pass `:parent-close-policy
-  :abandon` (the default here, like async, is `:terminate`)"*.
-- **Bug:** `run-child-workflow` ([core.cljc:470](src/intemporal/core.cljc#L470)) destructures only
-  `:child-id` and forwards only `:child-id` — **`:parent-close-policy` is accepted syntactically
-  and silently discarded**, so the synchronous variant cannot set a close policy at all.
-- `join-all` (:327) is literally `(mapv join handles)`.
-- `get-workflow-history` (:997) is `p/load-history`; `get-workflow-result` (:1002) is a 6-line
-  filter over it.
-- `suspension?` (:1030), `defn-workflow` (:1018), `stub-protocol` (:1012) are one-line re-exports.
-  Note `suspension?` has **zero** uses in `src/`, `test/` or `dev/` but is documented as required
-  CLJS saga API in [README.md:220](README.md#L220) — and `saga_test.cljs` catches `js/Error`
-  directly at :51,:69,:85 without it. Resolve: either it is dead, or that is an untested path.
-- `start-workflow` (:587) = `submit-workflow` + `ensure-worker!` + `await-workflow`;
-  `resume-workflow` (:733) = `wake-workflow` + `ensure-worker!` + `await-workflow`. Three public
-  entry points over one operation. Keep `submit-workflow` + `await-workflow` + `start-workflow` as
-  sugar; drop `resume-workflow`. `start-workflow` also needs a `#?(:clj …)` split purely to append
-  `:workflow-id` to the result map (:603-605) — have `await-workflow` return it.
-- Three terminal predicates (`terminal-status?`:607, `terminal-event?`:652,
-  `terminal-history?`:659) plus the event set written inline at :643 **and** :654.
-- `stub` binds `ctx` at :68 then calls `(ctx/current-context)` again at :129 to pass to
-  `schedule-activity!`, which uses it only for `(:workflow-id ctx)`.
+Add a store-contract section to `architecture.md` covering:
 
-**Unify `start-worker`.** Two independent implementations —
-[core.cljc:742-838](src/intemporal/core.cljc#L742) (JVM, 97 lines: Thread + Semaphore +
-FixedThreadPool) and [:841-920](src/intemporal/core.cljc#L841) (CLJS, 80 lines: setTimeout +
-promesa) — both re-derive the `unresumable` atom, `requeue-registered!`, the failure
-classification, `recover-running!` and `release-owner`. Only the scheduling primitive genuinely
-differs. Extract the shared body over a small platform shim; consolidate the defaults into one map
-(which also fixes the `poll-ms` 500-vs-50 divergence above).
+- which operations are atomic and their crash windows;
+- event identity and what happens when the same identity is saved again;
+- how legitimate repeated activity-attempt events are represented;
+- the total order returned by `load-history`;
+- whether conflicting writes for one event identity reject, first-win, or last-win;
+- cancellation visibility during a running drive;
+- strict FIFO semantics for signals of one workflow/name;
+- child creation/link postconditions and crash recovery;
+- ownership, wake-version, status, and resource-close behaviour.
 
-**Also:** [macros.cljc](src/intemporal/internal/macros.cljc) `stub-protocol` (:44-106) is ~60 lines
-where the `:clj` and `:cljs` branches build the same `sig+args` seq with cosmetically different
-accessors (:56-66 vs :90-98) and emit the same `reify` tail (:76-83 vs :99-106). `cljs-available?`
-(:12) does a runtime `(require 'cljs.analyzer)` in a `try` to guard a branch — in a ns that
-*unconditionally* requires `cljs.analyzer.api` at :6, so the guard is pointless. Its `opts`
-parameter is documented *"currently unused"* and threaded through `core.cljc:1012` into nothing.
+Adopt committed append order as the `load-history` order unless the contract and public history API
+are deliberately changed. Sequence number is a replay address, not a chronological order: multiple
+event types share a sequence and async/child completions may arrive after higher-sequence events.
 
-**Delete [utils.cljc](src/intemporal/utils.cljc)** — a public namespace in the library's API tree
-holding one function, `current-time-ms`, a 2-branch reader conditional. Fold into
-`intemporal.internal.context`.
+Do not order ties lexically by event type. In particular, that would place
+`:activity-completed` before `:activity-scheduled` for the same sequence. JDBC's auto-increment `id`
+currently supplies an append ordinal and must not be dropped until an equivalent ordering mechanism
+exists everywhere. FDB will likely need a versionstamp/order index separate from its event-identity
+index.
 
-**Tests:** the three child-workflow close-policy tests (abandon / terminate / cascade-cancel) are
-72–82% identical in both `.clj` and `.cljs` — 6 files, ~400 lines → one parameterized test per
-platform.
+### 5b. Expand conformance tests first
+
+Run the same tests against InMemory, PostgreSQL, MariaDB, and FDB for:
+
+- committed history order, including same-sequence scheduled/completed pairs and late child/async
+  completion;
+- exact duplicate writes and conflicting same-identity writes;
+- multiple durable retry attempts;
+- atomic append-and-wake and park-vs-wake races;
+- exclusive claims under contention;
+- cancellation between consecutive activities;
+- strict signal FIFO, including multiple signals created in one millisecond;
+- missing, active, cancelled, and terminal statuses;
+- a child seeded then linked, plus a crash between those operations;
+- resource closure.
+
+The current shared suite is necessary but not sufficient. Do not require it to pass "unchanged" when
+the contract itself is being tightened; make each new assertion fail on the divergent backend before
+fixing that backend.
+
+### 5c. Make safe API reductions
+
+- Remove `save-event` from the protocol and provide a namespace-level convenience function over
+  `save-events`; make FDB's single-event path use the same implementation.
+- Keep `find-event` or replace it with an explicitly indexed point-lookup operation. It is used for
+  live timer, async, and child-completion checks outside the pass-local replay snapshot; replacing it
+  with `load-history` would regress JDBC and can change race behaviour.
+- Keep `max-seq` unless terminal-event persistence is redesigned to allocate its sequence atomically.
+- Keep cancellation reads until a tested alternative preserves between-operation visibility. A
+  per-drive cache is not equivalent.
+- Keep pending-signal inspection until its diagnostic and race-test uses have a backend-neutral
+  replacement. Saving one protocol method is not worth backend-specific test scans.
+
+### 5d. Share pure scheduling logic, retain atomic persistence verbs
+
+Move pure predicates and state transitions—terminal derivation, normalization, wake transition,
+eligibility, and park result calculation—to a shared scheduling namespace where backends can reuse
+them.
+
+Retain backend-level atomic operations such as:
+
+- append events and wake;
+- compare wake-version, append suspension events, and park;
+- scan and claim runnable workflows;
+- mark cancellation and wake;
+- recover/release owner state.
+
+Do not implement these by composing independent public `read`, `append`, and `CAS` calls. JDBC must
+keep them inside one database transaction, FDB inside one FDB transaction with index maintenance,
+and InMemory inside one atom transition. FDB's ready/due/owner indexes remain backend-specific even
+when they call shared pure transition functions.
+
+### 5e. Resolve child-link semantics
+
+The engine currently seeds the child's `:workflow-started` history before calling `link-child!`.
+Change the protocol documentation to say that `link-child!` records linkage for an already-created
+child, and change the conformance test to seed the child first and then require `:running` on all
+backends.
+
+Separately add a crash test for failure between child seeding and linkage. If replay cannot guarantee
+repair of the link and close policy, introduce one compound `create-and-link-child!` store operation
+that writes all required state atomically. Do not make `link-child!` manufacture an empty row and call
+it claimable; JDBC's claim query deliberately requires a start event.
+
+### 5f. Backend cleanup after the contract is green
+
+JDBC:
+
+- remove the now-unused dialect argument from payload encoding;
+- use `rs/as-unqualified-lower-maps` consistently and remove `row-value`;
+- extract the small timestamp-expression difference from duplicated claim/park SQL;
+- add `(workflow_id, signal_name, id)` signal lookup/order indexes to both PostgreSQL and MariaDB;
+  MariaDB's foreign-key index covers `workflow_id`, not the whole consume query;
+- change `signal_name` from unbounded text where necessary to support the composite index;
+- remove signal `created_at` only after confirming no operational/debug use;
+- use `EXPLAIN` with representative data before removing status or schedule indexes;
+- keep the database-kind enum unless reducing it to a boolean genuinely clarifies every caller.
+
+FDB:
+
+- use a transactionally ordered key, preferably an FDB versionstamp or a transactional per-queue
+  counter, for signal FIFO; never use a process-local counter;
+- preserve ready/due/owner index maintenance inside the same transaction as schedule changes;
+- implement point event lookup from an identity index rather than scanning full history.
+
+SQL string literals cannot directly share Clojure keyword sets. Centralize semantic predicates in
+Clojure, but do not contort SQL generation merely to claim that every textual status list has one
+source.
 
 ---
 
-## Phase 6 — Documentation
+## Phase 6 — Unify the engine lifecycle and simplify internals
 
-**Inline the rationale, then delete the review notes.** `kimi.md`'s finding IDs are cited from
-**16 production comments** — `protocol.cljc:73`, `core.cljc:38`, `context.cljc:65,84,97`,
-`activity.cljc:129,149,215`, `runtime.clj:99,188`, `runtime.cljs:45`, `execution.clj:80,91,190`,
-`execution.cljs:87,98,226` — plus 6 test namespaces. Each cited rationale (X1, X3, X4, X8, X9, A1,
-A16) is one sentence: inline it into the comment that cites it so the comment is self-contained,
-then delete `kimi.md`, `sonnet.md`, `sol.md`, `issues.md`, `fable.md` (1,568 lines / 176K). This is
-exactly the failure mode `improvements.md` already caused — it was deleted out from under 8
-references that still dangle today (`workflow_registry.cljc:6`, four jepsen files,
-`DEVELOPMENT.md:86`); scrub those too. Keep `README.md`, `architecture.md`, `DEVELOPMENT.md`,
-`AGENTS.md`.
+### 6a. Make the engine the only public worker lifecycle
 
-**Fix drift.** `AGENTS.md` lists `internal/fns/start_workflow.clj/.cljs` (gone) and an `IScheduler`
-protocol (gone). `README.md:252` says `:threads` defaults to unbounded — verify against
-`make-workflow-engine`. The Postgres migration comment says `parent_close_policy: cascade-cancel |
-abandon | require-join`; the real set is `#{:cascade-cancel :abandon :terminate}`
-([spec.cljc:69](src/intemporal/spec.cljc#L69)) — `require-join` does not exist.
-[jdbc.clj:149](src/intemporal/store/jdbc.clj#L149) cites *"Migration 20260807000007"* — no such
-migration exists, there is exactly one per dialect; :207 cites index
-`uq_intemporal_history_wf_seq_type` — the migration declares an anonymous constraint.
-[spec.cljc:42](src/intemporal/spec.cljc#L42) refers to the *"dead, incomplete
-`intemporal.internal.events` namespace"* — already gone from `src/`.
+Remove the public `start-worker` API. There should be one engine lifecycle rather than an inert
+engine constructor, a lazily created private worker, and a separately managed public worker whose
+stop function is invisible to `shutdown-engine`.
+
+Make engine construction start exactly one engine-owned recovery worker. Because construction now
+starts threads/timers and performs store recovery, either rename the entry point to
+`start-workflow-engine` or document `make-workflow-engine` as an active resource constructor. Do not
+retain both names as two subtly different execution modes.
+
+The running engine must:
+
+- accept all former worker settings (`:owner-id`, poll interval, batch size, and workflow
+  concurrency) as engine options;
+- register configured workflow/activity protocol implementations before the first claim;
+- call `recover-running!` before beginning its normal claim loop;
+- use the same worker for `start-workflow`, `submit-workflow`, and `resume-workflow`, removing
+  `ensure-worker!` and its special low-latency second configuration;
+- make `shutdown-engine` stop the worker, drain or interrupt active drives according to the
+  documented grace period, release ownership, and then stop the activity executor;
+- prevent construction or accidental startup of a second worker for the same engine.
+
+Crash recovery cannot rely on the current random `:internal-worker-owner`. `recover-running!` only
+recovers `RUNNING` workflows for the same owner, and owned `WAITING` workflows are likewise not
+claimable by a different owner. Require a stable `:owner-id` whenever restart recovery is expected;
+allow a generated id only for explicitly ephemeral/in-memory use. Until the store has leases and
+fencing tokens, document and enforce as far as practical that one stable owner id identifies at
+most one live process. If overlapping processes with the same identity must be supported, add
+leases/fencing before claiming automatic crash recovery is safe.
+
+Workflow definitions must be loaded and protocol activity implementations supplied before the
+worker scans persisted work. Prefer engine construction options for required registrations; do not
+depend on a later `start-workflow` call to populate a fresh recovery engine. The existing
+unresumable-workflow retry path remains a defensive fallback, not the normal startup sequence.
+
+If the project needs submission/status-only processes that must never execute workflows, expose a
+separate client abstraction or an explicit non-worker mode. Do not call that object a fully running
+workflow engine, and do not make every transient API client silently compete for claims.
+
+Add lifecycle tests proving that:
+
+- `submit-workflow` executes without an explicit worker call;
+- constructing a fresh engine with the same durable store and stable owner automatically recovers
+  a workflow interrupted while `RUNNING`;
+- a due timer and a durably woken signal wait resume after restart without `resume-workflow`;
+- a fresh recovery engine has all workflow and protocol activity registrations before it claims;
+- `shutdown-engine` stops polling, handles in-flight drives, and releases ownership;
+- random/ephemeral ownership is not advertised as cross-process recovery;
+- client-only mode, if retained, never calls `claim-runnable!`.
+
+### 6b. Keep useful workflow façades
+
+Keep the public operations that express useful workflow concepts:
+
+- `join-all` and `join-any`;
+- synchronous, async, and detached child-workflow variants;
+- `start-workflow`, `submit-workflow`, `await-workflow`, and `resume-workflow`;
+- `get-workflow-history` and `get-workflow-result`;
+- `stub-protocol`, `defn-workflow`, and `suspension?`.
+
+Keep one public engine start/constructor operation and `shutdown-engine`; remove `start-worker` and
+its independently returned stop function after all callers and documentation use the unified
+lifecycle.
+
+Their wrappers are small because a good façade should be small. Removing them would force users to
+depend on internal handles, store protocols, or macros. `suspension?` remains necessary for CLJS code
+that uses `catch :default`; add a test for that documented path because existing saga tests use
+`catch js/Error`, which intentionally does not catch the plain suspension type.
+
+Internal simplifications:
+
+- factor one private child scheduler returning both child id and handle information, while keeping
+  the three public return shapes;
+- have `await-workflow` always include `:workflow-id`, eliminating the platform-specific append in
+  `start-workflow`;
+- share terminal predicates and event sets from the internal domain namespace;
+- remove the redundant second `current-context` lookup in `stub`;
+- extract the common worker bookkeeping (`unresumable`, registration checks, failure classification,
+  recovery/release) while keeping Thread/Semaphore and Promise/setTimeout scheduling separate;
+- simplify `stub-protocol` only after adding CLJ/CLJS tests for multi-arity protocol methods and CLJS
+  optimized builds;
+- move `current-time-ms` to a small internal clock namespace rather than into workflow context;
+- parameterize the close-policy tests per platform instead of maintaining six mostly identical
+  files.
+
+After these changes, review the public API as a product-design exercise. Remove a public function
+only when there is a named replacement and README/examples/tests migrate in the same commit. Do not
+set a target count such as "31 to 20."
 
 ---
 
-## Verification
+## Phase 7 — Documentation and historical-note cleanup
 
-Record a baseline **before** starting (I have not run these — plan mode):
+Before deleting AI review notes, revalidate every still-open finding. Preserve verified limitations
+in `architecture.md`, a small `KNOWN_LIMITATIONS.md`, or tracked issues; do not rely on git history as
+the only place users can discover an active correctness limitation.
+
+Then:
+
+- inline the short rationale behind every `kimi.md` finding reference in production comments;
+- replace dangling `improvements.md` and `deepseek` references with self-contained explanations;
+- delete stale `kimi.md`, `sonnet.md`, `sol.md`, `issues.md`, and `fable.md` only after open findings
+  have a maintained home;
+- update `AGENTS.md` after the final code layout exists;
+- correct the migration close-policy comment (`:terminate`, not `require-join`);
+- remove nonexistent migration/index names from JDBC comments;
+- remove stale spec references to deleted namespaces;
+- update README defaults, public APIs, CheckedStore construction, packaging, and chaos-harness status;
+- replace the two-mode engine/worker documentation with the unified engine lifecycle, including
+  stable-owner, registration-order, shutdown, and optional client-only semantics.
+
+Keep `README.md`, `architecture.md`, `DEVELOPMENT.md`, `AGENTS.md`, and any curated limitations
+document.
+
+---
+
+## Verification matrix
+
+Run the smallest relevant checks after each commit, then the full matrix at phase boundaries.
+
+### Always
 
 ```bash
-bin/kaocha :in-memory                       # JVM, no external services
-bin/kaocha test-cljs                        # Node
-clj-kondo --parallel --lint src test build dev deps.edn
+clj-kondo --parallel --lint src test build dev deps.edn resources
+bin/kaocha :in-memory
+bin/kaocha :test-cljs
 ```
 
-Expect the in-memory count to *drop* after Phase 0 — deleting `bench/store_test.clj` removes a
-duplicate run of the whole store conformance suite. Note the delta deliberately.
+### Build and demo
 
-Per phase:
+```bash
+clojure -T:build compile-main
+clojure -T:build jar
+node_modules/.bin/shadow-cljs compile node
+node_modules/.bin/shadow-cljs release doc
+earthly +build-all
+```
 
-- **Phase 0** — `clj-kondo … build dev` must reach **0 errors** (2 today);
-  `clj -T:build compile-main` and `clj -T:build jar` must succeed (both fail today);
-  `earthly +build-all` green.
-- **Phase 2** — observer collapse is covered by `child_workflow_test.clj:112` and
-  `saga_test.clj:233`, the only `(:log engine)` consumers; extend them to assert the new event
-  shape. `CheckedStore` gating is covered by
-  [spec_test.clj:34-44](test/intemporal/tests/store/spec_test.clj#L34) (`toggle-is-enabled-in-ci`)
-  and :294 (`check!-is-wired`), which exist precisely to fail loudly if the flag is dropped.
-- **Phase 3** — the shared conformance suite
-  ([store/test_suite.clj](test/intemporal/tests/store/test_suite.clj)) is the safety net; it must
-  pass unchanged against all three backends. Bring up services and run the integration suite:
-  ```bash
-  docker-compose up -d
-  bin/kaocha test --focus-meta integration          # Postgres + FDB
-  DATABASE_URL='jdbc:mariadb://localhost:3306/root?user=root&password=root' \
-    bin/kaocha test --focus-meta integration        # MariaDB
-  ```
-  Add a conformance assertion for history ordering (3c) and **tighten**
-  `spec_test.clj:255-257` for `link-child!` (3d) — that assertion currently accepts both
-  behaviours, so it must be narrowed or the fix is unverified.
-- **Phase 4** — `test/intemporal/tests/crash/`, `engine/`, and `runtime/` are the regression net;
-  they must pass on **both** platforms. The `::timeout` fix needs a new test: an activity that
-  returns `{:intemporal.internal.runtime/timeout true}` must complete, not report a timeout.
-- **Phase 5** — `submit_workflow_test.clj`, `worker_test.clj`, `worker_scheduling_test.clj`,
-  `status_test.clj`, `child_workflow_*`. The `:parent-close-policy` fix needs a test that the
-  *synchronous* `run-child-workflow` honours a non-default policy — none exists today, which is why
-  the bug survived.
-- **Finally** — `bin/run-coverage` end to end, and one smoke test of the built artifact: fresh JVM,
-  `target/intemporal.jar` on the classpath with only published deps, require the public ns, run one
-  workflow. Nothing tests the jar today.
+Inspect the jar contents and run both JVM and CLJS consumer smoke tests described in Phase 0.
 
-## Sequencing note
+### Store changes
 
-Phases 0 and 1 are pure deletion and can land immediately. Phase 2 is self-contained. Phase 3 is
-the largest and riskiest — do it against the conformance suite, one backend at a time, and land 3c
-and 3d as separate commits with their tightened assertions so the fixes are provable. Phase 4
-depends on nothing but is easiest after 2 (the observer collapse removes `-notify`, one of the
-files' cross-platform couplings). Phase 5 is breaking and should be one commit with a changelog.
-Phase 6 last, so the inlined rationale describes the final code.
+Bring up only the services required by the test:
+
+```bash
+docker compose up -d postgresql foundation
+bin/kaocha :test --focus-meta integration
+
+docker compose up -d mariadb
+DATABASE_URL='jdbc:mariadb://localhost:3306/root?user=root&password=root' \
+  bin/kaocha :test --focus-meta integration
+```
+
+Run the shared conformance suite against each backend while developing rather than waiting for the
+full integration suite.
+
+### Final
+
+```bash
+bin/run-coverage
+```
+
+Also run the packaged JVM/CLJS smoke tests and, if retained and repaired, one no-kill chaos baseline
+followed by a short kill/restart run.
+
+The known full-suite flaky replay-log test must be rerun in isolation before classifying a failure as
+unrelated.
+
+---
+
+## Commit sequencing
+
+1. Fix synchronous child policy.
+2. Fix the CLJS timeout sentinel.
+3. Repair build/package/CI and make demo generation reproducible.
+4. Delete duplicate bench tests and stale scratch code; land low-risk hygiene in small commits.
+5. Collapse observers and change the logging default.
+6. Gate CheckedStore construction while preserving close behaviour.
+7. Extract shared engine code without semantic changes.
+8. Write the store contract and failing cross-backend tests.
+9. Fix history, child-link, signal FIFO, and backend divergences one invariant at a time.
+10. Simplify IStore only where the now-tested contract permits it.
+11. Unify engine/worker ownership and shutdown, migrate callers, remove `start-worker`, then simplify
+    the remaining internal/public implementation without removing useful workflow façades.
+12. Revalidate historical findings, update maintained docs, and delete stale review notes.
+
+Do not combine a correctness fix, a protocol redesign, and mass file deletion in one commit. Each
+store divergence should land with the conformance assertion that proves it fixed.

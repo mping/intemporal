@@ -38,6 +38,13 @@
     (intemporal/wait-for-signal "close-order")
     {:order order :validated ok}))
 
+(intemporal/defn-workflow place-order-sync [order amount child-id]
+  ;; The join keeps the parent open while the child waits. Cancelling the parent
+  ;; makes the configured close policy observable while this helper is suspended.
+  (intemporal/run-child-workflow #'fulfill-order [order amount]
+                                 :child-id child-id
+                                 :parent-close-policy :abandon))
+
 ;; ── check ───────────────────────────────────────────────────────────────────────
 
 (defn- check [store]
@@ -68,6 +75,26 @@
 
 (deftest abandon-in-memory
   (testing "in-memory" (check (u/in-memory))))
+
+(deftest synchronous-child-forwards-close-policy
+  (testing "run-child-workflow preserves a non-default parent close policy"
+    (let [store (u/in-memory)]
+      (u/with-worker store
+        (fn [engine]
+          (let [pid (str "sync-parent-" (random-uuid))
+                cid (str pid "/child")]
+            (intemporal/submit-workflow engine #'place-order-sync ["ord-sync" 10 cid]
+                                        :workflow-id pid)
+            (is (= :running (u/await-status store cid :running 3000)))
+            (intemporal/cancel-workflow store pid)
+            (is (= :cancelled
+                   (:status (intemporal/await-workflow engine pid :timeout-ms 5000))))
+            (is (= :running (p/get-workflow-status store cid))
+                "the synchronous :abandon child survives parent cancellation")
+            (intemporal/send-signal store cid "packed" {})
+            (is (= :completed
+                   (:status (intemporal/await-workflow engine cid :timeout-ms 5000))))))))))
+
 (deftest ^:integration abandon-jdbc
   (testing "jdbc" (let [s (u/jdbc)] (try (check s) (finally (.close s))))))
 (deftest ^:integration abandon-fdb

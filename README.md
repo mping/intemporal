@@ -1,12 +1,15 @@
 # intemporal
 
-![Continuous Integration](https://github.com/mping/intemporal/actions/workflows/clojure.yml/badge.svg)
+![Continuous Integration](https://github.com/mping/intemporal/actions/workflows/ci.yaml/badge.svg)
 
 A Clojure library in the spirit of [temporal.io](https://temporal.io) or Uber Cadence.
 Define functions with side effects, and persist/resume their state — workflows survive
 process crashes and resume transparently.
 
 > :warning: **Use at your own peril — not production ready.**
+
+See [Known limitations](KNOWN_LIMITATIONS.md) for the current distributed ownership,
+cross-workflow atomicity, replay, and delivery constraints.
 
 Two concepts apply:
 - **Activities**: Functions (or protocol implementations) that handle side effects. The
@@ -42,10 +45,10 @@ Two concepts apply:
      :protocol (foo pr :X)}))
 
 ;; Create an engine and run the workflow
-(intemporal/with-workflow-engine [engine {:threads 2}]
-  (let [result (intemporal/start-workflow engine
-                                          my-workflow [1]
-                                          :protocols {MyActivities (->MyActivitiesImpl)})]
+(intemporal/with-workflow-engine
+  [engine {:threads 2
+           :protocols {MyActivities (->MyActivitiesImpl)}}]
+  (let [result (intemporal/start-workflow engine my-workflow [1])]
     (println result)))
 ```
 
@@ -55,8 +58,8 @@ Every workflow follows the same path: it is persisted as `RUNNABLE`, atomically 
 `RUNNING`, and either terminates or parks as `WAITING`. Workflow code is never driven
 directly by an API caller.
 
-`start-workflow` is the convenient blocking API. It submits the workflow, lazily starts the
-engine's bounded worker, and waits for the terminal result:
+`make-workflow-engine` is an active resource constructor: it starts exactly one
+engine-owned recovery worker. `start-workflow` submits and waits for the terminal result:
 
 ```clojure
 ;; The caller blocks until the workflow completes.
@@ -64,34 +67,32 @@ engine's bounded worker, and waits for the terminal result:
   (println result))
 ```
 
-`submit-workflow` returns immediately and is intended for a long-running explicit worker.
-`start-worker` polls only `RUNNABLE` workflows and due timed waits belonging to this owner
-(or unowned), atomically changes them to `RUNNING`, and resumes them through a bounded
-drive pool. Indefinite signal/join waits are `WAITING` and do not appear in scans until a
-signal, cancellation, or child completion durably wakes them. A restarted worker requeues
-its own interrupted `RUNNING` work when it uses the same stable `owner-id`. An explicit
-worker is useful for:
-
-- `submit-workflow` (submitting a workflow for worker execution)
-- Independent child workflows (`run-child-workflow-async` / `run-child-workflow-detached`)
-- Cross-pod / crash recovery
-- Any scenario where the caller cannot block (e.g. a REST handler that fires and forgets)
+`submit-workflow` uses the same engine and returns immediately. The engine polls only
+`RUNNABLE` workflows and due timed waits, atomically claims them as `RUNNING`, and resumes
+them through a bounded drive pool. Indefinite signal/join waits are absent from scans
+until a signal, cancellation, or child completion durably wakes them.
 
 ```clojure
-(let [engine (intemporal/make-workflow-engine :threads 4)
-      stop   (intemporal/start-worker engine
-                                      :poll-ms 100
-                                      :owner-id "pod-0"
-                                      :workflow-concurrency 4)]
-  ;; Submit a workflow for the worker to drive — returns immediately
-  (intemporal/submit-workflow engine my-wf [arg] :workflow-id "my-wf")
-  ;; The worker picks it up, runs it to completion
-  ;; ... send signals, cancel, observe via await-workflow / get-workflow-status ...
-  (stop))
+(let [engine (intemporal/make-workflow-engine
+               :threads 4
+               :owner-id "orders-pod-0"
+               :poll-ms 100
+               :workflow-concurrency 4)]
+  (try
+    (let [{:keys [workflow-id]}
+          (intemporal/submit-workflow engine my-wf [arg]
+                                       :workflow-id "my-wf")]
+      (intemporal/await-workflow engine workflow-id))
+    (finally
+      ;; No second worker handle is needed. The default shutdown grace is 5s;
+      ;; pass an explicit value when your activities need longer to drain.
+      (intemporal/shutdown-engine engine 10))))
 ```
 
-Both APIs use the same claim protocol, so an explicit worker and the engine-owned worker
-cannot concurrently drive the same workflow.
+A restarted process automatically requeues its own interrupted `RUNNING` work when its
+new engine uses the same stable `:owner-id`. One stable owner id must identify at most one
+live process; the stores do not yet implement leases or fencing. The generated
+`ephemeral-*` owner is suitable for local/in-memory use, not cross-process recovery.
 
 ### Activities
 
@@ -225,58 +226,54 @@ In **ClojureScript** catch `:default` and rethrow engine suspensions explicitly:
 ### Engine lifecycle
 
 ```clojure
-;; One-shot: caller drives the workflow (no worker)
+;; The engine owns execution for both blocking and asynchronous submission.
 (intemporal/with-workflow-engine [engine {:threads 4}]
   (intemporal/start-workflow engine my-workflow [arg]))
 
-;; Worker-driven: submit to a worker for asynchronous execution
 (let [engine (intemporal/make-workflow-engine :threads 4
-                                              :store  my-store   ;; see "Stores" below
+                                              :store my-store
+                                              :owner-id "pod-0"
+                                              :protocols {MyActivities (->MyActivitiesImpl)}
                                               :enable-logging true)
-      stop   (intemporal/start-worker engine
-                                      :poll-ms 100
-                                      :owner-id "pod-0"
-                                      :workflow-concurrency 4)]
-  ;; Submit workflows — the worker drives them
-  (intemporal/submit-workflow engine my-wf [arg] :workflow-id "my-wf")
-  ;; ... send signals, cancel, observe ...
-  (stop)
-  (intemporal/shutdown-engine engine))
+      {:keys [workflow-id]} (intemporal/submit-workflow engine my-wf [arg])]
+  (try
+    (intemporal/await-workflow engine workflow-id :timeout-ms 30000)
+    (finally
+      (intemporal/shutdown-engine engine 10))))
 ```
 
 `make-workflow-engine` options:
 
-| Option                | Default         | Description                             |
-|-----------------------|-----------------|-----------------------------------------|
-| `:store`              | `InMemoryStore` | Persistence backend (see Stores)        |
-| `:threads`            | unbounded       | Maximum concurrent activities           |
-| `:default-timeout-ms` | 30000           | Default activity timeout                |
-| `:enable-logging`     | true            | Logging observer (logs all events)      |
-| `:enable-telemetry`   | true            | OpenTelemetry tracing (JVM only)        |
-| `:observer`           | —               | Additional `IWorkflowObserver` instance |
+| Option | Default | Description |
+|---|---|---|
+| `:store` | `InMemoryStore` | Persistence backend (see Stores) |
+| `:threads` | unbounded | Maximum concurrent activities (JVM) |
+| `:queue-capacity` | 8 × threads | Pending activity submissions for a bounded executor |
+| `:submit-timeout-ms` | activity timeout | Maximum saturated submission wait (JVM) |
+| `:default-timeout-ms` | 30000 | Default timeout for one activity attempt |
+| `:owner-id` | generated `ephemeral-*` | Stable identity required for restart recovery |
+| `:poll-ms` | 10 | Durable scheduling poll interval |
+| `:batch-size` | 100 | Maximum claims per poll |
+| `:workflow-concurrency` | 4 | Maximum concurrent workflow drives |
+| `:protocols` | `{}` | Protocol activity implementations installed before recovery |
+| `:worker?` | `true` | `false` creates a submission/status-only client |
+| `:enable-logging` | `false` | Retain observer events in the engine's `:log` atom |
+| `:enable-telemetry` | `true` | OpenTelemetry tracing (JVM only) |
+| `:observer` | — | Additional `IWorkflowObserver` instance |
 
-### Worker & recovery
-
-`start-worker` runs the ownership-based recovery scan (see [Two execution models](#two-execution-models)
-above). Use `submit-workflow` (not `start-workflow`) to hand a workflow to the worker:
-
-```clojure
-(let [{:keys [workflow-id]} (intemporal/submit-workflow engine my-wf [args]
-                                                         :workflow-id "my-wf")]
-  ;; the worker will pick it up and run it
-  (intemporal/await-workflow engine workflow-id :timeout-ms 30000))
-;; => {:status :completed :result ...}
-```
+With `:worker? false`, `submit-workflow`, status, signal, and cancellation APIs remain
+available, but `start-workflow` and `resume-workflow` reject the client. Shutdown stops
+polling, drains or interrupts JVM workflow drives within the requested grace period,
+releases ownership, and then closes the activity executor.
 
 ## Stores
 
 Three `IStore` implementations ship with the library:
 
-Every store is built through a `create-store` factory (one per namespace), which wraps
-the raw backend in `intemporal.store.checked/CheckedStore` — a decorator that validates
-every value crossing the `IStore` boundary against `intemporal.spec` (a no-op unless
-`clojure.spec.check-asserts` is enabled, see `intemporal.spec`). Pass `:checked? false`
-to get the raw, unwrapped store instead.
+Every store factory accepts `:checked?`. Its default, `:auto`, installs
+`intemporal.store.checked/CheckedStore` only when spec assertions are enabled at
+construction. Use `true` to always install the validating decorator or `false` to always
+return the raw backend. A checked closeable store delegates close to its backend.
 
 ### InMemoryStore
 An in-process atom-based store. Default; adequate for development and single-process
@@ -323,7 +320,7 @@ but the runtimes differ:
 |------------------|--------------------------------------------------------------------------|--------------------------------------------------------------------------|
 | Execution        | Virtual threads, blocking calls, `Future`                                | Single-threaded, promise chains (`promesa`)                              |
 | `start-workflow` | Blocks until the workflow reaches a terminal state; returns a result map | Returns a `js/Promise` that resolves to the result map                   |
-| `await-workflow` | Blocks; returns `{:status … :result …}`                                  | Returns a promesa promise                                                |
+| `await-workflow` | Blocks; result always includes `:workflow-id` and `:status`               | Returns a promesa promise of the same map                                |
 | Engine loop      | `loop`/`recur` + `LinkedBlockingQueue` wake channel                      | Recursive promise chain with `setTimeout`                                |
 | Activity results | Direct return value                                                      | Always a promise (use `blet`/`bthen` from `intemporal.internal.context`) |
 | Suspensions      | Subclass `Error` (bypass `catch Exception`)                              | Plain `deftype`, not `js/Error` (bypass `catch js/Error`)                |
@@ -332,7 +329,7 @@ but the runtimes differ:
 | Worker           | Daemon thread with exponential backoff                                   | `js/setTimeout` tick, single-threaded                                    |
 | Vars (`#'`)      | Stable qualified name                                                    | Demangled JS name; `defn-workflow` handles registration uniformly        |
 
-Internal context macros (`blet`, `bthen`, `bfinally`, `bloop`) restore the dynamic
+Internal context macros (`blet`, `bthen`, `bfinally`) restore the dynamic
 `*workflow-context*` binding inside promise callbacks on CLJS — needed for `stub` calls
 inside `p/let` chains.
 
@@ -349,7 +346,8 @@ It includes:
 - **Provision saga** — order-fulfilment saga with LIFO compensation
 - **Child workflows** — independent child workflows with sleep, signals, and cancellation-policy demo
 
-To run locally: `npx shadow-cljs watch doc` and open `http://localhost:8000`.
+To run locally, run `bin/build-doc` once, then `npx shadow-cljs watch doc`, and
+open `http://localhost:8000`.
 
 ## Development
 
@@ -370,5 +368,5 @@ clojure -T:build jar
 clojure -A:dev
 ```
 
-See [CLAUDE.md](./CLAUDE.md) for detailed development commands, architecture notes,
-and test organization.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed development commands and test
+organization, and [architecture.md](architecture.md) for engine internals.

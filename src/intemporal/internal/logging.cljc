@@ -38,17 +38,11 @@
                 :error err#}))))
 
 ;; --- Print-style (Variadic) ---
-(defmacro trace [& args] `(expand-log :trace ~@args))
 (defmacro debug [& args] `(expand-log :debug ~@args))
-(defmacro info  [& args] `(expand-log :info  ~@args))
-(defmacro warn  [& args] `(expand-log :warn  ~@args))
 (defmacro error [& args] `(expand-log :error ~@args))
-(defmacro fatal [& args] `(expand-log :fatal ~@args))
 
 ;; --- Format-style (Printf) ---
 (defmacro tracef [& args] `(expand-logf :trace ~@args))
 (defmacro debugf [& args] `(expand-logf :debug ~@args))
 (defmacro infof  [& args] `(expand-logf :info  ~@args))
 (defmacro warnf  [& args] `(expand-logf :warn  ~@args))
-(defmacro errorf [& args] `(expand-logf :error ~@args))
-(defmacro fatalf [& args] `(expand-logf :fatal ~@args))

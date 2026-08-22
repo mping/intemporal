@@ -1,6 +1,6 @@
 (ns intemporal.tests.engine.replay-snapshot-test
-  "Regression test for kimi.md improvement #6 (bugs A16 + X9): replay must read
-   the PASS-LOCAL history snapshot, not the live store, one operation at a time.
+  "Regression test: replay must read the pass-local history snapshot, not the
+   live store one operation at a time.
 
    `drive-workflow!` loads the whole history once per iteration
    into the workflow context (`execution.clj`, `(:history ctx)`), but the stub
@@ -66,10 +66,6 @@
         (injector inner (count (filter #(= :load-history (:op %)) @trace))))
       h))
 
-  (save-event [_ workflow-id event]
-    (swap! trace conj {:op :save :event-type (:event-type event) :seq (:seq event)})
-    (p/save-event inner workflow-id event))
-
   (save-events [_ workflow-id events]
     (doseq [e events]
       (swap! trace conj {:op :save :event-type (:event-type e) :seq (:seq e)}))
@@ -124,7 +120,7 @@
   (testing "duplicate (seq, event-type) entries resolve to the EARLIEST one"
     ;; History legitimately holds duplicates: :activity-scheduled is re-emitted
     ;; on every pass that reaches it before completion, and check-then-act writes
-    ;; double-write on InMemory/FDB (kimi.md P4). `find-event` returns the first
+    ;; duplicate identity writes. `find-event` returns the first
     ;; match, so the index must too — a plain (into {} ...) keeps the LAST and
     ;; silently makes replay resolution depend on append order.
     (let [history [{:event-type :activity-completed :seq 0 :result :zero}

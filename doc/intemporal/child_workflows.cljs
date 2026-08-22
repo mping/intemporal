@@ -12,9 +12,9 @@
    fate when the parent CLOSES (success, failure, or cancellation). Here children use
    :cascade-cancel, so cancelling the parent (the Cancel button) cancels them too.
 
-   Independent children are driven by the recovery worker (here, the CLJS
-   promise/setTimeout worker), so the page submit-workflows the parent and starts a
-   worker rather than calling start-workflow directly."
+   Independent children are driven by the engine-owned recovery loop (here, the
+   CLJS promise/setTimeout implementation), so the page uses submit-workflow for
+   non-blocking UI execution."
   (:require [clojure.string :as str]
             [promesa.core :as prom]
             [intemporal.core :as intemporal]
@@ -87,7 +87,7 @@
 ;;;;
 ;; UI state
 
-(defonce app-state (atom {:engine nil :store nil :stop nil}))
+(defonce app-state (atom {:engine nil :store nil}))
 
 ;;;;
 ;; Rendering helpers
@@ -251,9 +251,10 @@
 
 (def ^:private terminal? #{:completed :failed :cancelled})
 
-(defn- stop-workers! []
-  (doseq [stop (:stops @app-state)] (stop))
-  (swap! app-state assoc :stops nil))
+(defn- stop-engine! []
+  (when-let [engine (:engine @app-state)]
+    (intemporal/shutdown-engine engine))
+  (swap! app-state assoc :engine nil :store nil))
 
 (defn- poll! [store root]
   (render-tree-svg! store root)
@@ -263,33 +264,29 @@
                        (when (= status :completed)
                          (str "\n\n" (prn-str (intemporal/get-workflow-result store root))))))
     (if (terminal? status)
-      (stop-workers!)
+      (stop-engine!)
       (js/setTimeout #(poll! store root) 200))))
 
 (defn run-demo! []
-  (stop-workers!)
+  (stop-engine!)
   (let [regions (->> (-> js/document (.getElementById "regions") .-value
                          (str/split #"[,\s]+"))
                      (remove str/blank?)
                      (mapv keyword))
-        engine  (intemporal/make-workflow-engine :threads 4 :enable-logging true)
-        store   (:store engine)
-        ;; A single worker scans pending workflows SEQUENTIALLY (one step at a
-        ;; time), so children/grandchildren would run one region after another.
-        ;; Start a POOL of workers instead — each has its own owner-id and claims
-        ;; disjoint pending workflows, so regions advance in parallel. Peak
-        ;; in-flight ≈ parent + one child + one grandchild per region.
         n-workers (inc (* 2 (max 1 (count regions))))
-        stops     (mapv (fn [_] (intemporal/start-worker engine :poll-ms 30))
-                        (range n-workers))]
+        engine  (intemporal/make-workflow-engine
+                  :threads 4
+                  :enable-logging true
+                  :poll-ms 30
+                  :workflow-concurrency n-workers)
+        store   (:store engine)]
     (reset! app-state {:engine engine
-                       :store  store
-                       :stops  stops})
+                       :store  store})
     (set-results! "Running…")
     (set-html! "tree" "")
     (set-html! "events" "")
-    ;; Submit the parent for the worker to drive (NOT start-workflow, whose
-    ;; blocking loop would race the worker on the same workflow).
+    ;; Submit without awaiting so the browser UI remains responsive. Both
+    ;; submission styles use this same engine-owned recovery loop.
     (intemporal/submit-workflow engine #'deploy-service ["billing-api" regions]
                                 :workflow-id wf-id)
     (poll! store wf-id)))

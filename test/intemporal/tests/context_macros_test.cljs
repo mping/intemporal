@@ -53,3 +53,23 @@
         (is (= :completed (:status result)))
         (is (= 3 (:result result)) "Context should be present in blet body")
         (intemporal/shutdown-engine engine)))))
+
+(deftest catch-default-must-rethrow-engine-suspensions
+  (testing "suspension? supports the documented catch :default guard"
+    (let [saw-suspension? (atom false)
+          engine (intemporal/make-workflow-engine :threads 2)
+          my-wf (fn []
+                  (try
+                    (intemporal/sleep 1)
+                    :done
+                    (catch :default e
+                      (if (intemporal/suspension? e)
+                        (do
+                          (reset! saw-suspension? true)
+                          (throw e))
+                        :caught-user-error))))]
+      (with-result [result (intemporal/start-workflow engine my-wf [])]
+        (is @saw-suspension?)
+        (is (= :completed (:status result)))
+        (is (= :done (:result result)))
+        (intemporal/shutdown-engine engine)))))

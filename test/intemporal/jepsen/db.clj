@@ -4,8 +4,7 @@
   Each 'node' (owner-id) maps to a forked Process whose classpath is set by
   `-X:dev:jdbc:jepsen-worker`.  We use ProcessBuilder for real SIGKILL
   semantics: destroyForcibly() skips the JVM shutdown hook, exactly modelling
-  a hard crash.  This destroys the process-local signal-callback atom,
-  reproducing bug 1.1.
+  a hard crash and leaving durable RUNNING ownership for restart recovery.
 
   Process model deviation: we don't use SSH/sshd containers (local-only).
   The jepsen library is not required here; we implement our own lightweight
@@ -112,12 +111,12 @@
   "Runs intemporal migrations and Jepsen side-channel migrations against
   the given db-spec."
   [db-spec]
-  (doseq [[dir table] [["migrations/postgres"        "migrations"]
-                       ["migrations/jepsen/postgres"  "jepsen_migrations"]]]
-    (migratus/migrate {:store                :database
-                       :migration-dir        dir
-                       :migration-table-name table
-                       :db                   db-spec})))
+  (doseq [[dir table] [["migrations/postgres"       nil]
+                       ["migrations/jepsen/postgres" "jepsen_migrations"]]]
+    (migratus/migrate (cond-> {:store         :database
+                               :migration-dir dir
+                               :db            db-spec}
+                        table (assoc :migration-table-name table)))))
 
 (defn truncate-all!
   "Clears all intemporal and Jepsen tables between runs."

@@ -1,5 +1,6 @@
-(ns intemporal.utils)
+(ns intemporal.utils
+  (:require
+   [intemporal.internal.clock :as clock]))
 
 (defn current-time-ms []
-  #?(:clj (System/currentTimeMillis)
-     :cljs (js/Date.now)))
+  (clock/now-ms))

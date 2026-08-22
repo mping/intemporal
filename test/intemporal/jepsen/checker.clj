@@ -6,21 +6,7 @@
   has stopped, the nemesis is paused, all workers have been restarted (so each
   one's startup ran), and a grace period has elapsed.
 
-  Checkers are mapped to specific bugs in improvements.md:
-
-    1. liveness               — bugs 1.1, 1.3: workflows never complete after
-                                the owning worker crashes
-    2. signal-consumed        — bug  2.1: register-then-consume race leaves
-                                orphaned signal rows
-    3. history-integrity      — bug  1.2: concurrent writers corrupt event log
-                                via ON CONFLICT DO UPDATE
-    4. cancellation-liveness  — bug  2.3: cancel-workflow can't wake a sleeper
-
-  Expected post-quiesce state for the CURRENT (buggy) codebase:
-    checker 1 (liveness)              -> FAIL  (workflows stuck without resume)
-    checker 2 (signal-consumed)       -> FAIL  (if race is hit; intermittent)
-    checker 3 (history-integrity)     -> FAIL  (if concurrent-start ran)
-    checker 4 (cancellation-liveness) -> FAIL  (cancelled sleepers never wake)"
+  All four are expected to pass after stable-owner restart recovery."
   (:require
    [clojure.string :as str]
    [next.jdbc :as jdbc]
@@ -32,11 +18,15 @@
 ;; ---------------------------------------------------------------------------
 ;; Helper: submitted workflow-ids from history
 
-(defn- submitted-ids
-  "Set of workflow-ids that the generator successfully submitted."
+(defn- liveness-ids
+  "Set of successfully submitted workflows expected to terminate without an
+  explicit cancellation. `cancel-sleep` deliberately waits forever; instances
+  that receive a cancellation are checked by cancellation-liveness-checker."
   [history]
   (->> @history
-       (filter #(and (= :submit (:f %)) (= :ok (:type %))))
+       (filter #(and (= :submit (:f %))
+                     (= :ok (:type %))
+                     (not= :cancel-sleep (get-in % [:value :wf-type]))))
        (keep #(get-in % [:value :workflow-id]))
        set))
 
@@ -59,14 +49,14 @@
 ;; ---------------------------------------------------------------------------
 ;; Checker 1: Liveness (bugs 1.1, 1.3)
 ;;
-;; Every submitted workflow must reach a terminal state (:completed, :failed,
-;; :cancelled).  Workflows stuck in :running after the quiesce + grace period
-;; mean that no worker auto-resumed them after its crash.
+;; Every workflow that is expected to finish on its own must reach a terminal
+;; state after the quiesce and stable-owner restart grace period. Uncancelled
+;; cancel-sleep workflows are deliberately parked forever and are excluded.
 
 (defn liveness-checker
-  "1. Every submitted workflow is in a terminal state after quiesce."
+  "1. Every self-terminating submitted workflow is terminal after quiesce."
   [db-spec history]
-  (let [ids (submitted-ids history)]
+  (let [ids (liveness-ids history)]
     (if (empty? ids)
       {:valid? true :violations [] :stats {:submitted 0}}
       (let [in-clause (str/join "," (repeat (count ids) "?"))
@@ -96,14 +86,8 @@
 ;; ---------------------------------------------------------------------------
 ;; Checker 2: Signal consumed (bug 2.1)
 ;;
-;; Every signal the test client wrote (via jepsen_signals_sent or the nemesis's
-;; signal-dead-workflows!) should eventually be consumed by the workflow.  An
-;; unconsumed row in intemporal_signals after quiesce + grace either means:
-;;   a) the owning worker died and its callback atom was empty (bug 1.1), or
-;;   b) the signal arrived between consume-check and register-callback (bug 2.1).
-;;
-;; This checker flags both; the distinction is visible in the nemesis history
-;; (was the worker alive when the signal was sent?).
+;; Every durably sent signal should eventually be consumed, including signals
+;; sent while the owning process is dead or while a drive is parking.
 
 (defn signal-consumed-checker
   "2. No orphaned signal rows remain after quiesce."
@@ -130,22 +114,8 @@
 ;; ---------------------------------------------------------------------------
 ;; Checker 3: History integrity (bug 1.2)
 ;;
-;; Concurrent calls to start-workflow with the same workflow-id use
-;; ON CONFLICT (workflow_id, seq) DO UPDATE, silently overwriting events.
-;; Symptoms:
-;;   a) Multiple :workflow-started events at seq=0 (last writer wins silently).
-;;   b) Two workers produce different event_type at the same seq — detected by
-;;      comparing event_type vs the "canonical" value stored in the first write.
-;;
-;; We detect this by looking for workflows where seq 0 has a non-canonical
-;; event type, or where the history contains duplicate seq numbers that were
-;; overwritten (the DO UPDATE mask hides them, but if two writers raced and
-;; produced DIFFERENT event_types at the same seq, one version is lost).
-;;
-;; We approximate: for any workflow that had a concurrent-start op, check
-;; whether intemporal_history has a :workflow-started at seq=0.  If the
-;; second writer overwrote seq=0 with a different event_type (our sentinel
-;; "workflow-started-duplicate"), that row proves a race.
+;; Concurrent writes of one event identity must converge to exactly one durable
+;; row. The event payload is first-write-wins; it is never overwritten.
 
 (defn history-integrity-checker
   "3. No concurrent-write corruption in intemporal_history."
@@ -154,39 +124,24 @@
     (if (empty? cs-ids)
       {:valid? true :violations [] :stats {:concurrent-start-workflows 0}}
       (let [in-clause (str/join "," (repeat (count cs-ids) "?"))
-            ;; Look for evidence of the silent overwrite: seq=0 with the
-            ;; sentinel event_type means the second writer clobbered the first.
-            corrupted (jdbc/execute! db-spec
-                        (into [(str "SELECT workflow_id, event_type
-                                     FROM intemporal_history
-                                     WHERE workflow_id IN (" in-clause ")
-                                       AND seq = 0
-                                       AND event_type = 'workflow-started-duplicate'")]
-                              cs-ids)
-                        jdbc-opts)
-            ;; Also look for seq=0 that is NOT workflow-started (any other
-            ;; winner in the race is also corruption).
-            unexpected (jdbc/execute! db-spec
-                         (into [(str "SELECT workflow_id, event_type
-                                      FROM intemporal_history
-                                      WHERE workflow_id IN (" in-clause ")
-                                        AND seq = 0
-                                        AND event_type <> 'workflow-started'")]
-                               cs-ids)
-                         jdbc-opts)]
-        {:valid?     (and (empty? corrupted) (empty? unexpected))
-         :violations {:overwritten-by-duplicate (vec corrupted)
-                      :unexpected-seq0           (vec unexpected)}
+            rows (jdbc/execute! db-spec
+                   (into [(str "SELECT workflow_id, COUNT(*) AS event_count
+                                  FROM intemporal_history
+                                 WHERE workflow_id IN (" in-clause ")
+                                   AND event_key = '[:workflow-started -1 nil]'
+                                 GROUP BY workflow_id
+                                HAVING COUNT(*) <> 1")]
+                         cs-ids)
+                   jdbc-opts)]
+        {:valid?     (empty? rows)
+         :violations (vec rows)
          :stats      {:concurrent-start-workflows (count cs-ids)
-                      :corrupted (+ (count corrupted) (count unexpected))}}))))
+                      :corrupted (count rows)}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Checker 4: Cancellation liveness (bug 2.3)
 ;;
-;; After cancel-workflow is called on a workflow that is blocked in
-;; wait-for-signal, the cancelled flag is set in intemporal_workflows but the
-;; workflow never observes it (no re-entry to the execution loop).  The checker
-;; looks for workflows where:
+;; The checker looks for workflows where:
 ;;   - cancelled = TRUE in intemporal_workflows
 ;;   - The last history event is NOT workflow-completed / workflow-failed /
 ;;     workflow-cancelled

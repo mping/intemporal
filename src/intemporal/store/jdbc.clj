@@ -3,10 +3,12 @@
    [clojure.string :as str]
    [hikari-cp.core :as hikari]
    [intemporal.internal.codec :as codec]
+   [intemporal.internal.domain :as domain]
    [intemporal.protocol :as p]
    [intemporal.store.checked :as checked]
    [migratus.core :as migratus]
-   [next.jdbc :as jdbc])
+   [next.jdbc :as jdbc]
+   [next.jdbc.result-set :as rs])
   (:import
    (java.lang AutoCloseable)))
 
@@ -71,20 +73,16 @@
     ;; MariaDB / MySQL
     "INSERT IGNORE INTO intemporal_workflows (id) VALUES (?)"))
 
-;; A1: history is keyed per (workflow_id, seq, event_type) — the engine records
-;; multiple event types at the same seq (scheduled + completed, started +
-;; completed, ...), so the conflict target must include event_type or later
-;; events silently overwrite earlier ones. Re-writing the SAME event type at the
-;; same seq (normal replay) stays idempotent via the upsert.
+;; Event keys encode the canonical event identity. Rewriting one identity is
+;; first-write-wins, while legitimate retry attempts have distinct keys.
 (defn- upsert-history-sql [kind]
   (case kind
-    :postgres "INSERT INTO intemporal_history (workflow_id, seq, event_type, data)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (workflow_id, seq, event_type) DO UPDATE SET data = EXCLUDED.data"
+    :postgres "INSERT INTO intemporal_history (workflow_id, event_key, seq, event_type, data)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (workflow_id, event_key) DO NOTHING"
     ;; MariaDB / MySQL
-    "INSERT INTO intemporal_history (workflow_id, seq, event_type, data)
-                VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE data = VALUES(data)"))
+    "INSERT IGNORE INTO intemporal_history (workflow_id, event_key, seq, event_type, data)
+                VALUES (?, ?, ?, ?, ?)"))
 
 (defn- upsert-cancel-sql [kind]
   (case kind
@@ -97,17 +95,15 @@
 (declare ->payload-param)
 
 (defn- terminal-status-in [events]
-  (some #(case (:event-type %)
-           :workflow-completed  "completed"
-           :workflow-failed     "failed"
-           :workflow-cancelled  "cancelled"
-           :workflow-terminated "terminated"
-           nil)
-        events))
+  (some-> (domain/terminal-status-in events) name))
 
-(defn- row-value [row column]
-  (or (get row (keyword "intemporal_workflows" (name column)))
-      (get row column)))
+(def ^:private query-options {:builder-fn rs/as-unqualified-lower-maps})
+
+(defn- query! [connectable sql]
+  (jdbc/execute! connectable sql query-options))
+
+(defn- query-one! [connectable sql]
+  (jdbc/execute-one! connectable sql query-options))
 
 (defn- append-events!
   [tx kind workflow-id events]
@@ -115,9 +111,10 @@
   (doseq [event events]
     (jdbc/execute! tx [(upsert-history-sql kind)
                        workflow-id
+                       (pr-str (domain/event-identity event))
                        (:seq event)
                        (name (:event-type event))
-                       (->payload-param kind (dissoc event :event-type))]))
+                       (->payload-param (dissoc event :event-type))]))
   (when-let [term (terminal-status-in events)]
     (jdbc/execute! tx
                    ["UPDATE intemporal_workflows
@@ -148,17 +145,17 @@
 ;; activity result came back as a string and broke replay determinism (bug #22).
 ;; Migration 20260807000007 changed `intemporal_history.data` and
 ;; `intemporal_signals.payload` from JSONB/JSON to text accordingly, so there is
-;; no longer a PGobject to bind and `kind` no longer affects serialization.
+;; no longer a PGobject or dialect-specific payload conversion.
 ;;
 ;; Conversion stays EXPLICIT at this store's call sites rather than going through
 ;; `extend-protocol prepare/SettableParameter` / `rs/ReadableColumn`, which are
 ;; JVM-global: extending IPersistentMap/IPersistentVector would silently coerce
 ;; every map/vector parameter of every next.jdbc call in the host application
 ;; (including non-intemporal ones).
-(defn- ->payload-param [_kind x]
+(defn- ->payload-param [x]
   (codec/encode x))
 
-(defn- <-payload-val [_kind x]
+(defn- <-payload-val [x]
   (if (string? x)
     (codec/decode x)
     x))
@@ -173,16 +170,12 @@
     (when datasource (hikari/close-datasource datasource)))
   p/IStore
   (load-history [_ workflow-id]
-    (let [rows (jdbc/execute! datasource
-                              ["SELECT event_type, data FROM intemporal_history WHERE workflow_id = ? ORDER BY id ASC"
-                               workflow-id])]
+    (let [rows (query! datasource
+                       ["SELECT event_type, data FROM intemporal_history WHERE workflow_id = ? ORDER BY id ASC"
+                        workflow-id])]
       (->> rows
-           (mapv (fn [{:intemporal_history/keys [event_type data]}]
-                   (assoc (<-payload-val kind data) :event-type (keyword event_type)))))))
-
-  (save-event [this workflow-id event]
-    (p/save-events this workflow-id [event])
-    event)
+           (mapv (fn [{:keys [event_type data]}]
+                   (assoc (<-payload-val data) :event-type (keyword event_type)))))))
 
   (save-events [_ workflow-id events]
     (when (seq events)
@@ -196,57 +189,55 @@
       (wake-row! tx workflow-id)))
 
   (find-event [_ workflow-id event-type seq-num]
-    (let [row (jdbc/execute-one! datasource
-                                 ["SELECT data FROM intemporal_history WHERE workflow_id = ? AND event_type = ? AND seq = ?"
-                                  workflow-id (name event-type) seq-num])]
+    (let [row (query-one! datasource
+                          ["SELECT data FROM intemporal_history WHERE workflow_id = ? AND event_type = ? AND seq = ?"
+                           workflow-id (name event-type) seq-num])]
       (when row
-        (assoc (<-payload-val kind (:intemporal_history/data row)) :event-type event-type))))
+        (assoc (<-payload-val (:data row)) :event-type event-type))))
 
   (max-seq [_ workflow-id]
-    ;; MAX(seq) WHERE workflow_id = ? is served by the leading (workflow_id,
-    ;; seq, ...) columns of uq_intemporal_history_wf_seq_type — an index range
-    ;; scan for the last matching entry, not a full history load/deserialize.
-    (->> (jdbc/execute-one! datasource
-                            ["SELECT MAX(seq) AS max_seq FROM intemporal_history WHERE workflow_id = ?"
-                             workflow-id])
+    ;; MAX(seq) is an indexed scalar query, not a history load/deserialization.
+    (->> (query-one! datasource
+                     ["SELECT MAX(seq) AS max_seq FROM intemporal_history WHERE workflow_id = ?"
+                      workflow-id])
          vals
          first))
 
   (get-pending-signals [_ workflow-id]
-    (let [rows (jdbc/execute! datasource
-                              ["SELECT signal_name, payload FROM intemporal_signals WHERE workflow_id = ? ORDER BY id ASC"
-                               workflow-id])]
+    (let [rows (query! datasource
+                       ["SELECT signal_name, payload FROM intemporal_signals WHERE workflow_id = ? ORDER BY id ASC"
+                        workflow-id])]
       (->> rows
-           (reduce (fn [acc {:intemporal_signals/keys [signal_name payload]}]
-                     (update acc signal_name (fnil conj []) (<-payload-val kind payload)))
+           (reduce (fn [acc {:keys [signal_name payload]}]
+                     (update acc signal_name (fnil conj []) (<-payload-val payload)))
                    {}))))
 
   (add-signal [_ workflow-id signal-name signal-data]
     (jdbc/with-transaction [tx datasource]
       (jdbc/execute! tx [(upsert-workflow-sql kind) workflow-id])
       (jdbc/execute! tx ["INSERT INTO intemporal_signals (workflow_id, signal_name, payload) VALUES (?, ?, ?)"
-                         workflow-id signal-name (->payload-param kind signal-data)])
+                         workflow-id signal-name (->payload-param signal-data)])
       (wake-row! tx workflow-id))
     signal-data)
 
   (consume-signal [_ workflow-id signal-name]
     (jdbc/with-transaction [tx datasource]
-      (let [row (jdbc/execute-one! tx
-                                   ["SELECT id, payload FROM intemporal_signals WHERE workflow_id = ? AND signal_name = ? ORDER BY id ASC FOR UPDATE SKIP LOCKED"
-                                    workflow-id signal-name])]
+      (let [row (query-one! tx
+                            ["SELECT id, payload FROM intemporal_signals WHERE workflow_id = ? AND signal_name = ? ORDER BY id ASC FOR UPDATE SKIP LOCKED"
+                             workflow-id signal-name])]
         (when row
-          (jdbc/execute! tx ["DELETE FROM intemporal_signals WHERE id = ?" (:intemporal_signals/id row)])
-          (<-payload-val kind (:intemporal_signals/payload row))))))
+          (jdbc/execute! tx ["DELETE FROM intemporal_signals WHERE id = ?" (:id row)])
+          (<-payload-val (:payload row))))))
 
   (wake-workflow [_ workflow-id]
     (jdbc/with-transaction [tx datasource]
       (wake-row! tx workflow-id)))
 
   (is-cancelled? [_ workflow-id]
-    (let [row (jdbc/execute-one! datasource
-                                 ["SELECT cancelled FROM intemporal_workflows WHERE id = ?"
-                                  workflow-id])]
-      (boolean (:intemporal_workflows/cancelled row))))
+    (let [row (query-one! datasource
+                          ["SELECT cancelled FROM intemporal_workflows WHERE id = ?"
+                           workflow-id])]
+      (boolean (:cancelled row))))
 
   (mark-cancelled [_ workflow-id]
     (jdbc/with-transaction [tx datasource]
@@ -255,22 +246,22 @@
     nil)
 
   (get-workflow-status [_ workflow-id]
-    (let [wf-row (jdbc/execute-one! datasource
-                                    ["SELECT cancelled, status FROM intemporal_workflows WHERE id = ?"
-                                     workflow-id])
-          status (:intemporal_workflows/status wf-row)]
+    (let [wf-row (query-one! datasource
+                             ["SELECT cancelled, status FROM intemporal_workflows WHERE id = ?"
+                              workflow-id])
+          status (:status wf-row)]
       (cond
         (nil? wf-row) :not-found
         ;; Check terminal status first: a late mark-cancelled must not override
         ;; a workflow that already completed or failed.
         (#{"completed" "failed" "cancelled" "terminated"} status) (keyword status)
-        (:intemporal_workflows/cancelled wf-row) :cancelled
+        (:cancelled wf-row) :cancelled
         :else :running)))
 
   ;; --- Durable scheduling + ownership-based recovery ---
   (claim-runnable! [_ owner-id limit now-ms]
     (jdbc/with-transaction [tx datasource]
-      (let [rows (jdbc/execute!
+      (let [rows (query!
                    tx
                    [(case kind
                       :postgres
@@ -300,22 +291,22 @@
                          ["UPDATE intemporal_workflows
                              SET owner = ?, run_state = 'RUNNING', next_run_at = NULL
                            WHERE id = ?"
-                          owner-id (row-value row :id)]))
+                          owner-id (:id row)]))
         (mapv (fn [row]
-                {:workflow-id (row-value row :id)
-                 :wake-version (long (or (row-value row :wake_version) 0))})
+                {:workflow-id (:id row)
+                 :wake-version (long (or (:wake_version row) 0))})
               rows))))
 
   (park-workflow! [_ workflow-id expected-wake-version events next-run-at-ms]
     (jdbc/with-transaction [tx datasource]
-      (let [row (jdbc/execute-one!
+      (let [row (query-one!
                   tx
                   ["SELECT status, run_state, wake_version
                      FROM intemporal_workflows WHERE id = ? FOR UPDATE"
                    workflow-id])
-            status (row-value row :status)
-            state  (some-> (row-value row :run_state) str str/upper-case)
-            current-version (long (or (row-value row :wake_version) 0))
+            status (:status row)
+            state  (some-> (:run_state row) str str/upper-case)
+            current-version (long (or (:wake_version row) 0))
             terminal-event? (terminal-status-in events)]
         (cond
           (#{"completed" "failed" "cancelled" "terminated"} status) {:park-status :terminal}
@@ -374,20 +365,18 @@
     ;; The child row already exists (its :workflow-started event was saved just
     ;; before this call). Stamp the parent linkage on it; idempotent — re-linking
     ;; writes the same values.
-    (jdbc/with-transaction [tx datasource]
-      (jdbc/execute! tx [(upsert-workflow-sql kind) child-id])
-      (jdbc/execute! tx ["UPDATE intemporal_workflows
+    (jdbc/execute! datasource ["UPDATE intemporal_workflows
                           SET parent_workflow_id = ?, parent_seq = ?, parent_close_policy = ?
                           WHERE id = ?"
-                         parent-id parent-seq (name policy) child-id]))
+                         parent-id parent-seq (name policy) child-id])
     nil)
 
   (list-children [this parent-id]
-    (let [rows (jdbc/execute! datasource
-                              ["SELECT id, parent_seq, parent_close_policy
-                   FROM intemporal_workflows WHERE parent_workflow_id = ?"
-                               parent-id])]
-      (mapv (fn [{:intemporal_workflows/keys [id parent_seq parent_close_policy]}]
+    (let [rows (query! datasource
+                       ["SELECT id, parent_seq, parent_close_policy
+                           FROM intemporal_workflows WHERE parent_workflow_id = ?"
+                        parent-id])]
+      (mapv (fn [{:keys [id parent_seq parent_close_policy]}]
               {:child-id id
                :parent-seq parent_seq
                :policy (keyword parent_close_policy)
@@ -396,16 +385,15 @@
 
 ;; TODO use more complete opts
 (defn create-store
-  "Creates a new JDBC-backed IStore, wrapped with intemporal.spec assertions
-  by default (intemporal.store.checked/CheckedStore). The JDBC URL prefix
+  "Creates a new JDBC-backed IStore, optionally wrapped with intemporal.spec
+  assertions. The JDBC URL prefix
   determines the database kind (postgresql | mariadb | mysql) and thus the SQL
   dialect and migration directory used.
 
   Options:
-  - :checked? - wrap with spec assertions (default true). Pass false for a
-                raw, unwrapped store."
-  [jdbc-url & {:keys [checked?] :or {checked? true}}]
+  - :checked? - :auto (default), true, or false."
+  [jdbc-url & {:keys [checked?] :or {checked? :auto}}]
   (let [kind  (migrate! jdbc-url)
         ds    (hikari/make-datasource {:jdbc-url jdbc-url})
         store (->JdbcStore ds kind)]
-    (if checked? (checked/->CheckedStore store) store)))
+    (checked/wrap store checked?)))

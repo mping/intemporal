@@ -1,5 +1,7 @@
 (ns intemporal.tests.store.test-suite
   (:require
+   [clojure.set :as set]
+   [clojure.string :as str]
    [clojure.spec.alpha :as s]
    [clojure.test :refer [is testing]]
    [intemporal.core :as intemporal]
@@ -35,6 +37,82 @@
 
 (defn- unclaimed? [claims workflow-id]
   (not-any? #(= workflow-id (:workflow-id %)) claims))
+
+(defn- run-history-contract-tests [store]
+  (testing "committed append order and event identity"
+    (let [workflow-id (str "history-contract-" (random-uuid))
+          started     (started-event workflow-id)
+          scheduled   {:event-type :activity-scheduled :seq 0
+                       :activity-name "contract/activity" :args []}
+          later       {:event-type :timer-scheduled :seq 1
+                       :fire-at (+ (System/currentTimeMillis) 1000)}
+          completed   {:event-type :activity-completed :seq 0
+                       :activity-name "contract/activity" :result :first}
+          conflict    (assoc completed :result :conflicting)]
+      (p/save-events store workflow-id [started scheduled later])
+      (p/save-event store workflow-id completed)
+      (p/save-event store workflow-id completed)
+      (p/save-event store workflow-id conflict)
+      (is (= [:workflow-started :activity-scheduled :timer-scheduled
+              :activity-completed]
+             (mapv :event-type (p/load-history store workflow-id)))
+          "history follows committed append order, not replay sequence order")
+      (is (= :first (:result (p/find-event store workflow-id
+                                           :activity-completed 0)))
+          "an exact duplicate is idempotent and a conflicting identity is first-write-wins")
+
+      (let [attempt (fn [n]
+                      {:event-type :activity-attempt-failed
+                       :seq 2 :activity-name "contract/activity"
+                       :attempts n :error {:message (str "attempt " n)}
+                       :will-retry (< n 3)})]
+        (p/save-events store workflow-id [(attempt 1) (attempt 2) (attempt 3)])
+        (is (= [1 2 3]
+               (->> (p/load-history store workflow-id)
+                    (filter #(= :activity-attempt-failed (:event-type %)))
+                    (mapv :attempts)))
+            "retry attempts have distinct durable identities at one replay sequence"))
+      (p/save-event store workflow-id
+                    {:event-type :workflow-completed :seq 3 :result :done}))))
+
+(defn- run-signal-fifo-test [store]
+  (testing "signals are strict FIFO even when produced faster than clock resolution"
+    (let [workflow-id (str "signal-fifo-" (random-uuid))
+          payloads    (mapv (fn [n] {:n n}) (range 40))]
+      (p/save-event store workflow-id (started-event workflow-id))
+      (doseq [payload payloads]
+        (p/add-signal store workflow-id "fifo" payload))
+      (is (= payloads (get (p/get-pending-signals store workflow-id) "fifo")))
+      (is (= payloads
+             (mapv (fn [_] (p/consume-signal store workflow-id "fifo")) payloads)))
+      (is (nil? (p/consume-signal store workflow-id "fifo")))
+      (p/save-event store workflow-id
+                    {:event-type :workflow-completed :seq 0 :result :done}))))
+
+(defn- run-claim-contention-test [store]
+  (testing "concurrent owners receive disjoint claims"
+    (let [prefix (str "claim-contention-" (random-uuid))
+          ids    (mapv #(str prefix "-" %) (range 12))]
+      (doseq [workflow-id ids]
+        (p/save-event store workflow-id (started-event workflow-id)))
+      (let [ready (promise)
+            claim (fn [owner]
+                    @ready
+                    (p/claim-runnable! store owner 1000
+                                       (System/currentTimeMillis)))
+            a     (future (claim "contention-a"))
+            b     (future (claim "contention-b"))]
+        (deliver ready true)
+        (let [in-scope? #(str/starts-with? % prefix)
+              a-ids (set (filter in-scope? (map :workflow-id @a)))
+              b-ids (set (filter in-scope? (map :workflow-id @b)))]
+          (is (empty? (set/intersection a-ids b-ids)))
+          (is (= (clojure.core/set ids) (set/union a-ids b-ids))))
+        (p/release-owner store "contention-a")
+        (p/release-owner store "contention-b")
+        (doseq [workflow-id ids]
+          (p/save-event store workflow-id
+                        {:event-type :workflow-completed :seq 0 :result :done}))))))
 
 (defn- run-scheduling-state-tests [store]
   (testing "durable RUNNABLE/RUNNING/WAITING state machine"
@@ -125,6 +203,9 @@
         (p/release-owner store owner-id)))))
 
 (defn run-store-tests [store]
+  (run-history-contract-tests store)
+  (run-signal-fifo-test store)
+  (run-claim-contention-test store)
   (run-scheduling-state-tests store)
 
   (testing "Basic store operations"
@@ -181,10 +262,20 @@
                         (p/requeue-running! store wf-id))))
 
         (let [child-id (str wf-id "-child")]
+          (let [ghost-id (str child-id "-missing")]
+            (p/link-child! store wf-id 0 ghost-id :terminate)
+            (is (not-any? #(= ghost-id (:child-id %))
+                          (p/list-children store wf-id))
+                "link-child! does not manufacture or expose a missing child"))
+          (p/save-event store child-id (started-event child-id))
           (p/link-child! store wf-id 0 child-id :terminate)
           (let [children (p/list-children store wf-id)]
             (is (s/valid? ::spec/children children)
-                (s/explain-str ::spec/children children)))))))
+                (s/explain-str ::spec/children children))
+            (is (= :running (:status (first children)))
+                "link-child! links an already-created child; it never creates an empty row"))
+          (p/save-event store child-id
+                        {:event-type :workflow-completed :seq 0 :result :done})))))
 
   (testing "Workflow execution with store"
     (intemporal/with-workflow-engine [engine {:store store :threads 2}]

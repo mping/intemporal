@@ -1,222 +1,158 @@
 (ns intemporal.observer
+  #?(:cljs
+     (:require-macros
+      [intemporal.internal.logging :as log]))
   (:require
+   [intemporal.internal.logging :as log]
    [intemporal.protocol :as p]
-   [intemporal.utils :as utils]))
+   [intemporal.internal.clock :as clock]))
 
-;; ============================================================================
-;; Default Observer (Logging)
-;; ============================================================================
+(defn notify!
+  "Deliver one event map to an observer without allowing observer failures to
+   affect workflow execution. Adds :timestamp once when the emitter did not
+   provide one; composed observers therefore see the identical event value."
+  [observer event]
+  (when observer
+    (let [event (cond-> event
+                  (nil? (:timestamp event))
+                  (assoc :timestamp (clock/now-ms)))]
+      (try
+        (p/on-event observer event)
+        (catch #?(:clj Throwable :cljs :default) e
+          (log/warnf e "Observer error for %s" (:event event)))))))
+
+;; Event constructors keep call sites compact while the public extension surface
+;; remains the single IWorkflowObserver/on-event operation.
+(defn on-workflow-started [observer workflow-id workflow-name args]
+  (notify! observer {:event :workflow-started
+                     :workflow-id workflow-id
+                     :workflow-name workflow-name
+                     :args args}))
+
+(defn on-workflow-suspended [observer workflow-id suspension-type]
+  (notify! observer {:event :workflow-suspended
+                     :workflow-id workflow-id
+                     :suspension-type suspension-type}))
+
+(defn on-workflow-resumed [observer workflow-id]
+  (notify! observer {:event :workflow-resumed :workflow-id workflow-id}))
+
+(defn on-child-workflow-scheduled
+  [observer workflow-id seq-num child-workflow-id child-workflow-name args]
+  (notify! observer {:event :child-workflow-scheduled
+                     :workflow-id workflow-id
+                     :seq seq-num
+                     :child-workflow-id child-workflow-id
+                     :child-workflow-name child-workflow-name
+                     :args args}))
+
+(defn on-activity-scheduled [observer workflow-id seq-num activity-name args]
+  (notify! observer {:event :activity-scheduled
+                     :workflow-id workflow-id
+                     :seq seq-num
+                     :activity-name activity-name
+                     :args args}))
+
+(defn on-activity-started [observer workflow-id seq-num activity-name]
+  (notify! observer {:event :activity-started
+                     :workflow-id workflow-id
+                     :seq seq-num
+                     :activity-name activity-name}))
+
+(defn on-activity-completed
+  [observer workflow-id seq-num activity-name result duration-ms]
+  (notify! observer {:event :activity-completed
+                     :workflow-id workflow-id
+                     :seq seq-num
+                     :activity-name activity-name
+                     :result result
+                     :duration-ms duration-ms}))
+
+(defn on-activity-failed
+  [observer workflow-id seq-num activity-name error duration-ms]
+  (notify! observer {:event :activity-failed
+                     :workflow-id workflow-id
+                     :seq seq-num
+                     :activity-name activity-name
+                     :error error
+                     :duration-ms duration-ms}))
+
+(defn on-async-started [observer workflow-id seq-num]
+  (notify! observer {:event :async-started :workflow-id workflow-id :seq seq-num}))
+
+(defn on-async-completed [observer workflow-id seq-num result]
+  (notify! observer {:event :async-completed
+                     :workflow-id workflow-id
+                     :seq seq-num
+                     :result result}))
+
+(defn on-async-failed [observer workflow-id seq-num error]
+  (notify! observer {:event :async-failed
+                     :workflow-id workflow-id
+                     :seq seq-num
+                     :error error}))
+
+(defn on-timer-scheduled [observer workflow-id seq-num fire-at]
+  (notify! observer {:event :timer-scheduled
+                     :workflow-id workflow-id
+                     :seq seq-num
+                     :fire-at fire-at}))
+
+(defn on-timer-fired [observer workflow-id seq-num]
+  (notify! observer {:event :timer-fired :workflow-id workflow-id :seq seq-num}))
+
+(defn on-signal-received [observer workflow-id signal-name payload]
+  (notify! observer {:event :signal-received
+                     :workflow-id workflow-id
+                     :signal-name signal-name
+                     :payload payload}))
+
+(defn on-workflow-completed [observer workflow-id result]
+  (notify! observer {:event :workflow-completed
+                     :workflow-id workflow-id
+                     :result result}))
+
+(defn on-workflow-failed [observer workflow-id error]
+  (notify! observer {:event :workflow-failed
+                     :workflow-id workflow-id
+                     :error error}))
+
+(defn on-workflow-cancelled [observer workflow-id]
+  (notify! observer {:event :workflow-cancelled :workflow-id workflow-id}))
+
+(defn on-compensation-started [observer workflow-id]
+  (notify! observer {:event :compensation-started :workflow-id workflow-id}))
+
+(defn on-compensation-failed [observer workflow-id error]
+  (notify! observer {:event :compensation-failed
+                     :workflow-id workflow-id
+                     :error error}))
+
+(defn on-compensation-completed [observer workflow-id]
+  (notify! observer {:event :compensation-completed :workflow-id workflow-id}))
 
 (defrecord LoggingObserver [log-atom]
   p/IWorkflowObserver
-  (on-workflow-started [_ workflow-id workflow-name args]
-    (swap! log-atom conj {:event :workflow-started
-                          :workflow-name workflow-name
-                          :workflow-id workflow-id
-                          :args args
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-workflow-suspended [_ workflow-id suspension-type]
-    (swap! log-atom conj {:event :workflow-suspended
-                          :workflow-id workflow-id
-                          :suspension-type suspension-type
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-workflow-resumed [_ workflow-id]
-    (swap! log-atom conj {:event :workflow-resumed
-                          :workflow-id workflow-id
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-child-workflow-scheduled [_ workflow-id seq-num child-workflow-id child-workflow-name args]
-    (swap! log-atom conj {:event :child-workflow-scheduled
-                          :workflow-id workflow-id
-                          :seq seq-num
-                          :child-workflow-id child-workflow-id
-                          :child-workflow-name child-workflow-name
-                          :args args
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-activity-scheduled [_ workflow-id seq-num activity-name args]
-    (swap! log-atom conj {:event :activity-scheduled
-                          :workflow-id workflow-id
-                          :seq seq-num
-                          :activity-name activity-name
-                          :args args
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-activity-started [_ workflow-id seq-num activity-name]
-    (swap! log-atom conj {:event :activity-started
-                          :workflow-id workflow-id
-                          :seq seq-num
-                          :activity-name activity-name
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-activity-completed [_ workflow-id seq-num activity-name result duration-ms]
-    (swap! log-atom conj {:event :activity-completed
-                          :workflow-id workflow-id
-                          :seq seq-num
-                          :activity-name activity-name
-                          :result result
-                          :duration-ms duration-ms
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-activity-failed [_ workflow-id seq-num activity-name error duration-ms]
-    (swap! log-atom conj {:event :activity-failed
-                          :workflow-id workflow-id
-                          :seq seq-num
-                          :activity-name activity-name
-                          :error error
-                          :duration-ms duration-ms
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-async-started [_ workflow-id seq-num]
-    (swap! log-atom conj {:event :async-started
-                          :workflow-id workflow-id
-                          :seq seq-num
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-async-completed [_ workflow-id seq-num result]
-    (swap! log-atom conj {:event :async-completed
-                          :workflow-id workflow-id
-                          :seq seq-num
-                          :result result
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-async-failed [_ workflow-id seq-num error]
-    (swap! log-atom conj {:event :async-failed
-                          :workflow-id workflow-id
-                          :seq seq-num
-                          :error error
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-timer-scheduled [_ workflow-id seq-num fire-at]
-    (swap! log-atom conj {:event :timer-scheduled
-                          :workflow-id workflow-id
-                          :seq seq-num
-                          :fire-at fire-at
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-timer-fired [_ workflow-id seq-num]
-    (swap! log-atom conj {:event :timer-fired
-                          :workflow-id workflow-id
-                          :seq seq-num
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-signal-received [_ workflow-id signal-name payload]
-    (swap! log-atom conj {:event :signal-received
-                          :workflow-id workflow-id
-                          :signal-name signal-name
-                          :payload payload
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-workflow-completed [_ workflow-id result]
-    (swap! log-atom conj {:event :workflow-completed
-                          :workflow-id workflow-id
-                          :result result
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-workflow-failed [_ workflow-id error]
-    (swap! log-atom conj {:event :workflow-failed
-                          :workflow-id workflow-id
-                          :error error
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-workflow-cancelled [_ workflow-id]
-    (swap! log-atom conj {:event :workflow-cancelled
-                          :workflow-id workflow-id
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-compensation-started [_ workflow-id]
-    (swap! log-atom conj {:event :compensation-started
-                          :workflow-id workflow-id
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-compensation-failed [_ workflow-id error]
-    (swap! log-atom conj {:event :compensation-failed
-                          :workflow-id workflow-id
-                          :error error
-                          :timestamp (utils/current-time-ms)}))
-
-  (on-compensation-completed [_ workflow-id]
-    (swap! log-atom conj {:event :compensation-completed
-                          :workflow-id workflow-id
-                          :timestamp (utils/current-time-ms)})))
+  (on-event [_ event]
+    (swap! log-atom conj event)))
 
 (defn make-logging-observer
-  "Create an observer that logs all events to an atom"
+  "Create an observer that appends all event maps to an atom."
   ([] (make-logging-observer (atom [])))
   ([log-atom] (->LoggingObserver log-atom)))
 
-(defn noop-observer
-  "Create an observer that does nothing"
-  []
+(defn noop-observer []
   (reify p/IWorkflowObserver
-    (on-workflow-started [_ _ _ _])
-    (on-workflow-suspended [_ _ _])
-    (on-workflow-resumed [_ _])
-    (on-child-workflow-scheduled [_ _ _ _ _ _])
-    (on-activity-scheduled [_ _ _ _ _])
-    (on-activity-started [_ _ _ _])
-    (on-activity-completed [_ _ _ _ _ _])
-    (on-activity-failed [_ _ _ _ _ _])
-    (on-async-started [_ _ _])
-    (on-async-completed [_ _ _ _])
-    (on-async-failed [_ _ _ _])
-    (on-timer-scheduled [_ _ _ _])
-    (on-timer-fired [_ _ _])
-    (on-signal-received [_ _ _ _])
-    (on-workflow-completed [_ _ _])
-    (on-workflow-failed [_ _ _])
-    (on-workflow-cancelled [_ _])
-    (on-compensation-started [_ _])
-    (on-compensation-failed [_ _ _])
-    (on-compensation-completed [_ _])))
+    (on-event [_ _])))
 
 (defn make-composite-observer
-  "Create an observer that fans out all events to a list of observers.
-   Returns a noop-observer if the list is empty."
+  "Fan out each event to every non-nil observer. A failing observer is isolated,
+   and later observers still receive the exact same event map."
   [observers]
-  (let [obs (vec (filter some? observers))]
-    (if (empty? obs)
+  (let [observers (vec (filter some? observers))]
+    (if (empty? observers)
       (noop-observer)
       (reify p/IWorkflowObserver
-        (on-workflow-started [_ workflow-id workflow-name args]
-          (doseq [o obs] (p/on-workflow-started o workflow-id workflow-name args)))
-        (on-workflow-suspended [_ workflow-id suspension-type]
-          (doseq [o obs] (p/on-workflow-suspended o workflow-id suspension-type)))
-        (on-workflow-resumed [_ workflow-id]
-          (doseq [o obs] (p/on-workflow-resumed o workflow-id)))
-        (on-child-workflow-scheduled [_ workflow-id seq-num child-workflow-id child-workflow-name args]
-          (doseq [o obs] (p/on-child-workflow-scheduled o workflow-id seq-num child-workflow-id child-workflow-name args)))
-        (on-activity-scheduled [_ workflow-id seq-num activity-name args]
-          (doseq [o obs] (p/on-activity-scheduled o workflow-id seq-num activity-name args)))
-        (on-activity-started [_ workflow-id seq-num activity-name]
-          (doseq [o obs] (p/on-activity-started o workflow-id seq-num activity-name)))
-        (on-activity-completed [_ workflow-id seq-num activity-name result duration-ms]
-          (doseq [o obs] (p/on-activity-completed o workflow-id seq-num activity-name result duration-ms)))
-        (on-activity-failed [_ workflow-id seq-num activity-name error duration-ms]
-          (doseq [o obs] (p/on-activity-failed o workflow-id seq-num activity-name error duration-ms)))
-        (on-async-started [_ workflow-id seq-num]
-          (doseq [o obs] (p/on-async-started o workflow-id seq-num)))
-        (on-async-completed [_ workflow-id seq-num result]
-          (doseq [o obs] (p/on-async-completed o workflow-id seq-num result)))
-        (on-async-failed [_ workflow-id seq-num error]
-          (doseq [o obs] (p/on-async-failed o workflow-id seq-num error)))
-        (on-timer-scheduled [_ workflow-id seq-num fire-at]
-          (doseq [o obs] (p/on-timer-scheduled o workflow-id seq-num fire-at)))
-        (on-timer-fired [_ workflow-id seq-num]
-          (doseq [o obs] (p/on-timer-fired o workflow-id seq-num)))
-        (on-signal-received [_ workflow-id signal-name payload]
-          (doseq [o obs] (p/on-signal-received o workflow-id signal-name payload)))
-        (on-workflow-completed [_ workflow-id result]
-          (doseq [o obs] (p/on-workflow-completed o workflow-id result)))
-        (on-workflow-failed [_ workflow-id error]
-          (doseq [o obs] (p/on-workflow-failed o workflow-id error)))
-        (on-workflow-cancelled [_ workflow-id]
-          (doseq [o obs] (p/on-workflow-cancelled o workflow-id)))
-        (on-compensation-started [_ workflow-id]
-          (doseq [o obs] (p/on-compensation-started o workflow-id)))
-        (on-compensation-failed [_ workflow-id error]
-          (doseq [o obs] (p/on-compensation-failed o workflow-id error)))
-        (on-compensation-completed [_ workflow-id]
-          (doseq [o obs] (p/on-compensation-completed o workflow-id)))))))
+        (on-event [_ event]
+          (doseq [observer observers]
+            (notify! observer event)))))))

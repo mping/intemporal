@@ -38,18 +38,18 @@
           store  (->ParkRacingStore inner raced? "go"
                                     {:id "worker-race"
                                      :payload {:payload :arrived}})
-          engine (intemporal/make-workflow-engine :store store :threads 2)
-          stop   (intemporal/start-worker engine
-                                          :owner-id "wake-race-worker"
-                                          :poll-ms 20
-                                          :workflow-concurrency 1)
+          engine (intemporal/make-workflow-engine
+                   :store store :threads 2
+                   :owner-id "wake-race-worker"
+                   :poll-ms 20
+                   :workflow-concurrency 1)
           wf-id  (str "worker-wake-race-" (random-uuid))]
       (try
         (intemporal/submit-workflow engine waiting-workflow [] :workflow-id wf-id)
         (is (= {:status :completed
-                :result {:payload :arrived}}
+                :result {:payload :arrived}
+                :workflow-id wf-id}
                (intemporal/await-workflow engine wf-id :timeout-ms 3000)))
         (is @raced? "the signal was injected immediately before worker park")
         (finally
-          (stop)
           (intemporal/shutdown-engine engine))))))

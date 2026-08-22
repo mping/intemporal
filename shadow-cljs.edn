@@ -1,6 +1,5 @@
 ;; shadow-cljs configuration
-{:deps {:aliases [:cljs :dev :doc :fdb]}
- :nrepl {:init-ns intemporal.dev}
+{:deps {:aliases [:cljs :dev :doc]}
  :dev-http {8000 "public"}
  :builds {:doc {:target :browser
                 :output-dir "public/js"
@@ -20,14 +19,5 @@
           :node {:target    :node-test
                  :output-to "target/tests.js"
                  :ns-regexp "-test$"
-                 :preloads  [intemporal.tests.node-keepalive]
                  :compiler-options {:source-map "true"}
-                 :autorun   true}
-
-          :dev {:target :browser
-                :asset-path "."
-                :output-dir "target"
-                :compiler-options {:infer-externs true
-                                   :optimizations :none}
-                :modules {:dev {:entries [intemporal.dev]}}}}}
-
+                 :autorun   true}}}

@@ -36,6 +36,11 @@
     (intemporal/wait-for-signal "close-order")
     {:order order :validated ok}))
 
+(intemporal/defn-workflow place-order-sync [order amount child-id]
+  (intemporal/run-child-workflow #'fulfill-order [order amount]
+                                 :child-id child-id
+                                 :parent-close-policy :abandon))
+
 ;; ── test ────────────────────────────────────────────────────────────────────────
 
 (deftest abandon-in-memory
@@ -63,5 +68,31 @@
                                  (is (= :completed (:status r)) "abandoned child completes independently")
                                  (is (match? {:order "ord-2" :charged {:charged 200} :shipped {:shipped "ord-2"}}
                                              (:result r))))))))
+            (prom/catch (fn [e] (is false (str "unexpected error: " e))))
+            (prom/finally (fn [_ _] (done))))))))
+
+(deftest synchronous-child-forwards-close-policy
+  (testing "run-child-workflow preserves a non-default parent close policy"
+    (async done
+      (let [store (u/in-memory)
+            pid   "sync-parent-ab-1"
+            cid   "sync-parent-ab-1/child"]
+        (-> (u/with-worker store
+              (fn [engine]
+                (intemporal/submit-workflow engine #'place-order-sync ["ord-sync" 10 cid]
+                                             :workflow-id pid)
+                (-> (u/await-status store cid :running 3000)
+                    (prom/then (fn [s]
+                                 (is (= :running s))
+                                 (intemporal/cancel-workflow store pid)
+                                 (intemporal/await-workflow engine pid :timeout-ms 5000)))
+                    (prom/then (fn [r]
+                                 (is (= :cancelled (:status r)))
+                                 (is (= :running (p/get-workflow-status store cid))
+                                     "the synchronous :abandon child survives parent cancellation")
+                                 (intemporal/send-signal store cid "packed" {})
+                                 (intemporal/await-workflow engine cid :timeout-ms 5000)))
+                    (prom/then (fn [r]
+                                 (is (= :completed (:status r))))))))
             (prom/catch (fn [e] (is false (str "unexpected error: " e))))
             (prom/finally (fn [_ _] (done))))))))

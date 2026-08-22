@@ -32,10 +32,11 @@
    + engine down afterwards. Returns body-fn's value. The captured `store`
    (= (:store engine)) is still used for point reads / signals in the body."
   [store body-fn]
-  (let [engine (intemporal/make-workflow-engine :store store :threads 4)
-        stop   (intemporal/start-worker engine :poll-ms 25 :owner-id (str "w-" (random-uuid)))]
+  (let [engine (intemporal/make-workflow-engine
+                 :store store :threads 4 :poll-ms 25
+                 :owner-id (str "w-" (random-uuid)))]
     (try (body-fn engine)
-         (finally (stop) (intemporal/shutdown-engine engine)))))
+         (finally (intemporal/shutdown-engine engine)))))
 
 ;; ── store fixtures ──────────────────────────────────────────────────────────────
 

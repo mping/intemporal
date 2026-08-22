@@ -6,15 +6,15 @@
 
   Op types:
     :submit          — inserts a workflow spec into jepsen_work_queue
-    :signal          — calls add-signal directly on the JDBC store
-    :cancel          — calls mark-cancelled directly on the JDBC store
+    :signal          — calls send-signal through a separate JDBC store client
+    :cancel          — calls cancel-workflow through that store client
     :observe         — reads workflow status from intemporal_workflows + history
-    :concurrent-start — inserts the same workflow-id twice (different wf types
-                        accepted by different workers) to trigger bug 1.2
+    :concurrent-start — races two writes of one event identity
 
   History entries are plain EDN maps compatible with jepsen.history format:
     {:process <int> :type (:ok|:fail|:info) :f <op> :value {...} :time <ms>}"
   (:require
+   [intemporal.core :as intemporal]
    [next.jdbc :as jdbc]))
 
 (defn now-ms [] (System/currentTimeMillis))
@@ -75,37 +75,36 @@
         {:type :fail :error (str t)}))))
 
 (defn invoke-signal
-  "Writes a signal directly to the store.  Does NOT go through a worker — this
-  models a separate process (e.g. an HTTP endpoint) calling send-signal.
-
-  When the owning worker is alive, its callback atom fires and the workflow
-  wakes.  When the worker is dead, the signal row persists in intemporal_signals
-  but no callback fires (bug 1.1)."
-  [db-spec test-run workflow-id signal-name]
-  (try
-    (jdbc/execute! db-spec
-      ;; payload is EDN text since migration 20260807000007 (bug #22) — no ::jsonb cast
-      ["INSERT INTO intemporal_signals (workflow_id, signal_name, payload)
-        VALUES (?,?,'{}')"
-       workflow-id signal-name])
-    (jdbc/execute! db-spec
-      ["INSERT INTO jepsen_signals_sent (test_run, workflow_id, signal_name)
-        VALUES (?,?,?)"
-       test-run workflow-id signal-name])
-    {:type :ok :value {:workflow-id workflow-id :signal signal-name}}
-    (catch Throwable t
-      {:type :fail :error (str t)})))
+  "Send through a separate store client, modelling an HTTP/API process. The
+  store atomically persists the signal and advances durable scheduling state.
+  A test-side reservation ensures the generator and nemesis send at most one
+  expected signal per workflow."
+  [store db-spec test-run workflow-id signal-name]
+  (let [reservation (jdbc/execute-one! db-spec
+                      ["INSERT INTO jepsen_signals_sent
+                          (test_run, workflow_id, signal_name)
+                        VALUES (?,?,?)
+                        ON CONFLICT (test_run, workflow_id) DO NOTHING
+                        RETURNING id"
+                       test-run workflow-id signal-name])]
+    (if-not reservation
+      {:type :ok :value {:workflow-id workflow-id :signal signal-name
+                         :already-sent true}}
+      (try
+        (intemporal/send-signal store workflow-id signal-name {})
+        {:type :ok :value {:workflow-id workflow-id :signal signal-name}}
+        (catch Throwable t
+          (jdbc/execute! db-spec
+            ["DELETE FROM jepsen_signals_sent WHERE test_run = ? AND workflow_id = ?"
+             test-run workflow-id])
+          {:type :fail :error (str t)})))))
 
 (defn invoke-cancel
-  "Sets the cancelled flag on the workflow.  If the workflow is sleeping on
-  wait-for-signal the flag will be set but the workflow will never observe it
-  (bug 2.3)."
-  [db-spec test-run workflow-id]
+  "Request cancellation through the store-backed public API. Marking and waking
+  are one durable transition."
+  [store db-spec test-run workflow-id]
   (try
-    (jdbc/execute! db-spec
-      ["INSERT INTO intemporal_workflows (id, cancelled) VALUES (?,TRUE)
-        ON CONFLICT (id) DO UPDATE SET cancelled = TRUE"
-       workflow-id])
+    (intemporal/cancel-workflow store workflow-id)
     (jdbc/execute! db-spec
       ["INSERT INTO jepsen_cancels_sent (test_run, workflow_id) VALUES (?,?)"
        test-run workflow-id])
@@ -123,17 +122,15 @@
       {:type :fail :error (str t)})))
 
 (defn invoke-concurrent-start
-  "Inserts the same workflow-id into the queue TWICE so that two workers race
-  to run it concurrently.  The UNIQUE constraint on workflow_id in the queue
-  prevents a second claim via the normal path, so we bypass the queue and
-  directly write to intemporal_history from two threads to reproduce bug 1.2.
+  "Races two exact writes of the same history identity. The event-key constraint
+  must retain exactly one row without overwriting its committed payload.
 
   Returns a map of {:workflow-id ... :threads-launched 2}."
   [db-spec test-run]
   (let [wf-id  (str (random-uuid))
         nonce  (str (random-uuid))
         result (promise)
-        write! (fn [seq-num event-type]
+        write! (fn [marker]
                  (try
                    (jdbc/with-transaction [tx db-spec]
                      (jdbc/execute! tx
@@ -143,19 +140,18 @@
                      (jdbc/execute! tx
                        ;; data is EDN text since migration 20260807000007 (bug #22)
                        ["INSERT INTO intemporal_history
-                           (workflow_id, seq, event_type, data)
-                         VALUES (?,?,?,'{}')
-                         ON CONFLICT (workflow_id, seq) DO UPDATE
-                           SET event_type = EXCLUDED.event_type,
-                               data = EXCLUDED.data"
-                        wf-id seq-num event-type]))
+                           (workflow_id, event_key, seq, event_type, data)
+                         VALUES (?,?,?,'workflow-started',?)
+                         ON CONFLICT (workflow_id, event_key) DO NOTHING"
+                        wf-id "[:workflow-started -1 nil]" -1
+                        (pr-str {:seq -1 :marker marker})]))
                    :ok
                    (catch Throwable t (str "error: " t))))
         ;; Fire two threads simultaneously.
         t1 (Thread/startVirtualThread
-             (fn [] (deliver result (write! 0 "workflow-started"))))
+             (fn [] (deliver result (write! :first))))
         t2 (Thread/startVirtualThread
-             (fn [] (write! 0 "workflow-started-duplicate")))]
+             (fn [] (write! :second)))]
     (.join ^Thread t1 5000)
     (.join ^Thread t2 5000)
     (jdbc/execute! db-spec

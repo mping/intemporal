@@ -79,17 +79,16 @@ There are **two** distinct things under the "jepsen" name.
 
 ### 1. Per-scenario bug guard tests — `test/intemporal/tests/jepsen/`
 
-Deterministic single-JVM tests, one namespace per known failure mode, each exercising
-InMemory + JDBC + FDB. They double as regression guards: a *fixed* bug's test asserts the
-correct behaviour, an *unfixed* bug's test asserts the buggy behaviour it still exhibits.
+Deterministic single-JVM regression tests, one namespace per former failure mode, each
+exercising InMemory + JDBC + FDB.
 
-| Namespace | Bug (see `improvements.md`) | State |
+| Namespace | Invariant | State |
 |---|---|---|
-| `bug-1-1-test` | Lost wake on signal across pods | buggy (Phase C) |
-| `bug-1-2-test` | Concurrent same-seq write corruption | buggy (Phase C) |
-| `bug-1-3-test` | No recovery poller on restart | buggy (Phase C) |
-| `bug-2-1-test` | Register-then-consume signal race | **fixed** (Phase A) |
-| `bug-2-3-test` | Cancel can't reach a sleeper | **fixed** (Phase A) |
+| `bug-1-1-test` | A durable signal wakes work across store instances | fixed |
+| `bug-1-2-test` | Concurrent owners cannot both claim one workflow | fixed |
+| `bug-1-3-test` | A restarted engine resumes durable runnable work | fixed |
+| `bug-2-1-test` | A signal racing with park cannot be lost | fixed |
+| `bug-2-3-test` | Cancellation wakes a signal waiter | fixed |
 
 ```bash
 # in-memory variants only (no DB)
@@ -112,7 +111,8 @@ signal consume/register window so `bug-2-1` reproduces its race 100% determinist
 
 Boots N worker JVMs against one Postgres, drives a submit/signal/cancel generator and a
 nemesis that SIGKILL/SIGTERMs and restarts workers, then checks invariants after a quiesce
-phase. This is the integration vehicle for the Phase C multi-pod work. Full design:
+phase. Each restarted engine reuses its stable owner id and recovers its claimed work.
+Full design:
 [test/intemporal/jepsen/README.md](test/intemporal/jepsen/README.md).
 
 ```bash
@@ -131,15 +131,6 @@ clojure -X:dev:jdbc:jepsen intemporal.jepsen.runner/run \
 
 The runner forks workers via the `:jepsen-worker` alias; both `:jepsen` and `:jepsen-worker`
 are defined in `deps.edn`. The Postgres URL comes from `POSTGRES_JDBC_URI` (default localhost).
-
-### Standalone bug reproducer
-
-`dev/verify_bugs.clj` runs all five scenarios against JDBC + FDB and prints a pass/fail
-report — a quick end-to-end smoke check:
-
-```bash
-clojure -X:dev:jdbc:fdb verify-bugs/run
-```
 
 ### Known flaky test
 

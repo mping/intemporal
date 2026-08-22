@@ -3,8 +3,9 @@
      (:require-macros
       [net.cgrand.macrovich :as macros]))
   (:require
-   [cljs.analyzer.api :as api]
+   #_{:clj-kondo/ignore [:unused-namespace]}
    [intemporal.internal.activity :as act]
+   #_{:clj-kondo/ignore [:unused-namespace]}
    [intemporal.internal.context :as ctx]
    [intemporal.internal.workflow-registry :as wreg]
    #?(:clj [net.cgrand.macrovich :as macros])))
@@ -47,8 +48,10 @@
   [proto & opts]
   (macros/case
     :cljs
-    (when cljs-available?
-      (let [resolved     (api/resolve &env proto)
+    #?(:clj
+       (when cljs-available?
+         (let [resolve-cljs (requiring-resolve 'cljs.analyzer.api/resolve)
+            resolved     (resolve-cljs &env proto)
             curr-ns      (:name (:ns &env))
             proto-ns     (:ns resolved)
             in-proto-ns? (= curr-ns proto-ns)
@@ -81,6 +84,7 @@
                  `(~sname [this# ~@args]
                     (let [f# (intemporal.core/stub (var ~qname))]
                       (f# ~@args))))))))
+       :cljs nil)
 
     :clj
     #_{:clj-kondo/ignore [:unresolved-symbol]}

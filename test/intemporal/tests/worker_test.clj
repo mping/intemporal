@@ -45,14 +45,14 @@
     (is (= :running (p/get-workflow-status store wid))
         "workflow is durably suspended, not terminal, after the crash")
     ;; Phase 2: a worker (fresh engine) + a signal delivered via the shared store.
-    (let [e2   (intemporal/make-workflow-engine :store store :threads 2)
-          stop (intemporal/start-worker e2 :poll-ms 50 :owner-id "w2")]
+    (let [e2 (intemporal/make-workflow-engine :store store :threads 2
+                                              :poll-ms 50 :owner-id "w2")]
       (try
         (intemporal/send-signal store wid "go" {})
         (is (= :completed (await-status store wid :completed 5000))
             "worker scan claimed ownership and resumed the workflow to completion")
         (is (= 51 (intemporal/get-workflow-result store wid)) "5*10 + 1 = 51")
-        (finally (stop) (intemporal/shutdown-engine e2))))))
+        (finally (intemporal/shutdown-engine e2))))))
 
 (deftest worker-recovery-in-memory
   (testing "shared InMemoryStore: worker resumes a crashed, then-signalled workflow"

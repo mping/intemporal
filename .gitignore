@@ -11,7 +11,7 @@ pom.xml.asc
 /.prepl-port
 .hgignore
 .hg/
-.clj-kondo
+.clj-kondo/.cache
 test/*.db
 .lsp/
 
@@ -19,7 +19,6 @@ test/*.db
 .shadow-cljs
 node_modules
 public
-bin
 out
 .cljs_node_repl
 dev/example.db

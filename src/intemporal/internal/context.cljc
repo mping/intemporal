@@ -60,12 +60,10 @@
   "Pass-local replay index: {[event-type seq] event}. FIRST occurrence wins,
    exactly like `find-event`'s `first`.
 
-   History may legitimately contain DUPLICATE (seq, event-type) entries —
-   :activity-scheduled is re-emitted on every pass that reaches it before
-   completion, and check-then-act writes double-write on InMemory/FDB (kimi.md
-   P4) — and replay must keep resolving each seq to the same, earliest one. A
-   plain (into {} ...) silently flips this to last-wins and makes replay depend
-   on append order."
+   History may contain several identities at one sequence (notably distinct
+   activity retry attempts). Replay must keep resolving an exact event-type/seq
+   lookup to the same earliest append. A plain (into {} ...) silently flips this
+   to last-wins and makes replay depend on append order."
   [history]
   (reduce (fn [m e]
             (let [k [(:event-type e) (:seq e)]]
@@ -80,8 +78,8 @@
 
    Replay reads THIS, never the live store: an event written by another thread
    while the pass is in flight (for example, a concurrent signal writer)
-   belongs to the NEXT pass. Reading the store per op mixes two snapshots inside
-   one pass (kimi.md X9) and costs a round-trip per replayed step (A16).
+   belongs to the NEXT pass. Reading the store per operation would mix two
+   snapshots inside one pass and add a round-trip per replayed step.
 
    Deliberately does NOT consult :pending-events — the store cannot see them
    mid-pass either, so snapshot-only is an exact substitution for the store read.
@@ -94,7 +92,7 @@
      (find-event @(:history ctx) event-type seq-num))))
 
 (defn attempt-state
-  "Durable retry state (kimi.md X8) for the activity at `seq-num`: the recorded
+  "Durable retry state for the activity at `seq-num`: the recorded
    :activity-attempt-failed carrying the HIGHEST :attempts, or nil when no
    attempt has been consumed yet. `stub` threads it into the activity suspension
    so the engine's retry loop resumes where a crashed drive left off instead of
@@ -102,14 +100,13 @@
 
    Deliberately NOT `history-event`: attempt events legitimately repeat at one
    (seq, event-type) — one per attempt — and the pass index is first-wins, so a
-   lookup there would keep answering \"attempt 1\" on InMemory, which appends every
-   copy (JDBC and FDB keep only the latest). Max over the running total is the one
-   reading that agrees across all three stores (see
+   lookup there would keep answering \"attempt 1\". Max over the running total is
+   the backend-independent reading (see
    `intemporal.internal.activity/attempt-failed-event`).
 
    Scans the snapshot rather than the index, but only where an activity is about
-   to be SCHEDULED — at most once per pass, since scheduling throws — so this
-   does not reintroduce the per-op cost A16 removed."
+   to be scheduled — at most once per pass, since scheduling throws — so it does
+   not reintroduce a per-operation store read."
   ([seq-num] (attempt-state (current-context) seq-num))
   ([ctx seq-num]
    (let [matching (filterv #(and (= :activity-attempt-failed (:event-type %))
@@ -269,16 +266,3 @@
                  (fn [& args#]
                    (binding [*workflow-context* ~ctx-sym]
                      (apply ~f args#))))))))
-
-(defmacro bloop
-  "Like p/loop, but automatically propagates *workflow-context*.
-   Use p/recur inside the body as normal."
-  [bindings & body]
-  (macros/case
-    :clj (throw (IllegalArgumentException. "CLJS only"))
-    :cljs
-    (let [ctx-sym (gensym "workflow-ctx")]
-      `(let [~ctx-sym *workflow-context*]
-         (promesa.core/loop ~bindings
-           (binding [*workflow-context* ~ctx-sym]
-             ~@body))))))

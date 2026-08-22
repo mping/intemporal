@@ -7,6 +7,7 @@
   (:require
    [intemporal.internal.activity :as a]
    [intemporal.internal.context :as ctx]
+   [intemporal.internal.domain :as domain]
    [intemporal.internal.error :as error]
    [intemporal.internal.execution :as exec]
    [intemporal.internal.logging :as log]
@@ -16,7 +17,7 @@
    [intemporal.observer :as obs]
    [intemporal.protocol :as p]
    [intemporal.store :as store]
-   [intemporal.utils :as utils]
+   [intemporal.internal.clock :as clock]
    #?@(:clj
        [[intemporal.tracing :as tracing]
         [net.cgrand.macrovich :as macros]
@@ -34,10 +35,9 @@
    control back to the engine. Called from stub when an activity needs to run
    (first execution or re-execution after interruption/rejection).
 
-   `attempt-state` is what history records this activity has already spent
-   (kimi.md X8) — nil on a first execution. The engine's retry loop resumes from
-   it, so a crash mid-retry costs the workflow no more attempts than the policy
-   granted in the first place."
+   `attempt-state` is the retry budget history records as already spent — nil on
+   first execution. The engine resumes from it, so a crash mid-retry cannot grant
+   more attempts than the original policy."
   [ctx activity-name seq-num args effective-timeout effective-retry attempt-state]
   (let [scheduled-event {:event-type    :activity-scheduled
                          :seq           seq-num
@@ -47,9 +47,9 @@
                          :retry-policy  (when effective-retry
                                           {:max-attempts (:max-attempts effective-retry)
                                            :backoff-ms   (:backoff-ms effective-retry)})
-                         :timestamp     (utils/current-time-ms)}]
+                         :timestamp     (clock/now-ms)}]
     (ctx/add-pending-event! scheduled-event)
-    (ctx/notify-observer p/on-activity-scheduled
+    (ctx/notify-observer obs/on-activity-scheduled
                          (:workflow-id ctx) seq-num activity-name (vec args))
     (log/infof "Scheduling activity suspension")
     (throw (error/make-suspension :activity {:seq           seq-num
@@ -74,7 +74,7 @@
     (fn [& args]
       (let [seq-num (ctx/next-seq!)]            ;; next-seq! already checks cancellation
         (log/with-mdc {:activity activity-name :seqnum seq-num}
-          (let [workflow-id     (ctx/current-workflow-id)
+          (let [workflow-id     (:workflow-id ctx)
                 existing        (ctx/history-event :activity-completed seq-num)
                 existing-failed (ctx/history-event :activity-failed seq-num)
                 err             (some-> (:error existing-failed) (error/map->exception))
@@ -117,7 +117,7 @@
                 (when rejected?    (log/infof "Activity execution was rejected: rescheduling"))
                 ;; Recover what earlier drives already spent on this activity, so
                 ;; the engine continues the retry sequence instead of restarting
-                ;; it (X8). Interruptions and rejections record no attempt, so a
+                ;; it. Interruptions and rejections record no attempt, so a
                 ;; reschedule for those carries the budget across untouched.
                 ;;
                 ;; Scheduling here is unconditional even mid-backoff: whether the
@@ -144,10 +144,9 @@
   "True when a recorded `:async-failed` / `:activity-failed` error describes an
    INFRASTRUCTURE condition rather than a workflow outcome:
 
-   - `:activity-interrupted` — a worker stop / engine shutdown interrupted the
-     activity mid-flight (X6/E4);
+   - `:activity-interrupted` — engine shutdown interrupted the activity mid-flight;
    - `:rejected` — the executor refused to accept the activity because it was
-     saturated or closing (X4).
+     saturated or closing.
 
    Neither is something the workflow did; both must be RE-RUN on the next pass,
    exactly as the synchronous `stub` already does. Replaying them as durable
@@ -188,7 +187,7 @@
       ;; Already failed - advance seq past consumed numbers during replay.
       ;; NOT for infrastructure failures (interrupt / executor rejection): those
       ;; fall through to `existing-started` below, which re-enqueues the activity
-      ;; so it actually runs, mirroring the sync `stub`'s reschedule (X6/E4/X4).
+      ;; so it actually runs, mirroring the synchronous stub's reschedule.
       (and existing-failed (not runtime-failed?))
       (do
         (ctx/update-seq! existing-failed)
@@ -241,7 +240,7 @@
                                      ;; Read straight from history rather than
                                      ;; from `src`: `scheduled` is an
                                      ;; :activity-scheduled event, which has
-                                     ;; never carried the attempt state (X8).
+                                     ;; never carried the attempt state.
                                      :attempt-state (ctx/attempt-state
                                                       (or (:seq live) activity-seq))}))
           (log/warnf "Async started at seq %s but no :activity-scheduled found; waiting" seq-num))
@@ -256,9 +255,9 @@
             record-started! (fn [last-seq]
                               (ctx/add-pending-event! (cond-> {:event-type :async-started
                                                                :seq        start-seq
-                                                               :timestamp  (utils/current-time-ms)}
+                                                               :timestamp  (clock/now-ms)}
                                                         last-seq (assoc :last-seq last-seq)))
-                              (ctx/notify-observer p/on-async-started (:workflow-id ctx) start-seq))]
+                              (ctx/notify-observer obs/on-async-started (:workflow-id ctx) start-seq))]
         ;; Try to execute the thunk to see what activity it wants
         (try
           (log/tracef "Invoking Async thunk")
@@ -272,8 +271,8 @@
                                      :seq        start-seq
                                      :last-seq   end-seq
                                      :result     result
-                                     :timestamp  (utils/current-time-ms)})
-            (ctx/notify-observer p/on-async-completed (:workflow-id ctx) start-seq result)
+                                     :timestamp  (clock/now-ms)})
+            (ctx/notify-observer obs/on-async-completed (:workflow-id ctx) start-seq result)
             (log/tracef "Async completed successfully with result %s" result)
             (->AsyncHandle start-seq))
           (catch #?(:clj Throwable :cljs :default) e
@@ -293,7 +292,7 @@
                                          ;; What earlier drives already spent on
                                          ;; this activity, so the engine resumes
                                          ;; the retry sequence rather than
-                                         ;; restarting it (X8).
+                                         ;; restarting it.
                                          :attempt-state (ctx/attempt-state activity-seq)})
                 ;; Return handle - we'll batch execute later
                 (->AsyncHandle start-seq))
@@ -317,7 +316,7 @@
       ;; An infrastructure failure (interrupt / rejection) is NOT a resolution:
       ;; `async` has already re-enqueued the activity for this pass, so suspend
       ;; and let handle-suspension flush the batch. Throwing here instead would
-      ;; durably fail the workflow for a routine worker stop (X6/E4/X4).
+      ;; durably fail the workflow for a routine engine stop.
       (and failed (not (runtime-failure? failed)))
       (throw (error/async-failed-exception handle-seq (:error failed)))
 
@@ -356,7 +355,7 @@
                                      :seq seq-num
                                      :index completed-idx
                                      :result result
-                                     :timestamp (utils/current-time-ms)})
+                                     :timestamp (clock/now-ms)})
             {:index completed-idx :result result})
 
           ;; Every handle already failed *for real*: no completion can ever arrive,
@@ -413,16 +412,16 @@
       ;; Reuse the deadline from a prior :signal-wait-scheduled event if one was
       ;; already persisted for this seq (mirrors sleep's :timer-scheduled reuse).
       ;; Recomputing (now + timeout-ms) on every replay would push the deadline
-      ;; later on each resume/re-drive — a crash-resumed (or worker-repolled, E1)
+      ;; later on each resume/re-drive — a crash-resumed or normally re-polled
       ;; wait could then never reliably time out.
       (let [prior    (ctx/history-event :signal-wait-scheduled seq-num)
-            deadline (or (:deadline prior) (+ (utils/current-time-ms) timeout-ms))]
+            deadline (or (:deadline prior) (+ (clock/now-ms) timeout-ms))]
         (when-not prior
           (ctx/add-pending-event! {:event-type :signal-wait-scheduled
                                    :seq seq-num
                                    :signal-name signal-name
                                    :deadline deadline
-                                   :timestamp (utils/current-time-ms)}))
+                                   :timestamp (clock/now-ms)}))
         (throw (error/make-suspension :wait-signal-timeout
                                       {:seq seq-num
                                        :signal-name signal-name
@@ -447,14 +446,14 @@
       ;; the deadline later on each resume (drift) and make a crash-resumed sleep
       ;; never reliably fire. The fire time must be deterministic across replays.
       (let [prior   (ctx/history-event :timer-scheduled seq-num)
-            fire-at (or (:fire-at prior) (+ (utils/current-time-ms) ms))]
+            fire-at (or (:fire-at prior) (+ (clock/now-ms) ms))]
         (when-not prior
           (ctx/add-pending-event! {:event-type :timer-scheduled
                                    :seq seq-num
                                    :fire-at fire-at
                                    :duration-ms ms
-                                   :timestamp (utils/current-time-ms)})
-          (ctx/notify-observer p/on-timer-scheduled (:workflow-id ctx) seq-num fire-at))
+                                   :timestamp (clock/now-ms)})
+          (ctx/notify-observer obs/on-timer-scheduled (:workflow-id ctx) seq-num fire-at))
         (throw (error/make-suspension :timer {:seq seq-num
                                               :fire-at fire-at}))))))
 ;; ============================================================================
@@ -467,10 +466,11 @@
   "Schedule a durable child workflow and wait for its result. Synchronous and
    asynchronous children share the same claimed execution path; the only
    difference is whether the returned handle is joined immediately."
-  [child-workflow-fn args & {:keys [child-id]}]
-  (join (run-child-workflow-async child-workflow-fn args :child-id child-id)))
-
-(def ^:private parent-close-policies #{:cascade-cancel :abandon :terminate})
+  [child-workflow-fn args & {:keys [child-id parent-close-policy]
+                             :or   {parent-close-policy :terminate}}]
+  (join (run-child-workflow-async child-workflow-fn args
+                                  :child-id child-id
+                                  :parent-close-policy parent-close-policy)))
 
 (defn- schedule-independent-child!
   "Create a child as an independent, claimable workflow (Tier 2): seed its
@@ -498,7 +498,7 @@
                             :cljs nil)]
             (p/save-event store child-wf-id
                           (cond-> {:event-type       :workflow-started
-                                   ;; A8: every event carries a real :seq. -1 is a
+                                   ;; Every event carries a real :seq. -1 is a
                                    ;; fixed sentinel below any op seq (which start
                                    ;; at 0), so :workflow-started always sorts
                                    ;; first (FDB) and never collides with the
@@ -511,7 +511,7 @@
                                    ;; write the parent's completion event and wake it.
                                    :parent-id        parent-id
                                    :parent-seq       seq-num
-                                   :timestamp        (utils/current-time-ms)}
+                                   :timestamp        (clock/now-ms)}
                             child-tc (assoc :tracecontext child-tc)))))
         (p/link-child! store parent-id seq-num child-wf-id policy)
         (ctx/add-pending-event! {:event-type        :child-workflow-scheduled
@@ -519,9 +519,24 @@
                                  :child-workflow-id child-wf-id
                                  :workflow-fn-name  fn-name
                                  :args              (vec args)
-                                 :timestamp         (utils/current-time-ms)})
-        (ctx/notify-observer p/on-child-workflow-scheduled parent-id seq-num child-wf-id fn-name (vec args))))
+                                 :timestamp         (clock/now-ms)})
+        (ctx/notify-observer obs/on-child-workflow-scheduled parent-id seq-num child-wf-id fn-name (vec args))))
     child-wf-id))
+
+(defn- schedule-child!
+  "Allocate one child operation and return both public representations."
+  [child-workflow-fn args child-id parent-close-policy]
+  (ctx/check-cancelled!)
+  (assert (domain/parent-close-policies parent-close-policy)
+          (str "Invalid :parent-close-policy " parent-close-policy))
+  (let [workflow-context (ctx/current-context)
+        seq-num          (ctx/next-seq!)
+        parent-id        (:workflow-id workflow-context)
+        child-wf-id      (or child-id (str parent-id "/child-" seq-num))]
+    (schedule-independent-child! parent-id seq-num child-wf-id
+                                 child-workflow-fn args parent-close-policy)
+    {:workflow-id child-wf-id
+     :handle      (->AsyncHandle seq-num)}))
 
 (defn run-child-workflow-async
   "Start `child-workflow-fn` as an INDEPENDENT child workflow and return an
@@ -546,16 +561,7 @@
    - :abandon                  — leave the child running independently (fire-and-forget)."
   [child-workflow-fn args & {:keys [child-id parent-close-policy]
                              :or   {parent-close-policy :terminate}}]
-  (ctx/check-cancelled!)
-  (assert (parent-close-policies parent-close-policy)
-          (str "Invalid :parent-close-policy " parent-close-policy))
-  (let [ctx         (ctx/current-context)
-        seq-num     (ctx/next-seq!)
-        parent-id   (:workflow-id ctx)
-        child-wf-id (or child-id (str parent-id "/child-" seq-num))]
-    (schedule-independent-child! parent-id seq-num child-wf-id
-                                 child-workflow-fn args parent-close-policy)
-    (->AsyncHandle seq-num)))
+  (:handle (schedule-child! child-workflow-fn args child-id parent-close-policy)))
 
 (defn run-child-workflow-detached
   "Fire-and-forget variant of `run-child-workflow-async`: schedule an independent
@@ -567,44 +573,34 @@
    Options: same as `run-child-workflow-async`."
   [child-workflow-fn args & {:keys [child-id parent-close-policy]
                              :or   {parent-close-policy :terminate}}]
-  (ctx/check-cancelled!)
-  (assert (parent-close-policies parent-close-policy)
-          (str "Invalid :parent-close-policy " parent-close-policy))
-  (let [ctx         (ctx/current-context)
-        seq-num     (ctx/next-seq!)
-        parent-id   (:workflow-id ctx)
-        child-wf-id (or child-id (str parent-id "/child-" seq-num))]
-    (schedule-independent-child! parent-id seq-num child-wf-id
-                                 child-workflow-fn args parent-close-policy)
-    child-wf-id))
+  (:workflow-id (schedule-child! child-workflow-fn args child-id parent-close-policy)))
 
 ;; ============================================================================
 ;; Public API
 ;; ============================================================================
 
-(declare submit-workflow await-workflow ensure-worker!)
+(declare submit-workflow await-workflow)
 
 (defn start-workflow
-  "Persist a workflow, ensure this engine's bounded durable worker is running,
-   and wait for the terminal result. All execution goes through claim-runnable!;
-   the caller never drives workflow code directly."
+  "Persist a workflow and wait for the running engine to produce its terminal
+   result. All execution goes through claim-runnable!; the caller never drives
+   workflow code directly."
   [engine workflow-fn args & {:keys [workflow-id protocols max-iterations]
                               :or {max-iterations 1000}}]
   #?(:clj
      (doseq [[proto impl] protocols]
        (a/register-protocol-activities! (:registry engine) proto impl)))
-  (let [engine (cond-> engine
-                 protocols (assoc :protocols protocols))
-        {:keys [workflow-id]}
+  #?(:cljs
+     (when protocols
+       (swap! (:protocols engine) merge protocols)))
+  (when-not (:worker? engine)
+    (throw (ex-info "start-workflow requires a running workflow engine"
+                    {:worker? false})))
+  (let [{:keys [workflow-id]}
         (submit-workflow engine workflow-fn args
                          :workflow-id workflow-id
                          :max-iterations max-iterations)]
-    (ensure-worker! engine)
-    #?(:clj  (assoc (await-workflow engine workflow-id) :workflow-id workflow-id)
-       :cljs (prom/then (await-workflow engine workflow-id)
-                        #(assoc % :workflow-id workflow-id)))))
-
-(def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
+    (await-workflow engine workflow-id)))
 
 (defn submit-workflow
   "Persist a RUNNABLE workflow and return {:workflow-id id} immediately.
@@ -623,47 +619,41 @@
                                  (tracing/ensure-workflow-span! wid workflow-name nil)))
                         :cljs nil)]
     (p/save-event store wid (cond-> {:event-type       :workflow-started
-                                     :seq              -1 ;; A8: fixed sentinel, see schedule-independent-child!
+                                     :seq              -1 ;; fixed sentinel, see schedule-independent-child!
                                      :workflow-id      wid
                                      :workflow-fn-name workflow-name
                                      :args             (vec args)
                                      :max-iterations   max-iterations
-                                     :timestamp        (utils/current-time-ms)}
+                                     :timestamp        (clock/now-ms)}
                               tracecontext (assoc :tracecontext tracecontext)))
     ;; submit IS the start of a worker-driven workflow (the worker only ever
     ;; resumes), so observe the start here — once — to create its root span.
     (when-let [observer (get engine :observer)]
-      (p/on-workflow-started observer wid workflow-name (vec args)))
+      (obs/on-workflow-started observer wid workflow-name (vec args)))
     {:workflow-id wid}))
 
 (defn- terminal-result
   "Reconstruct the public result from the persisted terminal event."
   [store workflow-id]
   (let [status (p/get-workflow-status store workflow-id)
-        terminal (some #(when (#{:workflow-completed :workflow-failed
-                                 :workflow-cancelled :workflow-terminated}
-                               (:event-type %))
-                          %)
+        terminal (some #(when (domain/terminal-event? %) %)
                        (p/load-history store workflow-id))]
-    (cond-> {:status status}
+    (cond-> {:status status :workflow-id workflow-id}
       (= :completed status) (assoc :result (:result terminal))
       (#{:failed :cancelled :terminated} status) (assoc :error (:error terminal)))))
 
-(defn- terminal-event?
-  [history]
-  (boolean (some #(#{:workflow-completed :workflow-failed
-                     :workflow-cancelled :workflow-terminated}
-                  (:event-type %))
-                 history)))
+(defn- terminal-event-in-history? [history]
+  (boolean (some domain/terminal-event? history)))
 
 (defn- terminal-history?
-  [store workflow-id]
-  (terminal-event? (p/load-history store workflow-id)))
+       [store workflow-id]
+  (terminal-event-in-history? (p/load-history store workflow-id)))
 
 (defn await-workflow
   "Wait until the workflow reaches a terminal state (:completed, :failed,
-   :cancelled, :terminated) and return {:status … :result …} (:result is nil for
-   non-completed terminals), or {:status :timeout} if the deadline elapses first.
+   :cancelled, :terminated) and return a map that always includes :workflow-id
+   and :status (plus :result for completion or :error for other terminals), or
+   {:status :timeout :workflow-id …} if the deadline elapses first.
    A briefly :not-found id (still starting) is tolerated.
 
    On the JVM this BLOCKS and returns the map; on ClojureScript it returns a
@@ -676,7 +666,7 @@
        (loop []
          (let [st (p/get-workflow-status store workflow-id)]
            (cond
-             (and (terminal-status? st)
+             (and (domain/terminal-status? st)
                   (terminal-history? store workflow-id)) (terminal-result store workflow-id)
              (> (System/currentTimeMillis) deadline) {:status :timeout :workflow-id workflow-id}
              :else (do (Thread/sleep (long poll-ms)) (recur))))))
@@ -685,7 +675,7 @@
        (letfn [(step []
                  (let [st (p/get-workflow-status store workflow-id)]
                    (cond
-                     (and (terminal-status? st)
+                     (and (domain/terminal-status? st)
                           (terminal-history? store workflow-id))
                      (prom/resolved (terminal-result store workflow-id))
                      (> (js/Date.now) deadline) (prom/resolved {:status :timeout :workflow-id workflow-id})
@@ -701,7 +691,7 @@
     (when-not started
       (throw (ex-info "Cannot drive: no :workflow-started event in history"
                       {:error/type ::no-started-event :workflow-id workflow-id})))
-    (if (terminal-event? history)
+    (if (terminal-event-in-history? history)
       #?(:clj  (terminal-result store workflow-id)
          :cljs (prom/resolved (terminal-result store workflow-id)))
       (let [workflow-fn (wreg/resolve-workflow (:workflow-fn-name started))
@@ -712,7 +702,7 @@
                              :max-iterations (or (:max-iterations started) 1000)
                              :wake-version wake-version})]
         (when observer
-          (p/on-workflow-resumed observer workflow-id))
+          (obs/on-workflow-resumed observer workflow-id))
         #?(:clj
            (if-let [span-ctx (and (:enable-telemetry engine)
                                   (or (tracing/active-span workflow-id)
@@ -734,13 +724,15 @@
   "Durably wake a submitted workflow and wait for it to terminate. Workflow
    execution itself always happens through a worker claim."
   [{:keys [store] :as engine} workflow-id]
+  (when-not (:worker? engine)
+    (throw (ex-info "resume-workflow requires a running workflow engine"
+                    {:worker? false :workflow-id workflow-id})))
   (p/wake-workflow store workflow-id)
-  (ensure-worker! engine)
   (await-workflow engine workflow-id))
 
 #?(:clj
-   (defn start-worker
-     "Start a background recovery worker. The durable scheduling scan claims only
+   (defn- start-worker-loop
+     "Start the engine-owned background recovery loop. The durable scheduling scan claims only
       RUNNABLE or due WAITING workflows and changes them to RUNNING atomically.
       Indefinite waits therefore consume no poll/replay work.
 
@@ -754,12 +746,12 @@
 
       Options:
         :owner-id             stable id for this worker (default: random uuid)
-        :poll-ms              poll interval (default 500)
+        :poll-ms              poll interval (default 10)
         :batch-size           max workflows claimed per poll (default 100)
         :workflow-concurrency max concurrently driven workflows (default 4)"
      [{:keys [store] :as engine}
       & {:keys [owner-id poll-ms batch-size workflow-concurrency]
-         :or   {owner-id (str (random-uuid)) poll-ms 500 batch-size 100
+         :or   {owner-id (str (random-uuid)) poll-ms 10 batch-size 100
                 workflow-concurrency 4}}]
      (let [running (atom true)
            _       (p/recover-running! store owner-id)
@@ -806,7 +798,7 @@
                           (let [capacity (min batch-size (.availablePermits permits))
                                 claims   (if (pos? capacity)
                                            (p/claim-runnable! store owner-id capacity
-                                                              (utils/current-time-ms))
+                                                              (clock/now-ms))
                                            [])]
                             (reset! backoff-ms (long poll-ms))
                             (doseq [claim claims :while @running]
@@ -825,21 +817,20 @@
          (.setDaemon true)
          (.setName (str "intemporal-worker-" owner-id))
          (.start))
-       (fn stop-worker []
+       (fn stop-worker [grace-period-secs]
          (reset! running false)
-         (.join thread (long (+ poll-ms 5000)))
-         (when (.isAlive thread)
-           (.interrupt thread)
-           (.join thread (long poll-ms)))
+         (.interrupt thread)
+         (.join thread (long (+ poll-ms 1000)))
          (.shutdown drives)
-         (when-not (.awaitTermination drives 5 java.util.concurrent.TimeUnit/SECONDS)
+         (when-not (.awaitTermination drives (long grace-period-secs)
+                                     java.util.concurrent.TimeUnit/SECONDS)
            (.shutdownNow drives)
            (.awaitTermination drives 1 java.util.concurrent.TimeUnit/SECONDS))
          (p/release-owner store owner-id)))))
 
 #?(:cljs
-   (defn start-worker
-     "ClojureScript recovery worker. Each tick atomically claims only RUNNABLE
+   (defn- start-worker-loop
+     "ClojureScript engine-owned recovery loop. Each tick atomically claims only RUNNABLE
       or due WAITING workflows and drives a bounded promise batch. The next tick
       starts after the batch settles.
 
@@ -848,12 +839,12 @@
 
       Options:
         :owner-id             stable id for this worker (default: random uuid)
-        :poll-ms              poll interval (default 50)
+        :poll-ms              poll interval (default 10)
         :batch-size           max workflows claimed per poll (default 100)
         :workflow-concurrency max concurrent promise drives (default 4)"
      [{:keys [store] :as engine}
       & {:keys [owner-id poll-ms batch-size workflow-concurrency unref-timers?]
-         :or   {owner-id (str (random-uuid)) poll-ms 50 batch-size 100
+         :or   {owner-id (str (random-uuid)) poll-ms 10 batch-size 100
                 workflow-concurrency 4 unref-timers? false}}]
      (let [running     (atom true)
            timer       (atom nil)
@@ -906,7 +897,7 @@
                      (requeue-registered!)
                      (let [limit  (min batch-size workflow-concurrency)
                            claims (p/claim-runnable! store owner-id limit
-                                                     (utils/current-time-ms))]
+                                                     (clock/now-ms))]
                        (-> (prom/all (mapv process-one claims))
                            (prom/then    (fn [_] (schedule-next)))
                            (prom/catch   (fn [_] (schedule-next)))))
@@ -914,31 +905,10 @@
                        (log/warnf "Worker %s loop error: %s" owner-id e)
                        (schedule-next)))))]
          (reset! timer (set-timeout tick 0))
-         (fn stop-worker []
+         (fn stop-worker [_grace-period-secs]
            (reset! running false)
            (when-let [t @timer] (js/clearTimeout t))
            (p/release-owner store owner-id))))))
-
-(defn- ensure-worker!
-  "Lazily start the engine-owned worker used by blocking start/resume calls."
-  [{:keys [internal-worker-stop internal-worker-owner] :as engine}]
-  (when-not internal-worker-stop
-    (throw (ex-info "Engine does not support managed workflow execution" {})))
-  #?(:clj
-     (locking internal-worker-stop
-       (when-not @internal-worker-stop
-         (reset! internal-worker-stop
-                 (start-worker engine
-                               :owner-id internal-worker-owner
-                               :poll-ms 10))))
-     :cljs
-     (when-not @internal-worker-stop
-       (reset! internal-worker-stop
-               (start-worker engine
-                             :owner-id internal-worker-owner
-                             :poll-ms 10
-                             :unref-timers? true))))
-  nil)
 
 (defn send-signal
   "Send a signal to a workflow.
@@ -984,7 +954,7 @@
   [store workflow-id]
   (log/with-mdc {:workflow-id workflow-id}
     (let [status (p/get-workflow-status store workflow-id)]
-      (if (terminal-status? status)
+      (if (domain/terminal-status? status)
         (log/debugf "Cancelling workflow that is already in terminal state %s, skipping" status)
         (do
           ;; mark-cancelled is one durable transition: record the request,
@@ -1077,7 +1047,7 @@
   [saga]
   (let [comps @(::compensations saga)]
     (when (seq comps)
-      (ctx/notify-observer p/on-compensation-started (ctx/current-workflow-id)))
+      (ctx/notify-observer obs/on-compensation-started (ctx/current-workflow-id)))
     ;; Suppress the cancellation check so compensating activities can run even
     ;; when this rollback was triggered by a cancellation (the cancel exception
     ;; was already caught by the user before calling compensate).
@@ -1088,23 +1058,25 @@
           (c)
           (catch #?(:clj Throwable :cljs :default) t
             (when (error/suspension? t) (throw t))
-            (ctx/notify-observer p/on-compensation-failed
+            (ctx/notify-observer obs/on-compensation-failed
                                  (ctx/current-workflow-id) (error/throwable->map t))
             (log/warnf "Compensation failed, continuing: %s" (ex-message t)))))
       (finally
         (ctx/set-compensating! false)))
     (when (seq comps)
-      (ctx/notify-observer p/on-compensation-completed (ctx/current-workflow-id)))))
+      (ctx/notify-observer obs/on-compensation-completed (ctx/current-workflow-id)))))
 
 ;; ============================================================================
 ;; Convenience Functions
 ;; ============================================================================
 
 (def ^:const default-activity-timeout-ms 30000)
+(def ^:private default-shutdown-grace-secs 5)
 
 (defn make-workflow-engine
-  "Create a complete workflow engine with all components.
-   Returns a map with :store, :executor, :registry, and :observer.
+  "Create and start a complete workflow engine. The returned engine owns one
+   durable recovery worker and its activity executor; close both with
+   shutdown-engine.
 
    Options:
    - :store - instance of protocols/IStore
@@ -1115,44 +1087,95 @@
      than :default-timeout-ms) rejects, and rejected activities are rescheduled
      on a later pass. Ignored in ClojureScript.
    - :queue-capacity - Wait-queue depth when :threads is set (default: 8x :threads)
+   - :submit-timeout-ms - Maximum saturated executor submission wait (JVM only)
    - :default-timeout-ms - Default activity timeout (default: 30000)
-   - :enable-logging - Enable logging observer (default: true)
+   - :owner-id - Stable worker identity. Supply the same unique identity after a
+     process restart to recover its owned work. A random id is suitable only for
+     ephemeral/local engines.
+   - :poll-ms - Durable scheduling poll interval (default: 10)
+   - :batch-size - Maximum claims per poll (default: 100)
+   - :workflow-concurrency - Maximum concurrent claimed drives (default: 4)
+   - :protocols - Protocol implementation map installed before recovery starts
+   - :worker? - Start the recovery worker (default true). False is intended only
+     for submission/status clients; start-workflow and resume-workflow reject it.
+   - :enable-logging - Retain observer events in :log (default: false)
    - :enable-telemetry - Enable OpenTelemetry tracing (default: true, JVM only)
    - :observer - Additional observer instance, composed on top of built-in observers"
-  [& {:keys [store threads queue-capacity default-timeout-ms enable-logging enable-telemetry observer]
+  [& {:keys [store threads queue-capacity submit-timeout-ms default-timeout-ms
+             owner-id poll-ms batch-size workflow-concurrency protocols worker?
+             enable-logging enable-telemetry observer unref-timers?]
       :or {store (store/create-store)
            default-timeout-ms  default-activity-timeout-ms
-           enable-logging true
-           enable-telemetry true}}]
+           batch-size 100
+           workflow-concurrency 4
+           worker? true
+           enable-logging false
+           enable-telemetry true
+           protocols {}}}]
   (let [registry (a/make-registry)
+        _ #?(:clj (doseq [[proto impl] protocols]
+                    (a/register-protocol-activities! registry proto impl))
+             :cljs nil)
+        protocol-registry #?(:clj nil :cljs (atom protocols))
         log-atom (when enable-logging (atom []))
         logging-observer (when enable-logging (obs/make-logging-observer log-atom))
-        composite-observer (obs/make-composite-observer [logging-observer observer])]
-    {:store store
-     ;; E7: this used to pass :threads, which make-vthreads-executor does not
-     ;; destructure — the bound was silently dropped and every engine ran an
-     ;; unbounded executor. Pass the name the executor actually reads.
-     :executor (runtime/make-vthreads-executor registry
-                 :max-concurrent threads
-                 :queue-capacity queue-capacity
-                 :default-timeout-ms default-timeout-ms)
-     :registry registry
-     :observer composite-observer
-     :internal-worker-stop (atom nil)
-     :internal-worker-owner (str "engine-" (random-uuid))
-     ;; OpenTelemetry tracing is wired at claimed-drive, child-workflow, and
-     ;; activity/timer boundaries rather than via an observer. JVM only.
-     :enable-telemetry #?(:clj enable-telemetry :cljs false)
-     :log (when enable-logging log-atom)}))
+        composite-observer (obs/make-composite-observer [logging-observer observer])
+        executor (runtime/make-vthreads-executor registry
+                   :max-concurrent threads
+                   :queue-capacity queue-capacity
+                   :submit-timeout-ms submit-timeout-ms
+                   :default-timeout-ms default-timeout-ms)
+        worker-stop (atom nil)
+        owner-id (or owner-id (str "ephemeral-" (random-uuid)))
+        poll-ms (or poll-ms 10)
+        base-engine {:store store
+                     :executor executor
+                     :registry registry
+                     :observer composite-observer
+                     :worker? worker?
+                     :owner-id owner-id
+                     :internal-worker-stop worker-stop
+                     ;; OpenTelemetry tracing is wired at claimed-drive, child-workflow,
+                     ;; and activity/timer boundaries rather than via an observer.
+                     :enable-telemetry #?(:clj enable-telemetry :cljs false)
+                     :log (when enable-logging log-atom)}
+        engine #?(:clj base-engine
+                  :cljs (assoc base-engine :protocols protocol-registry))]
+    (when worker?
+      (try
+        (reset! worker-stop
+                #?(:clj
+                   (start-worker-loop engine
+                                      :owner-id owner-id
+                                      :poll-ms poll-ms
+                                      :batch-size batch-size
+                                      :workflow-concurrency workflow-concurrency)
+                   :cljs
+                   (start-worker-loop engine
+                                      :owner-id owner-id
+                                      :poll-ms poll-ms
+                                      :batch-size batch-size
+                                      :workflow-concurrency workflow-concurrency
+                                      :unref-timers? (if (nil? unref-timers?)
+                                                       true
+                                                       unref-timers?))))
+        (catch #?(:clj Throwable :cljs :default) e
+          (p/shutdown-executor executor 0)
+          (throw e))))
+    engine))
 
 (defn shutdown-engine
-  "Stop the engine-owned worker and activity executor."
+  "Stop polling, allow claimed JVM workflow drives up to grace-period-secs to
+   finish, interrupt remaining drives, release ownership, and then stop the
+   activity executor. ClojureScript cancels future polls immediately because its
+   promise runtime cannot interrupt an in-flight callback. The default JVM grace
+   period is 5 seconds; pass 0 for immediate interruption."
   ([{:keys [executor] :as engine}]
-   (shutdown-engine engine 0))
+   (shutdown-engine engine default-shutdown-grace-secs))
   ([{:keys [executor internal-worker-stop]} grace-period-secs]
    (log/infof "Shutting down engine")
    (when-let [stop-worker (some-> internal-worker-stop deref)]
-     (stop-worker)
+     (stop-worker grace-period-secs)
      (reset! internal-worker-stop nil))
    (p/shutdown-executor executor grace-period-secs)))
 

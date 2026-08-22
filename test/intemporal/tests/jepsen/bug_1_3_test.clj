@@ -1,15 +1,15 @@
 (ns intemporal.tests.jepsen.bug-1-3-test
   "Bug 1.3 — Recovery after restart.  REGRESSION GUARD.
 
-  Root cause (improvements.md §1.3) — now FIXED (Phase C):
+  Former root cause, now fixed:
     There was no background process that resumed workflows after a restart, and
     resume required the caller to know the workflow fn + args. A workflow whose
     engine crashed stayed suspended forever.
 
-    The fix: durable runnable markers (C3) written on every signal, a lease (C1)
-    so only one worker runs a workflow, the workflow registry (B3) so a workflow
-    can be resumed by id alone, and start-worker (C4) which polls markers, claims
-    the lease, and resumes. A restarted process running a worker recovers
+    The fix: durable runnable transitions written on every signal, exclusive
+    claims so only one worker runs a workflow, and a workflow registry so a workflow
+    can be resumed by id alone, and the engine-owned worker which polls markers,
+    claims ownership, and resumes. A restarted engine recovers
     workflows it never started.
 
   These tests assert the FIXED behaviour: after the engine crashes, a worker on a
@@ -51,13 +51,13 @@
       (Thread/sleep 300)
       (future-cancel f1)
       (intemporal/shutdown-engine e1))
-    (let [e2   (intemporal/make-workflow-engine :store store :threads 2)
-          stop (intemporal/start-worker e2 :poll-ms 50 :owner-id "bug13-w")]
+    (let [e2 (intemporal/make-workflow-engine :store store :threads 2
+                                              :poll-ms 50 :owner-id "bug13-w")]
       (try
         (intemporal/send-signal store wid "go" {})
         {:status (await-status store wid :completed 5000)
          :result (intemporal/get-workflow-result store wid)}
-        (finally (stop) (intemporal/shutdown-engine e2))))))
+        (finally (intemporal/shutdown-engine e2))))))
 
 (defn- assert-recovered [{:keys [status result]}]
   (is (= :completed status) "worker on a fresh engine resumed the crashed workflow (bug 1.3 fixed)")

@@ -20,33 +20,36 @@ RUN ./install-clj-kondo
 
 deps:
   # copy all relevant files
-  COPY deps.edn tests.edn shadow-cljs.edn package.json /build
-  CACHE ./node_modules
+  COPY deps.edn tests.edn shadow-cljs.edn package.json package-lock.json /build
   CACHE ~/.m2
   RUN clj -Stree
-  RUN npm install
+  RUN npm ci
+
+build-base:
+  FROM +deps
+  COPY --dir .clj-kondo build bin dev doc src test resources /build
+
+test-base:
+  FROM +build-base
   RUN wget -nv https://github.com/apple/foundationdb/releases/download/7.3.57/foundationdb-clients_7.3.57-1_amd64.deb
   RUN dpkg -i foundationdb-clients_7.3.57-1_amd64.deb
   RUN echo "docker:docker@127.0.0.1:4500" > /etc/foundationdb/fdb.cluster
   RUN wget -nv --content-disposition https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar
 
-build-base:
-  FROM +deps
-  COPY --dir .clj-kondo build bin doc src test resources /build
-
 lint:
   FROM +build-base
-  RUN clj-kondo --parallel --lint src
-  RUN clj-kondo --parallel --lint test
+  RUN clj-kondo --parallel --lint src test build dev deps.edn resources
 build-main:
   FROM +build-base
   RUN clj -T:build compile-main
 build-jar:
-  FROM +build-main
+  FROM +build-base
   RUN clj -T:build jar
+  RUN clojure -M:jar-smoke-jvm
+  RUN clojure -M:jar-smoke-cljs
 build-cljs:
   FROM +build-base
-  RUN npx shadow-cljs release doc
+  RUN bin/build-doc
 
 build-all:
   BUILD +lint
@@ -55,7 +58,7 @@ build-all:
   BUILD +build-cljs
 
 test:
-  FROM +build-base
+  FROM +test-base
   #DO github.com/earthly/lib+INSTALL_DIND
   COPY docker ./docker
   COPY docker-compose.yaml ./

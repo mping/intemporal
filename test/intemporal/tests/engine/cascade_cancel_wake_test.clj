@@ -1,6 +1,6 @@
 (ns intemporal.tests.engine.cascade-cancel-wake-test
-  "Regression test for kimi.md finding E6 (test plan #15): `enforce-close-
-   policies!`'s :cascade-cancel case failed to make the child runnable.
+  "Regression test: `enforce-close-policies!`'s :cascade-cancel case must make
+   the child runnable.
 
    `cancel-workflow` (core.cljc:~884-890) does the right three things when
    cancelling a workflow directly atomically records cancellation and wakes the

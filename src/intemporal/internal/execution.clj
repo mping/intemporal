@@ -2,11 +2,15 @@
   (:require
    [intemporal.internal.activity :as a]
    [intemporal.internal.context :as ctx]
+   [intemporal.internal.domain :as domain]
    [intemporal.internal.error :as error]
+   [intemporal.internal.execution.common :as common]
    [intemporal.internal.logging :as log]
+   [intemporal.internal.throwable :as throwable]
+   [intemporal.observer :as obs]
    [intemporal.protocol :as p]
    [intemporal.tracing :as tracing]
-   [intemporal.utils :as utils])
+   [intemporal.internal.clock :as clock])
   (:import
    (java.util.concurrent RejectedExecutionException)))
 
@@ -20,64 +24,63 @@
   `(when ~observer
      (~proto-fn ~observer ~@args)))
 
+(def run-once common/run-once)
+
 (defn execute-workflow-fn [workflow-fn args]
-  (try
-    {:status :completed
-     :result (apply workflow-fn args)
-     :pending-asyncs @(:pending-asyncs (ctx/current-context))
-     :pending-events @(:pending-events (ctx/current-context))}
-    (catch Throwable e
-      (cond
-        (error/suspension? e)
-        {:status :suspended
-         :suspension-type (error/suspension-type e)
-         :suspension-data (error/suspension-data e)
-         :pending-asyncs @(:pending-asyncs (ctx/current-context))
-         :pending-events @(:pending-events (ctx/current-context))}
+  (let [{:keys [pending-asyncs pending-events]} (ctx/current-context)]
+    (try
+      {:status :completed
+       :result (apply workflow-fn args)
+       :pending-asyncs @pending-asyncs
+       :pending-events @pending-events}
+      (catch Throwable e
+        (cond
+          (error/suspension? e)
+          {:status :suspended
+           :suspension-type (error/suspension-type e)
+           :suspension-data (error/suspension-data e)
+           :pending-asyncs @pending-asyncs
+           :pending-events @pending-events}
 
-        (error/cancelled-exception? e)
-        {:status :cancelled
-         :pending-events @(:pending-events (ctx/current-context))}
+          (error/cancelled-exception? e)
+          {:status :cancelled
+           :pending-events @pending-events}
 
-        :else
-        ;; Real failure. Any saga rollback happens inside the workflow body (the
-        ;; user's catch calls intemporal/compensate); a compensating activity that
-        ;; suspends throws out of compensate and arrives here as a suspension,
-        ;; caught above, so the loop schedules + resumes it.
-        {:status :failed
-         :error e
-         :pending-events @(:pending-events (ctx/current-context))}))))
+          :else
+          {:status :failed
+           :error e
+           :pending-events @pending-events})))))
 
 (defn- attempt-once
   "Execute an activity exactly once.
    Returns {:status :success ...}, {:status :rejected ...}, or {:status :retryable-error ...}.
    Rejection is never retried; retryable-error is subject to the caller's policy."
   [executor activity-name args timeout-ms observer workflow-id seq-num attempt]
-  (let [start (utils/current-time-ms)]
-    (-notify p/on-activity-started observer workflow-id seq-num activity-name)
+  (let [start (clock/now-ms)]
+    (-notify obs/on-activity-started observer workflow-id seq-num activity-name)
     (log/infof "Executing activity via executor %s (attempt %d)" executor attempt)
     (try
       (let [result   (p/execute-activity executor activity-name args timeout-ms)
-            duration (- (utils/current-time-ms) start)]
-        (-notify p/on-activity-completed observer workflow-id seq-num activity-name result duration)
+            duration (- (clock/now-ms) start)]
+        (-notify obs/on-activity-completed observer workflow-id seq-num activity-name result duration)
         (log/infof "Activity succeeded (attempt %d), result: %s" attempt result)
         {:status :success :result result :duration duration :attempts attempt})
       (catch RejectedExecutionException e
-        (let [duration  (- (utils/current-time-ms) start)
+        (let [duration  (- (clock/now-ms) start)
               error     (error/activity-rejected-exception activity-name e)
               error-map (error/throwable->map error)]
-          (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
+          (-notify obs/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
           (log/warnf e "Activity execution rejected")
           {:status :rejected :error error-map :duration duration}))
       (catch Exception e
-        (let [duration  (- (utils/current-time-ms) start)
+        (let [duration  (- (clock/now-ms) start)
               error-map (error/throwable->map e)]
-          (-notify p/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
+          (-notify obs/on-activity-failed observer workflow-id seq-num activity-name error-map duration)
           (log/warnf e "Activity failed (attempt %d)" attempt)
           {:status :retryable-error :error error-map :exception e :duration duration})))))
 
 (defn- record-attempt!
-  "Persist one consumed retry attempt (kimi.md X8). Written BEFORE anything waits
+  "Persist one consumed retry attempt. Written BEFORE anything waits
    on the backoff — the window a crash lands in — so both the count and the
    deadline survive the drive that spent them."
   [store workflow-id seq-num activity-name attempt error-map duration-ms will-retry? retry-at]
@@ -88,7 +91,7 @@
 
 (defn run-attempt
   "Run ONE attempt of an activity and record its outcome. The retry LOOP is the
-   drive loop's job now, not this function's (kimi.md X8): a backoff is a durable
+   drive loop's job, not this function's: a backoff is a durable
    suspension, so nothing here ever sleeps.
 
    Starts at the attempt after the last one history records (`attempt-state`,
@@ -97,8 +100,8 @@
      {:status :failed ...}           -> caller writes :activity-failed (terminal)
      {:status :retry-scheduled ...}  -> nothing terminal; the recorded :retry-at
                                         is when the body may try again"
-  [executor activity-name args timeout-ms retry-policy observer workflow-id seq-num
-   attempt-state record-attempt!]
+  [store executor activity-name args timeout-ms retry-policy observer workflow-id seq-num
+   attempt-state]
   (let [attempt (a/next-attempt attempt-state)
         result  (attempt-once executor activity-name args timeout-ms observer workflow-id seq-num attempt)]
     (case (:status result)
@@ -114,28 +117,19 @@
         ;; through to a terminal :activity-failed carrying the infra kind, which
         ;; is what makes `stub` reschedule instead of replaying the error.
         (when-not infra?
-          (record-attempt! attempt (:error result) (:duration result) retry? retry-at))
+          (record-attempt! store workflow-id seq-num activity-name
+                           attempt (:error result) (:duration result) retry? retry-at))
         (if retry?
           {:status :retry-scheduled :retry-at retry-at :attempts attempt}
           (-> result (assoc :status :failed :attempts attempt) (dissoc :exception)))))))
-
-(defn- continue-decision [] {:op :continue})
-
-(defn- park-decision
-  ([reason events] (park-decision reason events nil))
-  ([reason events next-run-at]
-   {:op :park
-    :reason reason
-    :events (vec events)
-    :next-run-at next-run-at}))
 
 (defn park-until-retry!
   "Return a durable park command for an activity retry deadline."
   [workflow-id seq retry-at observer]
   (log/infof "Activity retry at seq %s due in %dms; suspending"
-             seq (max 0 (- retry-at (utils/current-time-ms))))
-  (-notify p/on-timer-scheduled observer workflow-id seq retry-at)
-  (park-decision :retry [] retry-at))
+             seq (max 0 (- retry-at (clock/now-ms))))
+  (-notify obs/on-timer-scheduled observer workflow-id seq retry-at)
+  (common/park-decision :retry [] retry-at))
 
 (defn process-pending-activity
   "Run (at most) one attempt of the suspended activity and record its outcome.
@@ -167,10 +161,9 @@
                               {:status   :failed
                                :error    (:error attempt-state)
                                :attempts (:attempts attempt-state)})
-                            (run-attempt executor activity-name args timeout-ms
+                            (run-attempt store executor activity-name args timeout-ms
                                          retry-policy observer workflow-id seq
-                                         attempt-state
-                                         (partial record-attempt! store workflow-id seq activity-name)))]
+                                         attempt-state))]
         (if (= :retry-scheduled (:status exec-result))
           (park-until-retry! workflow-id seq (:retry-at exec-result) observer)
           (let [success? (= :success (:status exec-result))
@@ -180,14 +173,14 @@
                                   :result        (:result exec-result)
                                   :duration-ms   (:duration exec-result)
                                   :attempts      (:attempts exec-result)
-                                  :timestamp     (utils/current-time-ms)}
+                                  :timestamp     (clock/now-ms)}
                            success? (assoc :result (:result exec-result))
                            (not success?) (assoc :error (:error exec-result)))]
             (p/save-event store workflow-id event)
-            (continue-decision)))))))
+            (common/continue-decision)))))))
 
 ;; ============================================================================
-;; Async batches: the ENGINE owns the retry loop (kimi.md X8)
+;; Async batches: the engine owns the retry loop
 ;; ============================================================================
 ;;
 ;; The executor used to retry internally, on a pool thread that has no store, no
@@ -196,29 +189,10 @@
 ;; once and everything below decides whether to retry, exactly as the sequential
 ;; path does, using the same `intemporal.internal.activity` helpers.
 
-(defn due-asyncs
-  "The pending asyncs whose activity may run right now: everything except the
-   ones still serving a recorded retry backoff."
-  [pending-asyncs]
-  (remove #(a/retry-pending? (:attempt-state %)) pending-asyncs))
-
-(defn earliest-async-retry
-  "The soonest instant any backing-off async becomes due, or nil if none is."
-  [pending-asyncs]
-  (->> pending-asyncs
-       (keep #(when (a/retry-pending? (:attempt-state %))
-                (:retry-at (:attempt-state %))))
-       (reduce (fn [a b] (if a (min a b) b)) nil)))
-
-(defn- with-async-retry-deadline [pending-asyncs decision]
-  (if (and (= :park (:op decision)) (= :async (:reason decision)))
-    (assoc decision :next-run-at (earliest-async-retry pending-asyncs))
-    decision))
-
 (defn- async-terminal-failure-events
   "The events that resolve an async handle as failed."
   [{:keys [activity-name activity-seq handle-seq]} error attempt now workflow-id observer]
-  (-notify p/on-async-failed observer workflow-id handle-seq error)
+  (-notify obs/on-async-failed observer workflow-id handle-seq error)
   (log/tracef "Got completion event: activity failed, error: %s" error)
   [{:event-type    :activity-failed
     :seq           activity-seq
@@ -241,7 +215,7 @@
   (log/with-mdc {:activity activity-name :seqnum activity-seq}
     (if (= :success (:status result))
       (do
-        (-notify p/on-async-completed observer workflow-id handle-seq (:result result))
+        (-notify obs/on-async-completed observer workflow-id handle-seq (:result result))
         (log/tracef "Got completion event: activity succeeded, result: %s" result)
         [{:event-type    :activity-completed
           :seq           activity-seq
@@ -274,7 +248,7 @@
                                      error (:duration result) true retry-at)])
 
           ;; Infrastructure failures consume no budget: `async` re-enqueues them
-          ;; from the :activity-failed kind (X6/E4/X4), so record no attempt.
+          ;; from the :activity-failed kind, so record no attempt.
           infra?
           (async-terminal-failure-events async-info error attempt now workflow-id observer)
 
@@ -310,8 +284,8 @@
 
      (let [{spent true eligible false} (group-by #(a/retry-budget-spent? (:attempt-state %))
                                                  pending-asyncs)
-           runnable (vec (if drain? eligible (due-asyncs eligible)))
-           now      (utils/current-time-ms)
+           runnable (vec (if drain? eligible (common/due-asyncs eligible)))
+           now      (clock/now-ms)
            events   (when (seq runnable)
                       ;; One attempt each: whether to retry is decided here, from
                       ;; the durable attempt record, never inside the executor.
@@ -323,11 +297,11 @@
        (when-let [all (seq (concat (mapcat #(spent-budget-events % now workflow-id observer) spent)
                                    events))]
          (p/save-events store workflow-id all))))
-   (continue-decision)))
+   (common/continue-decision)))
 
 (defn process-timer [store workflow-id suspension-data pending-events observer]
   (let [{:keys [seq fire-at]} suspension-data
-        now (utils/current-time-ms)]
+        now (clock/now-ms)]
     (if (>= now fire-at)
       (do
         (p/save-events store workflow-id pending-events)
@@ -335,9 +309,9 @@
           (p/save-event store workflow-id {:event-type :timer-fired
                                            :seq seq
                                            :timestamp now})
-          (-notify p/on-timer-fired observer workflow-id seq))
-        (continue-decision))
-      (park-decision :timer pending-events fire-at))))
+          (-notify obs/on-timer-fired observer workflow-id seq))
+        (common/continue-decision))
+      (common/park-decision :timer pending-events fire-at))))
 
 (defn process-signal [store workflow-id suspension-data pending-events observer]
   (let [{:keys [seq signal-name]} suspension-data
@@ -347,40 +321,40 @@
                                                          :signal-name signal-name
                                                          :signal-id   (:id signal-data)
                                                          :payload     (:payload signal-data)
-                                                         :timestamp   (utils/current-time-ms)})
-                        (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data)))]
+                                                         :timestamp   (clock/now-ms)})
+                        (-notify obs/on-signal-received observer workflow-id signal-name (:payload signal-data)))]
     (if-let [signal-data (p/consume-signal store workflow-id signal-name)]
       (do
         (p/save-events store workflow-id pending-events)
         (save-received signal-data)
-        (continue-decision))
-      (park-decision :signal pending-events))))
+        (common/continue-decision))
+      (common/park-decision :signal pending-events))))
 
 (defn process-signal-with-timeout [store workflow-id suspension-data
                                    pending-events observer]
   (let [{:keys [seq signal-name deadline]} suspension-data
-        now (utils/current-time-ms)
+        now (clock/now-ms)
         save-completed (fn [signal-data?]
                          (let [event (cond-> {:event-type  :signal-wait-completed
                                               :seq         seq
                                               :received    (some? signal-data?)
                                               :signal-name signal-name
-                                              :timestamp   (utils/current-time-ms)}
+                                              :timestamp   (clock/now-ms)}
                                        (some? signal-data?) (assoc :payload (:payload signal-data?)))]
                            (p/save-event store workflow-id event)
                            (when signal-data?
-                             (-notify p/on-signal-received observer workflow-id signal-name (:payload signal-data?)))))]
+                             (-notify obs/on-signal-received observer workflow-id signal-name (:payload signal-data?)))))]
     (if-let [signal-data (p/consume-signal store workflow-id signal-name)]
       (do
         (p/save-events store workflow-id pending-events)
         (save-completed signal-data)
-        (continue-decision))
+        (common/continue-decision))
       (if (>= now deadline)
         (do
           (p/save-events store workflow-id pending-events)
           (save-completed nil)
-          (continue-decision))
-        (park-decision :signal-timeout pending-events deadline)))))
+          (common/continue-decision))
+        (common/park-decision :signal-timeout pending-events deadline)))))
 
 (defn process-join-pending
   "Handle a :join-pending suspension. handle-suspension flushes the pending-asyncs
@@ -397,59 +371,12 @@
     (if (or completed failed)
       (do
         (p/save-events store workflow-id pending-events)
-        (continue-decision))
-      (park-decision :async pending-events))))
-
-;; ============================================================================
-;; Helper Functions for Workflow Execution
-;; ============================================================================
-
-(defn make-workflow-context
-  "Create workflow execution context from history."
-  [workflow-id history store registry observer]
-  {;; Write-once pass snapshot — never swap it: :history-index is derived from
-   ;; this exact vector and would silently desync.
-   :history (atom history)
-   ;; Built once per pass — plain map, no deref at the call site.
-   :history-index (ctx/index-history history)
-   :workflow-id workflow-id
-   :seq-counter (atom 0)
-   :pending-events (atom [])
-   :pending-asyncs (atom [])
-   :compensating? (atom false)
-   :store store
-   :registry registry
-   :observer observer})
+        (common/continue-decision))
+      (common/park-decision :async pending-events))))
 
 ;; ============================================================================
 ;; Tier 2: independent child workflows — parent/child lifecycle linkage
 ;; ============================================================================
-
-(def ^:private terminal-status? #{:completed :failed :cancelled :terminated})
-
-(defn- next-terminal-seq
-  "Deterministic :seq for a terminal control event (:workflow-completed/-failed/
-   -cancelled/-terminated): one past the highest seq recorded for `workflow-id`.
-   A8: every event now carries a real seq — this keeps terminal events sorting
-   after every real op (FDB) and re-finalization idempotent under the
-   (workflow_id, seq, event_type) upsert key (JDBC), instead of relying on a
-   NULL/wall-clock seq. :workflow-started always seeds -1 (core.cljc), so an
-   empty-bodied workflow still gets a distinct terminal seq (0). Uses
-   `p/max-seq` rather than a full `load-history` — each store serves it from an
-   index instead of loading/deserializing the whole history."
-  [store workflow-id]
-  (inc (or (p/max-seq store workflow-id) -1)))
-
-(defn- parent-link
-  "If `workflow-id` is an independent child, return {:parent-id :parent-seq} read
-   from its seeded :workflow-started event; nil for a top-level workflow."
-  [store workflow-id]
-  (let [started (->> (p/load-history store workflow-id)
-                     (filter #(= :workflow-started (:event-type %)))
-                     first)]
-    (when (:parent-id started)
-      {:parent-id  (:parent-id started)
-       :parent-seq (:parent-seq started)})))
 
 (defn- notify-parent-terminal
   "When `workflow-id` is a child, record its terminal outcome in the PARENT's
@@ -457,8 +384,8 @@
    -failed alias so the existing `join` resolves it) and wake the parent so the
    runnable scan re-resumes it. Idempotent — guarded by the parent's events."
   [store workflow-id completed? payload]
-  (when-let [{:keys [parent-id parent-seq]} (parent-link store workflow-id)]
-    (let [now     (utils/current-time-ms)
+  (when-let [{:keys [parent-id parent-seq]} (common/parent-link store workflow-id)]
+    (let [now     (clock/now-ms)
           already (or (p/find-event store parent-id :child-workflow-completed parent-seq)
                       (p/find-event store parent-id :child-workflow-failed parent-seq))]
       (when-not already
@@ -476,15 +403,6 @@
                          (not completed?) (assoc :error payload))]
           (p/save-events-and-wake! store parent-id [child-ev async-ev]))))))
 
-(defn- has-children?
-  "Cheap guard (uses only the always-present load-history) so the Tier 2
-   close-policy path — and the list-children store method it needs — is touched
-   ONLY for workflows that actually scheduled an independent child. Keeps every
-   non-Tier-2 workflow, on every store, on the original code path."
-  [store workflow-id]
-  (boolean (some #(= :child-workflow-scheduled (:event-type %))
-                 (p/load-history store workflow-id))))
-
 (defn enforce-close-policies!
   "Apply each child's :parent-close-policy when `workflow-id` closes (Temporal's
    ParentClosePolicy — acts on CHILDREN only, never changes this workflow's outcome):
@@ -497,9 +415,9 @@
    re-runs its finalizer, so the whole subtree must be enforced here, at close
    time. Idempotent."
   [store workflow-id]
-  (when (has-children? store workflow-id)
+  (when (common/has-children? store workflow-id)
     (doseq [{:keys [child-id status policy]} (p/list-children store workflow-id)]
-      (when-not (terminal-status? status)
+      (when-not (domain/terminal-status? status)
         (case policy
           ;; The child's status flips to :cancelled/:terminated here (flag/event)
           ;; and it may never be driven through its own finalizer, so end its
@@ -511,9 +429,9 @@
                               (enforce-close-policies! store child-id))
           :terminate      (do (p/save-event store child-id
                                             {:event-type  :workflow-terminated
-                                             :seq         (next-terminal-seq store child-id)
+                                             :seq         (common/next-terminal-seq store child-id)
                                              :workflow-id child-id
-                                             :timestamp   (utils/current-time-ms)})
+                                             :timestamp   (clock/now-ms)})
                               (p/wake-workflow store child-id)
                               (tracing/finish-workflow-span! child-id {:message "terminated (parent closed)"})
                               (enforce-close-policies! store child-id))
@@ -528,15 +446,15 @@
                                           :completed :workflow-completed
                                           :cancelled :workflow-cancelled
                                           :failed :workflow-failed)
-                            :seq (next-terminal-seq store workflow-id)
-                            :timestamp (utils/current-time-ms)}
+                            :seq (common/next-terminal-seq store workflow-id)
+                            :timestamp (clock/now-ms)}
                      completed? (assoc :result payload)
                      (not completed?) (assoc :error payload))]
     (p/save-event store workflow-id event)
     (case status
-      :completed (-notify p/on-workflow-completed observer workflow-id payload)
-      :cancelled (-notify p/on-workflow-cancelled observer workflow-id)
-      :failed    (-notify p/on-workflow-failed observer workflow-id payload))
+      :completed (-notify obs/on-workflow-completed observer workflow-id payload)
+      :cancelled (-notify obs/on-workflow-cancelled observer workflow-id)
+      :failed    (-notify obs/on-workflow-failed observer workflow-id payload))
     (enforce-close-policies! store workflow-id)
     (notify-parent-terminal store workflow-id completed? payload)
     (tracing/finish-workflow-span! workflow-id (when-not completed? payload))
@@ -579,46 +497,19 @@
    finalized as :failed because of them."
   [e]
   (or (.isInterrupted (Thread/currentThread))
-      (loop [t e]
-        (cond
-          (nil? t) false
-          (instance? InterruptedException t) true
-          :else (recur (.getCause ^Throwable t))))))
-
-(defn run-once
-  "Internal: Execute a side-effect thunk only once (not on replay).
-   Uses a special event marker to track execution.
-
-   This is an internal implementation detail and should not be exposed to users.
-   Users should wrap side effects in activities for proper determinism.
-
-   This can be used to eg run logging statements, etc"
-  [thunk]
-  (ctx/check-cancelled!)
-  (let [seq-num (ctx/next-seq!)
-        existing (ctx/history-event :run-once-completed seq-num)]
-    (if existing
-      ;; Replay: already executed, return cached result
-      (:result existing)
-      ;; First time: execute thunk and save result
-      (let [result (thunk)]
-        (ctx/add-pending-event! {:event-type :run-once-completed
-                                 :seq seq-num
-                                 :result result
-                                 :timestamp (utils/current-time-ms)})
-        result))))
+      (throwable/interrupted? e)))
 
 (defn- handle-suspension
   "Turn a workflow suspension into a uniform continue/park decision."
   [{:keys [store executor]} workflow-id suspension-type suspension-data
    pending-asyncs pending-events observer]
-  (-notify p/on-workflow-suspended observer workflow-id suspension-type)
+  (-notify obs/on-workflow-suspended observer workflow-id suspension-type)
   ;; A due async batch takes precedence; replay raises the original suspension
   ;; again after the batch is durable.
-  (if (seq (due-asyncs pending-asyncs))
+  (if (seq (common/due-asyncs pending-asyncs))
     (process-pending-asyncs-parallel store executor workflow-id
                                      pending-asyncs pending-events observer)
-    (with-async-retry-deadline
+    (common/with-async-retry-deadline
       pending-asyncs
       (case suspension-type
         :activity (process-pending-activity store executor workflow-id
@@ -634,13 +525,13 @@
           (if (or (some #(p/find-event store workflow-id :async-completed %) handle-seqs)
                   (every? #(p/find-event store workflow-id :async-failed %) handle-seqs))
             (do (p/save-events store workflow-id pending-events)
-                (continue-decision))
-            (park-decision :async pending-events)))))))
+                (common/continue-decision))
+            (common/park-decision :async pending-events)))))))
 
 (defn- replay-once
   [{:keys [store registry]} workflow-id workflow-fn args observer]
   (let [history (p/load-history store workflow-id)
-        context (make-workflow-context workflow-id history store registry observer)]
+        context (common/make-workflow-context workflow-id history store registry observer)]
     (binding [ctx/*workflow-context* context]
       (execute-workflow-fn workflow-fn args))))
 
@@ -654,7 +545,7 @@
                                     (:pending-events exec-result)
                                     observer)]
     (when (and observer (= :continue (:op decision)))
-      (p/on-workflow-resumed observer workflow-id))
+      (obs/on-workflow-resumed observer workflow-id))
     (if (= :continue (:op decision))
       {:op :continue :wake-version expected-wake-version}
       (let [{:keys [park-status wake-version]}

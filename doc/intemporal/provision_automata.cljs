@@ -7,7 +7,7 @@
             [hiccups.runtime :as hiccupsrt])
   (:require-macros [hiccups.core :as hiccups :refer [html]]
                    [intemporal.core :refer [defn-workflow]]
-                   [intemporal.internal.context :refer [blet bthen bloop]]))
+                   [intemporal.internal.context :refer [blet bthen]]))
 
 ;;;;
 ;; State machine — VM provisioning lifecycle
@@ -250,7 +250,7 @@
 ;;;;
 ;; Workflow
 ;;
-;; I/O stubs are created once and called inside the bloop. Each returns
+;; I/O stubs are created once and called inside the replayed loop. Each returns
 ;; {:event <keyword> & data}; the event drives fsm/transit and the data merges
 ;; into ctx so downstream activities receive ids from upstream ones.
 ;; No try/catch here — error handling lives inside each activity function.
@@ -263,7 +263,7 @@
         halt-vm        (intemporal/stub #'halt-vm!)
         detach-vol     (intemporal/stub #'detach-volume!)
         deprovision    (intemporal/stub #'deprovision!)]
-    (bloop [current init-state ctx {}]
+    (loop [current init-state ctx {}]
       (let [transitions (get rules current)]
         (if (empty? transitions)
           current
@@ -296,9 +296,9 @@
                   ;; :state/init and :state/running: user picks via button
                   [(get-next-event rules current) ctx])]
 
-            (p/recur (-> (fsm/transit {::fsm/rules rules ::fsm/state current} evt)
-                         ::fsm/state)
-                     ctx')))))))
+            (recur (-> (fsm/transit {::fsm/rules rules ::fsm/state current} evt)
+                       ::fsm/state)
+                   ctx')))))))
 
 ;;;;
 ;; Fulfilling user-input Promises

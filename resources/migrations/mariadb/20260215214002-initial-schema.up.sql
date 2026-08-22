@@ -2,10 +2,9 @@ CREATE TABLE IF NOT EXISTS intemporal_workflows (
     id VARCHAR(512) PRIMARY KEY,
     cancelled BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    -- Phase B2: O(1) workflow status, instead of scanning intemporal_history to
-    -- derive it. Also gives the Phase C recovery poller a cheap predicate.
+    -- O(1) workflow status, instead of scanning intemporal_history to derive it.
     status VARCHAR(64) NOT NULL DEFAULT 'running',
-    -- Phase C: ownership-based recovery. A workflow is owned by at most one pod
+    -- Ownership-based recovery. A workflow is owned by at most one process
     -- (a stable owner-id). A worker resumes the non-terminal workflows it
     -- owns-or-null; a crashed pod's work is reclaimed when it restarts with the
     -- same owner-id. No time-based leases.
@@ -32,12 +31,12 @@ CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_schedule
 CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_parent
     ON intemporal_workflows (parent_workflow_id);
 --;;
--- A1: the engine records multiple event types at the same seq, so history is
+-- The engine records multiple event types at the same seq, so history is
 -- keyed per event type rather than per seq alone (see the postgres migration
 -- of the same era for the full rationale). event_type is VARCHAR, not TEXT, so
 -- it can participate in the unique key below.
 --
--- A8: seq is NOT NULL — the engine assigns every event a deterministic seq
+-- seq is NOT NULL — the engine assigns every event a deterministic seq
 -- (:workflow-started = -1, terminal events = one past the last real op seq).
 --
 -- Bug #22: data is LONGTEXT, not JSON — the stores serialize payloads with EDN

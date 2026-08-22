@@ -10,6 +10,7 @@
    Enforcement is still gated by intemporal.spec/check! itself — a no-op
    unless clojure.spec.check-asserts is enabled. See intemporal.spec."
   (:require
+   [clojure.spec.alpha :as s]
    [intemporal.protocol :as p]
    [intemporal.spec :as spec]))
 
@@ -18,10 +19,6 @@
   (load-history [_ workflow-id]
     (->> (p/load-history inner workflow-id)
          (spec/check! ::spec/events)))
-
-  (save-event [_ workflow-id event]
-    (spec/check! ::spec/event event)
-    (p/save-event inner workflow-id event))
 
   (save-events [_ workflow-id events]
     (spec/check! ::spec/events events)
@@ -106,10 +103,27 @@
          (when (instance? java.lang.AutoCloseable inner)
            (.close ^java.lang.AutoCloseable inner)))]))
 
+(defn checked-store? [store]
+  (instance? CheckedStore store))
+
 (defn unwrap
   "Returns the concrete store `s` decorates, or `s` itself when it is not a
    CheckedStore. Use this when you need a backend-specific field that only the
    concrete record carries — e.g. a JdbcStore's :datasource — since those keys
    are not readable through the wrapper."
   [s]
-  (if (instance? CheckedStore s) (:inner s) s))
+  (if (checked-store? s) (:inner s) s))
+
+(defn wrap
+  "Apply the store validation construction policy.
+
+   :auto  wraps only when clojure.spec/check-asserts is currently enabled
+   true   always installs CheckedStore (individual checks remain dynamically gated)
+   false  returns the concrete store unchanged"
+  [store checked?]
+  (case checked?
+    :auto (if (s/check-asserts?) (->CheckedStore store) store)
+    true  (->CheckedStore store)
+    false store
+    (throw (ex-info "Invalid :checked? policy"
+                    {:checked? checked? :allowed #{:auto true false}}))))

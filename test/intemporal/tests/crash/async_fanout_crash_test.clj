@@ -1,10 +1,10 @@
 (ns intemporal.tests.crash.async-fanout-crash-test
-  "Regression test for kimi.md improvement #1 / bug X1: `handle-suspension`
-   only forwards pending asyncs to the engine for the :activity,
+  "Regression test: `handle-suspension` must forward pending asyncs for every
+   suspension type, not only :activity,
    :join-pending, :join-any-pending, and :child-workflow suspension branches.
    The :timer and :wait-signal(-timeout) branches drop them on the floor.
 
-   Reproducer (kimi.md X1): `(let [h (async #(act x))] (sleep ms) (join h))`.
+   Reproducer: `(let [h (async #(act x))] (sleep ms) (join h))`.
    Buggy behavior: pass 1's `async` persists an :async-started event and
    queues the activity in `pending-asyncs`; `sleep` then suspends with
    :timer, and the timer branch saves pending EVENTS but never runs the

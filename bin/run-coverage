@@ -27,5 +27,7 @@ lcov --add-tracefile target/coverage-clj/lcov.info \
      -o coverage/lcov.info
 genhtml --ignore-errors empty --ignore-errors unmapped coverage/lcov.info -o coverage
 
-printf "${BLUE}done! opening report${NC}\n"
-xdg-open coverage/index.html || open coverage/index.html ||  true
+printf "${BLUE}done! report: coverage/index.html${NC}\n"
+if [[ "${CI:-false}" != "true" ]]; then
+  xdg-open coverage/index.html || open coverage/index.html || true
+fi

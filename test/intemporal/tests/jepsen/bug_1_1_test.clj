@@ -44,14 +44,14 @@
       (Thread/sleep 300)
       (future-cancel f1)
       (intemporal/shutdown-engine e1))
-    (let [e2   (intemporal/make-workflow-engine :store store-b :threads 2)
-          stop (intemporal/start-worker e2 :poll-ms 50 :owner-id "bug11-w")]
+    (let [e2 (intemporal/make-workflow-engine :store store-b :threads 2
+                                              :poll-ms 50 :owner-id "bug11-w")]
       (try
         ;; Signal delivered through the SECOND store instance.
         (intemporal/send-signal store-b wid "go" {})
         {:status (await-status store-b wid :completed 5000)
          :result (intemporal/get-workflow-result store-b wid)}
-        (finally (stop) (intemporal/shutdown-engine e2))))))
+        (finally (intemporal/shutdown-engine e2))))))
 
 (defn- assert-woke [{:keys [status result]}]
   (is (= :completed status) "cross-instance signal woke the workflow via durable marker (bug 1.1 fixed)")

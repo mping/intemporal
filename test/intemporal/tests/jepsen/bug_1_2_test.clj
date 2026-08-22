@@ -1,7 +1,7 @@
 (ns intemporal.tests.jepsen.bug-1-2-test
   "Bug 1.2 — Concurrent execution corrupting history.  REGRESSION GUARD.
 
-  Root cause (improvements.md §1.2) — now FIXED (Phase C, ownership model):
+  Former root cause, now fixed by the ownership model:
     Two pods could run the same workflow and both write history; JDBC's
     ON CONFLICT DO UPDATE silently overwrote, FDB produced duplicate-seq rows.
     Nothing stopped two concurrent writers.

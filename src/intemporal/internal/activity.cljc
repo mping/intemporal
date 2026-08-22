@@ -1,7 +1,7 @@
 (ns intemporal.internal.activity
   (:require
    [intemporal.internal.error :as error]
-   [intemporal.utils :as utils]
+   [intemporal.internal.clock :as clock]
    #?(:cljs [clojure.string :as str])))
 
 ;; ============================================================================
@@ -76,9 +76,6 @@
 (defn get-activity-info [registry activity-name]
   (get @registry activity-name))
 
-(defn get-activity-fn [registry activity-name]
-  (:fn (get-activity-info registry activity-name)))
-
 (defn ensure-registered! [registry f]
   (let [activity-name (if (var? f)
                         (str (symbol f))
@@ -90,12 +87,6 @@
 ;; ============================================================================
 ;; Retry Policy
 ;; ============================================================================
-
-(defrecord RetryPolicy [max-attempts
-                        backoff-ms
-                        max-backoff-ms
-                        backoff-multiplier
-                        retryable-fn])
 
 (defn make-retry-policy
   "Create a retry policy.
@@ -112,7 +103,11 @@
            backoff-multiplier 2.0
            retryable-fn (constantly true)}}]
   (let [effective-backoff (or initial-backoff-ms backoff-ms 1000)]
-    (->RetryPolicy max-attempts effective-backoff max-backoff-ms backoff-multiplier retryable-fn)))
+    {:max-attempts max-attempts
+     :backoff-ms effective-backoff
+     :max-backoff-ms max-backoff-ms
+     :backoff-multiplier backoff-multiplier
+     :retryable-fn retryable-fn}))
 
 (defn calculate-backoff ^long [policy attempt]
   (let [base (:backoff-ms policy)
@@ -126,7 +121,7 @@
        ((:retryable-fn policy) error)))
 
 ;; ============================================================================
-;; Durable retry state (kimi.md X8)
+;; Durable retry state
 ;; ============================================================================
 ;;
 ;; The retry loop runs entirely inside one drive, so a crash between two attempts
@@ -143,10 +138,10 @@
 ;; wait itself durable: an engine no longer sleeps on the drive thread between
 ;; attempts, it suspends until that instant. The deadline is stamped once, when
 ;; the attempt fails, and reused verbatim on every later pass — recomputing it
-;; per replay is exactly the drift that made signal timeouts never fire (E5).
+;; per replay would keep pushing a deadline forward so it might never fire.
 ;;
 ;; The pure parts live here so the CLJ and CLJS engines cannot drift on the wire
-;; format or on the resume decision (kimi.md A1).
+;; format or on the resume decision.
 
 (defn attempt-failed-event
   "The durable record of one consumed attempt.
@@ -157,12 +152,9 @@
    resume without re-running anything. `retry-at` is the instant the next attempt
    becomes due (nil when no retry was granted).
 
-   Emitted repeatedly at the same (seq, :activity-attempt-failed) — one per
-   attempt — and the stores disagree about that: JDBC and FDB key on
-   (seq, event-type) and so keep only the latest, while InMemory appends every
-   copy. Carrying the running TOTAL (rather than a per-attempt marker to be
-   counted) is what makes the recovered value identical on all three; see
-   `intemporal.internal.context/attempt-state`."
+   Emitted repeatedly at the same replay sequence — one durable identity per
+   attempt. Carrying the running total also lets replay select the latest state
+   directly; see `intemporal.internal.context/attempt-state`."
   [seq-num activity-name attempts error-map duration-ms will-retry? retry-at]
   {:event-type    :activity-attempt-failed
    :seq           seq-num
@@ -172,22 +164,22 @@
    :duration-ms   duration-ms
    :will-retry    will-retry?
    :retry-at      retry-at
-   :timestamp     (utils/current-time-ms)})
+   :timestamp     (clock/now-ms)})
 
 (defn retry-at
   "The instant the attempt after `attempt` becomes due, or nil when the policy
    granted no further attempt. Stamped ONCE by the engine that ran the failing
-   attempt; never recomputed on replay (see the E5 drift note above)."
+   attempt; never recomputed on replay."
   [retry-policy attempt will-retry?]
   (when (and will-retry? retry-policy)
-    (+ (utils/current-time-ms) (calculate-backoff retry-policy attempt))))
+    (+ (clock/now-ms) (calculate-backoff retry-policy attempt))))
 
 (defn retry-pending?
   "True when the recovered state grants another attempt that is NOT yet due, i.e.
    the activity is mid-backoff. The workflow body consults this to refuse an
    early attempt: a worker poll (or any other wake) can re-drive a workflow at
    any moment, and only the body can decline to run before the deadline."
-  ([attempt-state] (retry-pending? attempt-state (utils/current-time-ms)))
+  ([attempt-state] (retry-pending? attempt-state (clock/now-ms)))
   ([attempt-state now]
    (boolean (and attempt-state
                  (:will-retry attempt-state)
@@ -211,9 +203,9 @@
 
 (defn infrastructure-failure?
   "True for failures that are not the activity's own fault: an interrupt from a
-   worker stop / engine shutdown, or a rejection from a saturated pool. `stub`
-   and `async` re-execute these instead of replaying them as errors (kimi.md
-   X6/E4), so they must not consume the caller's retry budget either — an
+   engine shutdown, or a rejection from a saturated pool. `stub` and `async`
+   re-execute these instead of replaying them as errors, so they must not consume
+   the caller's retry budget either — an
    infrastructure stop that burned attempts would shrink the budget every time a
    pod restarted."
   [e]

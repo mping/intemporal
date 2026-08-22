@@ -3,12 +3,11 @@
   SIGTERM), then later restarts it.  Maintains a min-alive floor so at least N
   workers can make progress.
 
-  Also provides 'signal-dead-workers': sends signals to all W1/W3 workflows
-  whose owner is currently dead.  This is the primary way to trigger bug 1.1:
-  the signal row lands in intemporal_signals but no callback fires because the
-  owning worker is gone."
+  It also sends durable signals to workflows owned by dead processes, testing
+  that a replacement engine consumes them after stable-owner recovery."
   (:require
    [clojure.string :as str]
+   [intemporal.jepsen.client :as client]
    [intemporal.jepsen.db :as db]
    [next.jdbc :as jdbc]
    [taoensso.telemere :as log]))
@@ -81,12 +80,9 @@
 ;; Signal-while-dead: exercises bug 1.1.
 
 (defn signal-dead-workflows!
-  "Finds W1 (signal-wait) and W3 (cancel-sleep) workflows whose owning worker
-  is currently dead, then sends the expected signal to each.  The signal row
-  lands in intemporal_signals but no callback fires — the workflow is stuck.
-
-  Records each signal in jepsen_signals_sent for the checker."
-  [{:keys [db-spec test-run owners history]}]
+  "Durably signal active workflows whose stable owner process is dead. A later
+  replacement process must recover and consume these signals."
+  [{:keys [store db-spec test-run owners history]}]
   (let [dead-owners (->> owners (remove db/alive?) set)
         ;; Find claimed-but-not-completed W1/W3 workflows owned by dead workers.
         rows (when (seq dead-owners)
@@ -96,10 +92,14 @@
                               WHERE test_run = ?
                                 AND completed = FALSE
                                 AND wf_type IN ('signal-wait','cancel-sleep','rapid-signal')
+                                AND NOT EXISTS (
+                                  SELECT 1 FROM jepsen_signals_sent ss
+                                   WHERE ss.test_run = ?
+                                     AND ss.workflow_id = jepsen_work_queue.workflow_id)
                                 AND claimed_by IN ("
                              (str/join "," (repeat (count dead-owners) "?"))
                              ")")
-                        test-run]
+                        test-run test-run]
                        dead-owners)))]
     (doseq [{:jepsen_work_queue/keys [workflow_id wf_type]} rows]
       (let [signal-name (case wf_type
@@ -108,32 +108,24 @@
                           "rapid-signal" "immediate"
                           nil)]
         (when signal-name
-          (try
-            (jdbc/execute! db-spec
-              ;; payload is EDN text since migration 20260807000007 (bug #22)
-              ["INSERT INTO intemporal_signals (workflow_id, signal_name, payload)
-                VALUES (?,?,'{}')"
-               workflow_id signal-name])
-            (jdbc/execute! db-spec
-              ["INSERT INTO jepsen_signals_sent (test_run, workflow_id, signal_name)
-                VALUES (?,?,?)"
-               test-run workflow_id signal-name])
+          (let [op (client/invoke-signal store db-spec test-run workflow_id signal-name)]
+            (if (= :ok (:type op))
+              (do
             (swap! history conj {:process :nemesis :type :info
                                  :f :signal-dead :value {:workflow-id workflow_id
                                                          :signal signal-name}
                                  :time (System/currentTimeMillis)})
             (log/log! :info (str "[nemesis] signalled dead workflow "
-                                  workflow_id " signal=" signal-name))
-            (catch Throwable t
-              (log/log! :warn (str "[nemesis] signal-dead-workflows! error: " t)))))))))
+                                      workflow_id " signal=" signal-name)))
+              (log/log! :warn (str "[nemesis] signal-dead-workflows! error: "
+                                   (:error op))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Quiesce helper
 
 (defn ensure-all-alive!
-  "Revives all dead workers during the quiesce phase.  Since intemporal has no
-  auto-resume on restart (bug 1.3), restarting workers here does NOT cause
-  stuck workflows to complete — it only proves that point."
+  "Revive every stable owner during quiesce so engine construction recovers its
+  interrupted RUNNING workflows."
   [{:keys [owners db-url test-run repo-root]}]
   (doseq [owner owners
           :when (not (db/alive? owner))]

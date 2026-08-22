@@ -18,17 +18,12 @@
   ;; unknown id
   (is (= :not-found (p/get-workflow-status store (str (random-uuid)))))
   ;; completed (terminal -> cached fast path) — submitted + run by a worker
-  (let [e (intemporal/make-workflow-engine :store store :threads 2)]
+  (let [e (intemporal/make-workflow-engine :store store :threads 2 :poll-ms 25)]
     (try
-      (let [stop (intemporal/start-worker e :poll-ms 25)]
-        (try
-          (let [{:keys [workflow-id]} (intemporal/submit-workflow e #'done-wf [21])]
-            (is (= {:status :completed :result 42}
-                   (intemporal/await-workflow e workflow-id :timeout-ms 5000)))
-            (is (= :completed (p/get-workflow-status store workflow-id))))
-          ;; Stop the explicit worker before start-workflow starts the engine's
-          ;; managed worker below.
-          (finally (stop))))
+      (let [{:keys [workflow-id]} (intemporal/submit-workflow e #'done-wf [21])]
+        (is (= {:status :completed :result 42 :workflow-id workflow-id}
+               (intemporal/await-workflow e workflow-id :timeout-ms 5000)))
+        (is (= :completed (p/get-workflow-status store workflow-id))))
       ;; A cancelled workflow is first-class: finalize-cancelled writes a
       ;; :workflow-cancelled terminal event, so the derived status is :cancelled
       ;; both during the mark-cancelled window and after finalization.

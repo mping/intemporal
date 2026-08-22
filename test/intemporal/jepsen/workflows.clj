@@ -2,25 +2,24 @@
   "Workflow shapes (W1–W4) submitted by the chaos test, plus the side-channel
   recording activity.
 
-  Side-channel writes go through *side-ds* (a separate auto-commit Hikari pool),
-  so rows are durable even if the worker JVM is SIGKILLed mid-activity.
+  Side-channel writes use the process-local side-context's separate auto-commit
+  Hikari pool, so rows are durable even if the worker JVM is SIGKILLed mid-activity.
 
-  Each workflow shape probes a specific bug from improvements.md:
-    W1 (signal-wait)     — bug 1.1: lost wake on signal when worker is dead
-    W2 (activity-chain)  — bug 1.3: no recovery poller; activities not re-run
-    W3 (cancel-sleep)    — bug 2.3: cancellation can't reach a sleeping workflow
-    W4 (rapid-signal)    — bug 2.1: register-then-consume signal race"
+  Each workflow shape probes durable wake, recovery, cancellation, or signal
+  behavior under real process failure."
   (:require
    [intemporal.core :as intemporal]
    [next.jdbc :as jdbc]
    [taoensso.telemere :as log]))
 
 ;; ---------------------------------------------------------------------------
-;; Dynamic bindings set by the worker before calling start-workflow / resume-workflow.
+;; Engine drives run on worker-owned threads, so dynamic bindings from the queue
+;; poller do not propagate. This process-local configuration is installed before
+;; the engine starts claiming recovered work.
+(defonce ^:private side-context (atom nil))
 
-(def ^:dynamic *side-ds*  nil)   ; auto-commit JDBC pool for side-channel writes
-(def ^:dynamic *test-run* nil)   ; test-run id stamped on every side-channel row
-(def ^:dynamic *owner*    nil)   ; worker owner-id for attribution
+(defn configure-side-channel! [datasource test-run owner]
+  (reset! side-context {:datasource datasource :test-run test-run :owner owner}))
 
 ;; ---------------------------------------------------------------------------
 ;; Side-channel recording.
@@ -29,12 +28,12 @@
   "Inserts one row into jepsen_invocations. Never throws — a side-channel
   failure must not crash the workflow."
   [workflow-id step nonce phase]
-  (when *side-ds*
+  (when-let [{:keys [datasource test-run owner]} @side-context]
     (try
-      (jdbc/execute! *side-ds*
+      (jdbc/execute! datasource
         ["INSERT INTO jepsen_invocations (test_run, workflow_id, step, nonce, phase, owner)
           VALUES (?,?,?,?,?,?)"
-         *test-run* workflow-id step nonce (name phase) *owner*])
+         test-run workflow-id step nonce (name phase) owner])
       (catch Throwable t
         (log/log! :warn (str "jepsen side-channel write failed: " t))))))
 
@@ -56,11 +55,11 @@
       (throw t))))
 
 ;; ---------------------------------------------------------------------------
-;; W1: signal-wait — probes bug 1.1 (lost wake on signal across processes).
+;; W1: signal-wait — durable wake on signal across processes.
 ;;
 ;; Registers a wait-for-signal :go.  If the worker is killed while waiting and
-;; someone sends the signal from another process, the workflow should resume.
-;; With the current implementation it will NOT: the callback is in a dead atom.
+;; someone sends the signal from another process, the workflow must resume when
+;; the stable owner restarts.
 
 (intemporal/defn-workflow signal-wait-workflow
   "Records :before, suspends on signal 'go', records :after."
@@ -71,10 +70,9 @@
     (act workflow-id "after" nonce)))
 
 ;; ---------------------------------------------------------------------------
-;; W2: activity-chain — probes bug 1.3 (no recovery poller).
+;; W2: activity-chain — recovery of an interrupted activity chain.
 ;;
-;; Runs a chain of activities.  If the worker crashes mid-chain and never
-;; explicitly calls resume-workflow, the remaining activities never run.
+;; A replacement engine resumes remaining steps without an explicit API call.
 
 (intemporal/defn-workflow activity-chain-workflow
   "Runs `steps` activities in sequence."
@@ -84,12 +82,11 @@
       (act workflow-id (str "step-" i) nonce))))
 
 ;; ---------------------------------------------------------------------------
-;; W3: cancel-sleep — probes bug 2.3 (cancellation can't reach a sleeper).
+;; W3: cancel-sleep — cancellation reaches a sleeper.
 ;;
 ;; Records :started, then waits for signal 'wake' forever.  The test client
-;; cancels the workflow via cancel-workflow.  With the current implementation
-;; the workflow never observes the cancellation because it never re-enters
-;; the execution loop.
+;; cancels the workflow via cancel-workflow. The durable wake makes it re-enter
+;; the execution loop and observe cancellation.
 
 (intemporal/defn-workflow cancel-sleep-workflow
   "Records :started, then blocks on signal 'wake'."
@@ -100,11 +97,10 @@
     (act workflow-id "woke" nonce)))
 
 ;; ---------------------------------------------------------------------------
-;; W4: rapid-signal — probes bug 2.1 (register-then-consume signal race).
+;; W4: rapid-signal — a signal races with the initial park.
 ;;
 ;; Immediately waits for signal 'immediate'.  The test client sends the signal
-;; at nearly the same time, trying to hit the window between the consume-check
-;; and the register-callback call in process-signal.
+;; at nearly the same time, exercising the store's wake-version check.
 
 (intemporal/defn-workflow rapid-signal-workflow
   "Suspends immediately on signal 'immediate', records :completed after."

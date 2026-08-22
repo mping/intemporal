@@ -8,7 +8,7 @@ intemporal.
 ```mermaid
 graph TD
     API["start-workflow / submit-workflow"] --> Store[(IStore)]
-    Store --> Worker["start-worker: claim-runnable!"]
+    Store --> Worker["engine-owned worker: claim-runnable!"]
     Worker --> Drive["drive-workflow!"]
     Drive --> Context["pass-local replay context"]
     Drive --> Executor[IActivityExecutor]
@@ -24,9 +24,55 @@ graph TD
   process-local scheduled callbacks.
 - `IWorkflowObserver` receives lifecycle notifications.
 
-`start-workflow` and `submit-workflow` are two waiting styles over one execution model.
-The former submits, starts an engine-owned bounded worker if needed, and awaits a terminal
-event. The latter returns the workflow id for an explicit worker to process.
+`make-workflow-engine` is an active resource constructor: it registers configured
+activities, recovers work for its owner, and starts exactly one bounded worker.
+`start-workflow` and `submit-workflow` are two waiting styles over that one execution
+model. The former submits and awaits a terminal event; the latter returns immediately.
+An explicit `:worker? false` instance is a submission/status client and cannot start or
+resume workflows.
+
+## Store contract
+
+`IStore` is the atomic persistence boundary. Implementations may use different indexes,
+but InMemory, JDBC, and FoundationDB expose the same behavior:
+
+- `save-events` commits a batch atomically. `save-event` is a namespace-level convenience
+  over that operation, not a second protocol verb.
+- An event identity is `[event-type seq nil]`, except
+  `:activity-attempt-failed`, whose identity includes `:attempts`. An exact duplicate is a
+  no-op. A conflicting write for an existing identity is first-write-wins. Retry attempts
+  therefore remain distinct while replayed writes remain idempotent.
+- `load-history` returns committed append order. Sequence is a deterministic replay
+  address, not chronology: a completion at sequence 0 may commit after an event at
+  sequence 1. JDBC retains its auto-increment append ordinal; FDB uses a transactional
+  per-workflow ordinal plus a separate event-identity index.
+- `find-event` is an indexed point read of the first durable identity. `max-seq` is also
+  indexed; neither requires loading a full history.
+- `save-events-and-wake!` appends and wakes in one transaction. `park-workflow!` compares
+  `wake-version`, appends suspension events, and changes scheduling state in one
+  transaction. There is no crash window in which a wake can be lost between those steps.
+- Cancellation marking and its wake are atomic. A running drive reads cancellation at
+  each workflow frontier, so cancellation may become visible between consecutive
+  activities without waiting for another process-local cache refresh.
+- Signals for one workflow/name are strict FIFO in commit order. JDBC uses the signal row
+  id; FDB uses a transactionally contended per-queue ordinal. Process clocks and random
+  suffixes never define queue order.
+- A child is first seeded with `:workflow-started`; `link-child!` only records linkage for
+  that existing child and never creates an empty workflow. If a process dies between
+  those operations, deterministic parent replay sees the seed and repairs the idempotent
+  link before persisting its scheduled marker.
+- `claim-runnable!` atomically changes eligible work to `RUNNING` and grants at most one
+  owner. Wake-version, ready/due indexes, and ownership indexes change in the same backend
+  transaction as their scheduling state.
+- Missing status is `:not-found`; every nonterminal scheduling state reads `:running`;
+  terminal history fixes the corresponding terminal status. Terminal state cannot be
+  woken or claimed.
+- Store decorators preserve `AutoCloseable`. Closing a checked JDBC store closes its
+  datasource; in-memory and FDB stores have no owned external resource to close.
+
+The atomic operations above must not be reconstructed from independent public reads and
+writes. JDBC keeps them in one SQL transaction, FDB in one FDB transaction, and the
+in-memory store in one atom transition.
 
 ## Lifecycle and scheduling state
 
@@ -129,13 +175,22 @@ followed by `join`, so synchronous and asynchronous children share one implement
 Child terminal persistence atomically appends completion/failure aliases to the parent and
 wakes it. Parent close policies are `:terminate`, `:cascade-cancel`, and `:abandon`.
 
-## Workers and shutdown
+## Engine ownership and shutdown
 
-A worker claims at most its available `:workflow-concurrency` capacity and executes claims
-in a bounded pool. Every poll yields, including empty and capacity-exhausted polls.
+A running engine owns exactly one worker. It claims at most its available
+`:workflow-concurrency` capacity and executes claims in a bounded pool. Every poll yields,
+including empty and capacity-exhausted polls.
 
 Stable owner ids allow `recover-running!` to return same-owner crash leftovers to
-`RUNNABLE`. Controlled shutdown stops claiming, drains current work where possible,
-requeues interrupted nonterminal drives, and releases ownership. On Node, the lazy
-engine-owned worker uses unreferenced poll timers so forgotten test/embedded engines do not
-keep the process alive.
+`RUNNABLE`. A stable id must identify at most one live process: there are no leases or
+fencing tokens yet. Generated `ephemeral-*` ids are suitable for local/in-memory engines,
+not cross-process crash recovery. Workflow definitions and protocol implementations must
+be loaded at construction, before recovery scans begin.
+
+Controlled shutdown stops claiming, drains or interrupts current work within its grace
+period, requeues interrupted nonterminal drives, releases ownership, and then shuts down
+the activity executor. On Node, engine poll timers are unreferenced by default so a
+forgotten embedded engine does not keep the process alive.
+
+The remaining correctness and scalability boundaries are maintained in
+[KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).

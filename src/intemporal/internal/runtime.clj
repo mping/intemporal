@@ -2,6 +2,7 @@
   (:require
    [intemporal.internal.error :as error]
    [intemporal.internal.logging :as log]
+   [intemporal.internal.throwable :as throwable]
    [intemporal.protocol :as p]
    [intemporal.tracing :as tracing])
   (:import
@@ -21,18 +22,6 @@
   (if (map? e)
     {:status :failed :error e :exception (error/map->exception e)}
     {:status :failed :error (error/throwable->map e) :exception e}))
-
-(defn- interrupted-cause?
-  "True when `t` is — or wraps, anywhere in its cause chain — an
-   InterruptedException. `.get` surfaces an activity thread interrupted by
-   `.shutdownNow` as an ExecutionException *wrapping* the InterruptedException,
-   so a plain `instance?` check is not enough."
-  [^Throwable t]
-  (loop [c t]
-    (cond
-      (nil? c)                            false
-      (instance? InterruptedException c)  true
-      :else                               (recur (.getCause c)))))
 
 (defrecord ParallelActivityExecutor [^ExecutorService pool
                                      registry-atom
@@ -68,14 +57,14 @@
       ;; Capture the workflow-thread context once so every parallel activity span
       ;; (each on its own pool thread) parents under the workflow trace.
       (let [parent-ctx (tracing/capture)
-            futures (mapv (fn [{:keys [activity-name args timeout-ms retry-policy]}]
+            futures (mapv (fn [{:keys [activity-name args timeout-ms]}]
                             (let [act     (get @registry-atom activity-name)
                                   timeout (or timeout-ms default-timeout-ms)]
                               (if (nil? act)
                                 (throw (ex-info "Activity not found"
                                                 {:activity-name activity-name}))
-                                ;; X4: the .submit must NOT be allowed to escape this
-                                ;; mapv. A saturated or closing pool rejects here, and an
+                                ;; The .submit must not escape this mapv. A saturated or
+                                ;; closing pool rejects here, and an
                                 ;; escaping RejectedExecutionException blows straight
                                 ;; through process-pending-asyncs-parallel ->
                                 ;; handle-suspension -> drive-workflow! (none of
@@ -96,7 +85,7 @@
                                                                                     ;; Exactly ONE attempt. Retrying here was invisible to the
                                                                                     ;; engine: this thread has no store, workflow-id or seq, so
                                                                                     ;; nothing about an attempt could be recorded and every crash
-                                                                                    ;; restarted the count at 1 (kimi.md X8). The engine now owns
+                                                                                    ;; restarted the count at 1. The engine now owns
                                                                                     ;; the retry loop, which also makes `timeout` bound a single
                                                                                     ;; attempt rather than the whole sequence.
                                                                                     (let [start (System/currentTimeMillis)]
@@ -126,8 +115,8 @@
                     (catch TimeoutException _
                       (.cancel future true)
                       (failure (error/activity-timeout-exception activity-name timeout)))
-                    ;; E4: an interrupt is INFRASTRUCTURE (worker stop / engine
-                    ;; shutdown), not a workflow outcome. It must be classified with
+                    ;; An interrupt is infrastructure (engine shutdown), not a
+                    ;; workflow outcome. It must be classified with
                     ;; the same :activity-interrupted kind the single-activity path
                     ;; uses (execute-activity), or the replay branches cannot tell it
                     ;; apart from a genuine failure and durably fail the workflow.
@@ -142,7 +131,7 @@
                       (failure (error/activity-interrupted-exception activity-name e)))
                     (catch Exception e
                       (let [cause (or (.getCause e) e)]
-                        (failure (if (interrupted-cause? e)
+                        (failure (if (throwable/interrupted? e)
                                    ;; .shutdownNow interrupted the ACTIVITY thread:
                                    ;; arrives as ExecutionException(InterruptedException).
                                    (error/activity-interrupted-exception activity-name cause)
@@ -171,7 +160,7 @@
   "Rejection handler for the bounded executor: waits for a queue slot instead of
    running the task on the calling thread.
 
-   E8: the previous `CallerRunsPolicy` ran a saturating activity INLINE on the
+   The previous `CallerRunsPolicy` ran a saturating activity inline on the
    workflow drive thread and handed back an already-completed future, so the
    `.get timeout` in `execute-activity` / `execute-activities-parallel` could
    never fire — activity timeouts were silently unenforced and a hung activity
@@ -185,7 +174,7 @@
    classify as `:rejected` so `stub` and `async` RESCHEDULE rather than replay a
    durable failure. Keeping rejection rare matters: every reschedule costs a
    replay iteration, and budget exhaustion still finalizes a workflow as
-   `:failed` (kimi.md X3)."
+   `:failed`."
   ^RejectedExecutionHandler [submit-timeout-ms]
   (reify RejectedExecutionHandler
     (rejectedExecution [_ task pool]
@@ -237,8 +226,8 @@
   [activity-registry-atom & {:keys [max-concurrent threads queue-capacity
                                     submit-timeout-ms default-timeout-ms]
                              :or   {default-timeout-ms 30000}}]
-  ;; `:threads` is the name the public `make-workflow-engine` option carries;
-  ;; accept both so neither call site can silently drop the bound again (E7).
+  ;; `:threads` is the public option; accept the internal alias too so neither
+  ;; call site can silently drop the bound.
   (let [max-concurrent (or max-concurrent threads)]
     (->ParallelActivityExecutor
       (if max-concurrent
