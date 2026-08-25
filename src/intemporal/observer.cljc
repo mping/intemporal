@@ -3,9 +3,9 @@
      (:require-macros
       [intemporal.internal.logging :as log]))
   (:require
+   [intemporal.internal.clock :as clock]
    [intemporal.internal.logging :as log]
-   [intemporal.protocol :as p]
-   [intemporal.internal.clock :as clock]))
+   [intemporal.protocol :as p]))
 
 (defn notify!
   "Deliver one event map to an observer without allowing observer failures to

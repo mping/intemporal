@@ -144,7 +144,7 @@
         side-ds  (make-pool db-url 2 true)   ; auto-commit for side-channel
         _        (wf/configure-side-channel! side-ds test-run owner)
         engine   (intemporal/start-engine :store store :threads 8
-                                                   :owner-id owner)
+                   :owner-id owner)
         stop-fn  (start-poll-loop! engine main-ds test-run owner)]
 
     (.addShutdownHook

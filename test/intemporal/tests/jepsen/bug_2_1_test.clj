@@ -18,7 +18,7 @@
 (defn- run-scenario [inner]
   (let [raced? (atom false)
         workflow-store (->ParkRacingStore inner raced? "go"
-                                           {:signal-id "in-window" :payload :arrived})
+                         {:signal-id "in-window" :payload :arrived})
         workflow-id (str "bug21-" (random-uuid))
         engine (intemporal/start-engine :store workflow-store :threads 2
                                         :owner-id (str "bug21-engine-" (random-uuid)))]

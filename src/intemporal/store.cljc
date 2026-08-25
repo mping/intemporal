@@ -363,7 +363,7 @@
                          :state (workflow-state workflow-id
                                                 (get-in new [:workflows workflow-id]))}
         (matching-creation? existing creation) {:create-status :exists
-                                                 :state (workflow-state workflow-id existing)}
+                                                :state (workflow-state workflow-id existing)}
         :else {:create-status :conflict
                :state (workflow-state workflow-id existing)})))
 

@@ -42,8 +42,8 @@
           original-load p/load-snapshot]
       (try
         (with-redefs [p/load-snapshot (fn [s workflow-id]
-                                       (swap! loads update workflow-id (fnil inc 0))
-                                       (original-load s workflow-id))]
+                                        (swap! loads update workflow-id (fnil inc 0))
+                                        (original-load s workflow-id))]
           (doseq [workflow-id waiter-ids]
             (intemporal/submit-workflow engine indefinite-waiter [workflow-id]
               :workflow-id workflow-id))

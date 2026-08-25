@@ -40,7 +40,7 @@
                        :workflow-fn-name workflow-name :args [9]}})
     (is (= workflow-id
            (:workflow-id (first (p/claim-runnable! workflow-store owner-id 1
-                                                 (System/currentTimeMillis))))))
+                                  (System/currentTimeMillis))))))
     (let [engine (intemporal/start-engine :store workflow-store :owner-id owner-id :poll-ms 5)]
       (try
         (is (= {:status :completed :result 10 :workflow-id workflow-id}

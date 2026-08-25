@@ -140,9 +140,7 @@
                                  (p/claim-runnable! st "test-owner" 10
                                                     (System/currentTimeMillis))))
                           workflow-id))
-          "a workflow whose async retry is not due must be excluded from worker claims")
-
-      )))
+          "a workflow whose async retry is not due must be excluded from worker claims"))))
 
 ;; ============================================================================
 ;; 3. The async timeout now bounds ONE attempt, not the whole sequence

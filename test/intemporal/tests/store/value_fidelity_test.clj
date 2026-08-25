@@ -66,16 +66,16 @@
       (let [returned-payload (get-in (p/load-workflow-state store wf-id)
                                      [:signals "approval" 0 :payload])]
         (is (some? returned-payload) "signal envelope was persisted")
-          (is (keyword? (:type returned-payload))
-              (str ":type should be a keyword after store round-trip, got: "
-                   (pr-str (:type returned-payload))))
-          (is (= :confirmed (:type returned-payload))
-              ":type value is :confirmed, not \"confirmed\"")
-          (is (keyword? (:status returned-payload))
-              (str ":status should be a keyword after store round-trip, got: "
-                   (pr-str (:status returned-payload))))
-          (is (= :ok (:status returned-payload))
-              ":status value is :ok, not \"ok\""))))
+        (is (keyword? (:type returned-payload))
+            (str ":type should be a keyword after store round-trip, got: "
+                 (pr-str (:type returned-payload))))
+        (is (= :confirmed (:type returned-payload))
+            ":type value is :confirmed, not \"confirmed\"")
+        (is (keyword? (:status returned-payload))
+            (str ":status should be a keyword after store round-trip, got: "
+                 (pr-str (:status returned-payload))))
+        (is (= :ok (:status returned-payload))
+            ":status value is :ok, not \"ok\""))))
 
   ;; 2. Activity result and workflow result round-trip through persisted history.
   (testing "activity and workflow results preserve keyword values in persisted history"

@@ -111,12 +111,12 @@
           (let [op (client/invoke-signal store db-spec test-run workflow_id signal-name)]
             (if (= :ok (:type op))
               (do
-            (swap! history conj {:process :nemesis :type :info
-                                 :f :signal-dead :value {:workflow-id workflow_id
-                                                         :signal signal-name}
-                                 :time (System/currentTimeMillis)})
-            (log/log! :info (str "[nemesis] signalled dead workflow "
-                                      workflow_id " signal=" signal-name)))
+                (swap! history conj {:process :nemesis :type :info
+                                     :f :signal-dead :value {:workflow-id workflow_id
+                                                             :signal signal-name}
+                                     :time (System/currentTimeMillis)})
+                (log/log! :info (str "[nemesis] signalled dead workflow "
+                                  workflow_id " signal=" signal-name)))
               (log/log! :warn (str "[nemesis] signal-dead-workflows! error: "
                                    (:error op))))))))))
 

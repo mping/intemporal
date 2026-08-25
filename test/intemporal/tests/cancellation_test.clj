@@ -103,7 +103,7 @@
 
 (deftest test-cancel-completed-workflow-is-noop
   (testing "cancel-workflow on an already-completed workflow is a no-op"
-    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) }]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid))}]
       (let [wf-id "cancel-completed-test"]
         (intemporal/start-workflow engine (fn [] :done) [] :workflow-id wf-id)
         (is (= :completed (p/get-workflow-status (:store engine) wf-id)))

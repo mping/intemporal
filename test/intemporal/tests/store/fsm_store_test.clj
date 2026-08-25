@@ -61,7 +61,7 @@
       (is (= :wake-raced (:commit-status (p/commit-transition! st stale))))
       (is (= ["one" "two"]
              (mapv :signal-id (get-in (p/load-workflow-state st "signals")
-                                       [:signals "go"]))))
+                                [:signals "go"]))))
       ;; A guarded park is not appropriate after consumption in this unit test:
       ;; use an unguarded continue transition to keep the claim running.
       (is (= :committed
@@ -73,7 +73,7 @@
                                   :signal-name "go" :signal-id "one" :payload 1}])))))
       (is (= ["two"]
              (mapv :signal-id (get-in (p/load-workflow-state st "signals")
-                                       [:signals "go"])))))))
+                                [:signals "go"])))))))
 
 (deftest terminal-transition-closes-descendants-in-one-revision-checked-commit
   (s/check-asserts true)
@@ -108,8 +108,8 @@
                                        :events [{:event-type :workflow-terminated :seq 0}]}]}]
       (is (= :conflict
              (:commit-status (p/commit-transition!
-                              st (assoc-in transition
-                                           [:expected-related-revisions "child"] 999)))))
+                               st (assoc-in transition
+                                            [:expected-related-revisions "child"] 999)))))
       (is (= :committed (:commit-status (p/commit-transition! st transition))))
       (is (= :completed (p/get-workflow-status st "parent")))
       (is (= :terminated (p/get-workflow-status st "child")))

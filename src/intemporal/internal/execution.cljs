@@ -5,14 +5,14 @@
    [intemporal.internal.logging :as log])
   (:require
    [intemporal.internal.activity :as a]
+   [intemporal.internal.clock :as clock]
    [intemporal.internal.context :as ctx]
    [intemporal.internal.error :as error]
-   [intemporal.internal.fsm :as fsm]
    [intemporal.internal.execution.common :as common]
+   [intemporal.internal.fsm :as fsm]
    [intemporal.internal.logging :as log]
    [intemporal.observer :as obs]
    [intemporal.protocol :as p]
-   [intemporal.internal.clock :as clock]
    [promesa.core :as prom]))
 
 ;; ============================================================================
@@ -250,10 +250,10 @@
   (let [snapshot (p/load-snapshot store workflow-id)
         history  (:history snapshot)
         context  (common/make-workflow-context workflow-id history registry observer
-                                              {:protocols @protocols
-                                               :now-ms (clock/now-ms)
-                                               :owner-id owner-id
-                                               :cancel-requested? (:cancel-requested? snapshot)})]
+                   {:protocols @protocols
+                    :now-ms (clock/now-ms)
+                    :owner-id owner-id
+                    :cancel-requested? (:cancel-requested? snapshot)})]
     (binding [ctx/*workflow-context* context]
       (-> (execute-workflow-fn workflow-fn args)
           (prom/then #(assoc % :snapshot snapshot))))))
@@ -408,8 +408,8 @@
                                                :events [(:attempt-event outcome)])}}
               (let [success? (= :success (:status outcome))
                     event (cond-> {:event-type (if success?
-                                                :activity-completed
-                                                :activity-failed)
+                                                 :activity-completed
+                                                 :activity-failed)
                                    :seq seq
                                    :activity-name activity-name
                                    :result (:result outcome)

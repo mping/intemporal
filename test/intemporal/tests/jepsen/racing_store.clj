@@ -2,7 +2,8 @@
   "FSM-store decorator that injects a signal immediately before the first park
    transition. The signal advances the durable wake revision, so the stale park
    must be rejected by commit-transition!."
-  (:require [intemporal.protocol :as p]))
+  (:require
+   [intemporal.protocol :as p]))
 
 (defrecord ParkRacingStore [inner fired? signal-name signal]
   p/IEngineStore

@@ -98,7 +98,7 @@
                                   (filter #(and (= :submit (:f %))
                                                 (= :ok (:type %))
                                                 (#{:signal-wait :rapid-signal}
-                                                  (get-in % [:value :wf-type]))))
+                                                 (get-in % [:value :wf-type]))))
                                   (remove #(already-signalled
                                              (get-in % [:value :workflow-id])))
                                   seq)]

@@ -90,13 +90,13 @@
 
 (deftest test-send-signal-not-found
   (testing "send-signal throws when workflow does not exist"
-    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) }]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid))}]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not active"
                             (intemporal/send-signal (:store engine) "no-such-wf" "approval" {}))))))
 
 (deftest test-send-signal-to-completed-workflow
   (testing "send-signal throws when workflow is already completed"
-    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) }]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid))}]
       (let [wf-id "completed-signal-test"]
         (intemporal/start-workflow engine (fn [] :done) [] :workflow-id wf-id)
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not active"

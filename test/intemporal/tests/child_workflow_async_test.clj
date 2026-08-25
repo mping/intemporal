@@ -121,7 +121,7 @@
         cid (str pid "/child")]
     ;; Phase 1: submit + run until the child suspends on its signal, then "crash".
     (let [e1 (intemporal/start-engine :store store :threads 4
-                                              :poll-ms 25 :owner-id "w1")]
+               :poll-ms 25 :owner-id "w1")]
       (try
         (intemporal/submit-workflow e1 #'parent-join-wf [5 cid] :workflow-id pid)
         (is (= :running (u/await-status store cid :running 3000)))
@@ -131,7 +131,7 @@
       (is (= :running (p/get-workflow-status store pid)) "durably suspended, not terminal")
       ;; Phase 2: fresh worker + the signal. Resume completes both.
       (let [e2 (intemporal/start-engine :store store :threads 4
-                                                :poll-ms 25 :owner-id "w2")]
+                 :poll-ms 25 :owner-id "w2")]
         (try
           (intemporal/send-signal store cid "go" 7)
           (let [r (intemporal/await-workflow e2 pid :timeout-ms 5000)]

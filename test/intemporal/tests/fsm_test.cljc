@@ -1,8 +1,8 @@
 (ns intemporal.tests.fsm-test
   (:require
+   [intemporal.internal.fsm :as fsm]
    #?(:clj [clojure.test :refer [deftest is testing]]
-      :cljs [cljs.test :refer-macros [deftest is testing]])
-   [intemporal.internal.fsm :as fsm]))
+      :cljs [cljs.test :refer-macros [deftest is testing]])))
 
 (def claim {:workflow-id "workflow" :owner-id "engine-a" :wake-version 4})
 

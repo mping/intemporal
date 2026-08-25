@@ -177,8 +177,8 @@
                             :owner-id owner-id
                             :kind :continue
                             :events [(a/attempt-failed-event
-                                      0 "intemporal.tests.crash.retry-durability-test/always-fails-activity"
-                                      max-attempts last-error 5 false nil)]})
+                                       0 "intemporal.tests.crash.retry-durability-test/always-fails-activity"
+                                       max-attempts last-error 5 false nil)]})
           engine      (intemporal/start-engine :store st :threads 2
                         :owner-id owner-id
                         :poll-ms 5 :workflow-concurrency 1)]
@@ -238,8 +238,7 @@
                               (p/claim-runnable! st "test-owner" 10
                                                  (System/currentTimeMillis))))
                        workflow-id)
-            "once the deadline passes the workflow becomes due again"))
-      )))
+            "once the deadline passes the workflow becomes due again")))))
 
 ;; ============================================================================
 ;; 4. Sync children keep the inline backoff

@@ -495,7 +495,7 @@
               (if (some (fn [creation]
                           (when-let [workflow (get workflows (:workflow-id creation))]
                             (not (fsm-matching-creation? tx root (:workflow-id creation)
-                                                        workflow creation))))
+                                   workflow creation))))
                         create-workflows)
                 {:commit-status :conflict
                  :state (fsm-workflow-state tx root workflow-id)}

@@ -6,6 +6,7 @@
       [net.cgrand.macrovich :as macros]))
   (:require
    [intemporal.internal.activity :as a]
+   [intemporal.internal.clock :as clock]
    [intemporal.internal.context :as ctx]
    [intemporal.internal.domain :as domain]
    [intemporal.internal.error :as error]
@@ -17,7 +18,6 @@
    [intemporal.observer :as obs]
    [intemporal.protocol :as p]
    [intemporal.store :as store]
-   [intemporal.internal.clock :as clock]
    #?@(:clj
        [[intemporal.tracing :as tracing]
         [net.cgrand.macrovich :as macros]
@@ -641,11 +641,11 @@
           {:workflow-id wid}
 
           :conflict
-      (throw (ex-info "Workflow ID is already bound to a different creation"
-                      {:error/type ::workflow-id-conflict
-                       :workflow-id wid
-                       :workflow-fn-name workflow-name
-                       :args (vec args)})))))
+          (throw (ex-info "Workflow ID is already bound to a different creation"
+                          {:error/type ::workflow-id-conflict
+                           :workflow-id wid
+                           :workflow-fn-name workflow-name
+                           :args (vec args)})))))
 
 (defn- terminal-result
   "Reconstruct the public result from the persisted terminal event."
@@ -662,7 +662,7 @@
 
 (defn- terminal-history?
        [store workflow-id]
-  (terminal-event-in-history? (p/load-history store workflow-id)))
+       (terminal-event-in-history? (p/load-history store workflow-id)))
 
 (defn await-workflow
   "Wait until the workflow reaches a terminal state (:completed, :failed,
@@ -675,7 +675,7 @@
    promesa promise of the map. The engine must be progressing the
    workflow. Options: :poll-ms (default 50), :timeout-ms (default 30000)."
   [{:keys [store] :as engine} workflow-id & {:keys [poll-ms timeout-ms]
-                                  :or   {poll-ms 50 timeout-ms 30000}}]
+                                             :or   {poll-ms 50 timeout-ms 30000}}]
   (when-not (running-engine? engine)
     (throw (ex-info "await-workflow requires a running workflow engine"
                     {:workflow-id workflow-id})))
@@ -836,13 +836,13 @@
          (.setDaemon true)
          (.setName (str "intemporal-engine-" owner-id))
          (.start))
-        (fn stop-engine [grace-period-secs]
+       (fn stop-engine [grace-period-secs]
          (reset! running false)
          (.interrupt thread)
          (.join thread (long (+ poll-ms 1000)))
          (.shutdown drives)
          (when-not (.awaitTermination drives (long grace-period-secs)
-                                     java.util.concurrent.TimeUnit/SECONDS)
+                     java.util.concurrent.TimeUnit/SECONDS)
            (.shutdownNow drives)
            (.awaitTermination drives 1 java.util.concurrent.TimeUnit/SECONDS))
          (p/release-owner! store owner-id)))))

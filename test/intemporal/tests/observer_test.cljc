@@ -1,10 +1,10 @@
 (ns intemporal.tests.observer-test
   (:require
-   #?(:clj [clojure.test :refer [deftest is]]
-      :cljs [cljs.test :refer-macros [deftest is]])
    [intemporal.core :as intemporal]
    [intemporal.observer :as observer]
-   [intemporal.protocol :as p]))
+   [intemporal.protocol :as p]
+   #?(:clj [clojure.test :refer [deftest is]]
+      :cljs [cljs.test :refer-macros [deftest is]])))
 
 (defn- collecting-observer [events]
   (reify p/IWorkflowObserver

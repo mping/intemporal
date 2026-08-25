@@ -80,7 +80,7 @@
         (-> (u/with-engine store
               (fn [engine]
                 (intemporal/submit-workflow engine #'place-order-sync ["ord-sync" 10 cid]
-                                             :workflow-id pid)
+                  :workflow-id pid)
                 (-> (u/await-status store cid :running 3000)
                     (prom/then (fn [s]
                                  (is (= :running s))

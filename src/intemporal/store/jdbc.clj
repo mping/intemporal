@@ -221,7 +221,7 @@
                            (let [result (jdbc/execute-one!
                                           tx [(upsert-history-sql kind)
                                               workflow-id
-                       (durable-key (domain/event-identity event))
+                                              (durable-key (domain/event-identity event))
                                               (:seq event)
                                               (name (:event-type event))
                                               (->payload-param (dissoc event :event-type))])]
@@ -333,21 +333,21 @@
      :revision (long (:revision row))
      :status (row-status row)
      :next-terminal-seq (long (inc (or (:max_seq
-                                          (query-one!
-                                            tx ["SELECT MAX(seq) AS max_seq
+                                         (query-one!
+                                           tx ["SELECT MAX(seq) AS max_seq
                                                   FROM intemporal_history
                                                  WHERE workflow_id = ?"
-                                                workflow-id]))
-                                         -1)))
+                                               workflow-id]))
+                                     -1)))
      :children (->> (query! tx
                             ["SELECT id, parent_seq, parent_close_policy
                                 FROM intemporal_workflows
                                WHERE parent_workflow_id = ? ORDER BY id ASC"
                              workflow-id])
-                     (mapv (fn [{:keys [id parent_seq parent_close_policy]}]
-                             (assoc (close-tree! tx id)
-                                    :policy (keyword parent_close_policy)
-                                    :parent-seq (long parent_seq)))))}))
+                 (mapv (fn [{:keys [id parent_seq parent_close_policy]}]
+                         (assoc (close-tree! tx id)
+                                :policy (keyword parent_close_policy)
+                                :parent-seq (long parent_seq)))))}))
 
 ;; ============================================================================
 ;; JdbcStore Implementation
@@ -599,23 +599,23 @@
                     (append-fsm-events! tx kind parent-id parent-events)
                     (wake-fsm-workflow! tx parent-id))))
               (doseq [{:keys [op workflow-id events terminal-status]} close-actions]
-                  (when-let [child (get rows workflow-id)]
-                    (when-not (terminal-row? child)
-                      (case op
-                        :cancel (jdbc/execute-one!
-                                  tx ["UPDATE intemporal_workflows
+                (when-let [child (get rows workflow-id)]
+                  (when-not (terminal-row? child)
+                    (case op
+                      :cancel (jdbc/execute-one!
+                                tx ["UPDATE intemporal_workflows
                                           SET cancelled = TRUE,
                                               wake_version = wake_version + 1,
                                               revision = revision + 1,
                                               next_run_at = NULL,
                                               run_state = CASE WHEN run_state = 'WAITING' THEN 'RUNNABLE' ELSE run_state END
                                         WHERE id = ?"
-                                      workflow-id])
-                        :terminate (terminalize-fsm-workflow!
-                                     tx kind workflow-id (or terminal-status :terminated) events)
-                        nil))))
-                {:commit-status :committed
-                 :state (workflow-state! tx workflow-id)}))))))
+                                    workflow-id])
+                      :terminate (terminalize-fsm-workflow!
+                                   tx kind workflow-id (or terminal-status :terminated) events)
+                      nil))))
+              {:commit-status :committed
+               :state (workflow-state! tx workflow-id)}))))))
 
   (release-owner! [_ owner-id]
     (jdbc/with-transaction [tx datasource]

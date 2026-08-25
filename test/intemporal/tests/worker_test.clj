@@ -46,7 +46,7 @@
         "workflow is durably suspended, not terminal, after the crash")
     ;; Phase 2: a fresh engine + a signal delivered via the shared store.
     (let [e2 (intemporal/start-engine :store store :threads 2
-                                              :poll-ms 50 :owner-id "w2")]
+               :poll-ms 50 :owner-id "w2")]
       (try
         (intemporal/send-signal store wid "go" {})
         (is (= :completed (await-status store wid :completed 5000))

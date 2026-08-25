@@ -52,7 +52,7 @@
       (future-cancel f1)
       (intemporal/shutdown-engine e1))
     (let [e2 (intemporal/start-engine :store store :threads 2
-                                              :poll-ms 50 :owner-id "bug13-w")]
+               :poll-ms 50 :owner-id "bug13-w")]
       (try
         (intemporal/send-signal store wid "go" {})
         {:status (await-status store wid :completed 5000)

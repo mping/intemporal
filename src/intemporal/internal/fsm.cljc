@@ -70,98 +70,98 @@
                                                           :events (vec events)
                                                           :consume-signals consumes)}))
         plan (case suspension-type
-      :timer
-      (let [{:keys [seq fire-at]} suspension-data]
-        (if (>= now-ms fire-at)
-          (assoc (continue (conj (vec pending-events)
-                                 {:event-type :timer-fired :seq seq :timestamp now-ms}))
-                 :emissions [{:event :timer-fired :seq seq}])
-          (park :timer fire-at)))
+               :timer
+               (let [{:keys [seq fire-at]} suspension-data]
+                 (if (>= now-ms fire-at)
+                   (assoc (continue (conj (vec pending-events)
+                                          {:event-type :timer-fired :seq seq :timestamp now-ms}))
+                          :emissions [{:event :timer-fired :seq seq}])
+                   (park :timer fire-at)))
 
-      :wait-signal
-      (let [{:keys [seq signal-name]} suspension-data]
-        (if-let [envelope (signal-envelope snapshot signal-name)]
-          (assoc (continue
-                   (conj (vec pending-events)
-                         {:event-type :signal-received
-                          :seq seq
-                          :signal-name signal-name
-                          :signal-id (or (:signal-id envelope) (:id envelope))
-                          :payload (signal-payload envelope)
-                          :timestamp now-ms})
-                   [(consume-descriptor signal-name envelope)])
-                 :emissions [{:event :signal-received
-                              :signal-name signal-name
-                              :payload (signal-payload envelope)}])
-          (park :signal nil)))
+               :wait-signal
+               (let [{:keys [seq signal-name]} suspension-data]
+                 (if-let [envelope (signal-envelope snapshot signal-name)]
+                   (assoc (continue
+                            (conj (vec pending-events)
+                                  {:event-type :signal-received
+                                   :seq seq
+                                   :signal-name signal-name
+                                   :signal-id (or (:signal-id envelope) (:id envelope))
+                                   :payload (signal-payload envelope)
+                                   :timestamp now-ms})
+                            [(consume-descriptor signal-name envelope)])
+                          :emissions [{:event :signal-received
+                                       :signal-name signal-name
+                                       :payload (signal-payload envelope)}])
+                   (park :signal nil)))
 
-      :wait-signal-timeout
-      (let [{:keys [seq signal-name deadline]} suspension-data]
-        (if-let [envelope (signal-envelope snapshot signal-name)]
-          (assoc (continue
-                   (conj (vec pending-events)
-                         {:event-type :signal-wait-completed
-                          :seq seq
-                          :received true
-                          :signal-name signal-name
-                          :payload (signal-payload envelope)
-                          :timestamp now-ms})
-                   [(consume-descriptor signal-name envelope)])
-                 :emissions [{:event :signal-received
-                              :signal-name signal-name
-                              :payload (signal-payload envelope)}])
-          (if (>= now-ms deadline)
-            (continue (conj (vec pending-events)
-                            {:event-type :signal-wait-completed
-                             :seq seq
-                             :received false
-                             :signal-name signal-name
-                             :timestamp now-ms}))
-            (park :signal-timeout deadline))))
+               :wait-signal-timeout
+               (let [{:keys [seq signal-name deadline]} suspension-data]
+                 (if-let [envelope (signal-envelope snapshot signal-name)]
+                   (assoc (continue
+                            (conj (vec pending-events)
+                                  {:event-type :signal-wait-completed
+                                   :seq seq
+                                   :received true
+                                   :signal-name signal-name
+                                   :payload (signal-payload envelope)
+                                   :timestamp now-ms})
+                            [(consume-descriptor signal-name envelope)])
+                          :emissions [{:event :signal-received
+                                       :signal-name signal-name
+                                       :payload (signal-payload envelope)}])
+                   (if (>= now-ms deadline)
+                     (continue (conj (vec pending-events)
+                                     {:event-type :signal-wait-completed
+                                      :seq seq
+                                      :received false
+                                      :signal-name signal-name
+                                      :timestamp now-ms}))
+                     (park :signal-timeout deadline))))
 
-      :join-pending
-      (let [{:keys [handle-seq]} suspension-data
-            history (:history snapshot)]
-        (if (or (history-event history :async-completed handle-seq)
-                (history-event history :async-failed handle-seq))
-          (continue pending-events)
-          (park :async nil)))
+               :join-pending
+               (let [{:keys [handle-seq]} suspension-data
+                     history (:history snapshot)]
+                 (if (or (history-event history :async-completed handle-seq)
+                         (history-event history :async-failed handle-seq))
+                   (continue pending-events)
+                   (park :async nil)))
 
-      :join-any-pending
-      (let [{:keys [handle-seqs]} suspension-data
-            history (:history snapshot)]
-        (if (or (some #(history-event history :async-completed %) handle-seqs)
-                (every? #(history-event history :async-failed %) handle-seqs))
-          (continue pending-events)
-          (park :async nil)))
+               :join-any-pending
+               (let [{:keys [handle-seqs]} suspension-data
+                     history (:history snapshot)]
+                 (if (or (some #(history-event history :async-completed %) handle-seqs)
+                         (every? #(history-event history :async-failed %) handle-seqs))
+                   (continue pending-events)
+                   (park :async nil)))
 
-      :activity
-      (let [{:keys [seq activity-name attempt-state]} suspension-data
-            retry-at (:retry-at attempt-state)]
-        (cond
-          ;; A recorded retry deadline owns the suspension until it is due.
-          (and (:will-retry attempt-state) (> retry-at now-ms))
-          (park :retry retry-at)
+               :activity
+               (let [{:keys [seq activity-name attempt-state]} suspension-data
+                     retry-at (:retry-at attempt-state)]
+                 (cond
+                   ;; A recorded retry deadline owns the suspension until it is due.
+                   (and (:will-retry attempt-state) (> retry-at now-ms))
+                   (park :retry retry-at)
 
-          ;; The last durable attempt declined a further retry. Reconstruct the
-          ;; activity failure without executing user code again.
-          (and attempt-state (not (:will-retry attempt-state)))
-          (continue
-            (conj (vec pending-events)
-                  {:event-type :activity-failed
-                   :seq seq
-                   :activity-name activity-name
-                   :error (:error attempt-state)
-                   :attempts (:attempts attempt-state)
-                   :timestamp now-ms}))
+                   ;; The last durable attempt declined a further retry. Reconstruct the
+                   ;; activity failure without executing user code again.
+                   (and attempt-state (not (:will-retry attempt-state)))
+                   (continue
+                     (conj (vec pending-events)
+                           {:event-type :activity-failed
+                            :seq seq
+                            :activity-name activity-name
+                            :error (:error attempt-state)
+                            :attempts (:attempts attempt-state)
+                            :timestamp now-ms}))
 
-          :else
-          {:kind :effect
-           :pre-transition (assoc base :kind :continue)
-           :effect {:kind :activity
-                    :suspension suspension-data}}))
+                   :else
+                   {:kind :effect
+                    :pre-transition (assoc base :kind :continue)
+                    :effect {:kind :activity
+                             :suspension suspension-data}}))
 
-      nil)]
+               nil)]
     (cond-> plan
       plan (update :emissions (fnil conj [])
                    {:event :workflow-suspended :suspension-type suspension-type})
@@ -171,9 +171,9 @@
 (defn- terminal-event
   [status seq now-ms payload]
   (cond-> {:event-type (case status
-                        :completed :workflow-completed
-                        :failed :workflow-failed
-                        :cancelled :workflow-cancelled)
+                         :completed :workflow-completed
+                         :failed :workflow-failed
+                         :cancelled :workflow-cancelled)
            :seq seq
            :timestamp now-ms}
     (= :completed status) (assoc :result payload)
@@ -262,17 +262,17 @@
                   :close-actions (mapv #(dissoc % :revision) actions)}]
      :close-actions (mapv #(dissoc % :revision) actions)
      :transition (cond-> {:workflow-id workflow-id
-                           :owner-id owner-id
-                           :kind :terminal
-                           :events (conj (vec pending-events)
-                                         (terminal-event status (:next-terminal-seq tree)
-                                                         now-ms payload))
-                           :terminal-status status
-                           :expected-related-revisions revisions
-                           :close-actions (mapv #(dissoc % :revision) actions)}
-                    (parent-notification snapshot status workflow-id now-ms payload)
-                    (assoc :parent-notification
-                           (parent-notification snapshot status workflow-id now-ms payload)))}))
+                          :owner-id owner-id
+                          :kind :terminal
+                          :events (conj (vec pending-events)
+                                        (terminal-event status (:next-terminal-seq tree)
+                                                        now-ms payload))
+                          :terminal-status status
+                          :expected-related-revisions revisions
+                          :close-actions (mapv #(dissoc % :revision) actions)}
+                   (parent-notification snapshot status workflow-id now-ms payload)
+                   (assoc :parent-notification
+                          (parent-notification snapshot status workflow-id now-ms payload)))}))
 
 (defn start
   "Create a machine for one claim. `claim` must include :workflow-id,
@@ -513,7 +513,7 @@
           transition (commit-command machine :commit-effect transition)
           retry-plan (run-plan machine retry-plan)
           :else (throw (ex-info "Effect result needs transition or retry-plan"
-                               {:result (:result input)}))))
+                         {:result (:result input)}))))
 
       :interrupted
       (finish machine (interrupted-result machine))

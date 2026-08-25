@@ -1,16 +1,16 @@
 (ns intemporal.internal.execution
   (:require
    [intemporal.internal.activity :as a]
+   [intemporal.internal.clock :as clock]
    [intemporal.internal.context :as ctx]
    [intemporal.internal.error :as error]
-   [intemporal.internal.fsm :as fsm]
    [intemporal.internal.execution.common :as common]
+   [intemporal.internal.fsm :as fsm]
    [intemporal.internal.logging :as log]
    [intemporal.internal.throwable :as throwable]
    [intemporal.observer :as obs]
    [intemporal.protocol :as p]
-   [intemporal.tracing :as tracing]
-   [intemporal.internal.clock :as clock])
+   [intemporal.tracing :as tracing])
   (:import
    (java.util.concurrent RejectedExecutionException)))
 
@@ -116,7 +116,7 @@
           {:status :retry-scheduled :retry-at retry-at :attempts attempt
            :attempt-event attempt-event}
           (cond-> (-> result (assoc :status :failed :attempts attempt)
-                       (dissoc :exception))
+                    (dissoc :exception))
             attempt-event (assoc :attempt-event attempt-event)))))))
 
 ;; ============================================================================
@@ -432,8 +432,8 @@
                                        :events [(:attempt-event outcome)])}}
       (let [success? (= :success (:status outcome))
             event (cond-> {:event-type (if success?
-                                        :activity-completed
-                                        :activity-failed)
+                                         :activity-completed
+                                         :activity-failed)
                            :seq seq
                            :activity-name activity-name
                            :result (:result outcome)
@@ -477,7 +477,7 @@
   (loop [response (fsm/step (fsm/start {:workflow-id workflow-id
                                         :owner-id (:owner-id engine)
                                         :wake-version wake-version})
-                           {:type :begin})]
+                    {:type :begin})]
     (let [{:keys [machine command emissions]} response]
       (if (>= (:iterations machine) max-iterations)
         (do
@@ -514,13 +514,13 @@
           (recur (fsm/step machine
                            {:type :effect-result
                             :result (execute-fsm-activity! engine workflow-id
-                                                          command observer)}))
+                                      command observer)}))
 
           :execute-async
           (recur (fsm/step machine
                            {:type :effect-result
                             :result (execute-fsm-async! engine workflow-id
-                                                       command observer)}))
+                                      command observer)}))
 
           :load-close-tree
           (recur (fsm/step machine {:type :close-tree-loaded

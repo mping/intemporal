@@ -57,7 +57,7 @@
                           (p/claim-runnable! store owner-id 10000 now)))))
     (is (= ["one" "two"]
            (mapv :signal-id (get-in (p/load-workflow-state store workflow-id)
-                                     [:signals "approval"]))))
+                              [:signals "approval"]))))
     (is (= :committed (:commit-status (consume! store workflow-id owner-id 0 "one" {:n 1}))))
     (is (= :committed (:commit-status (consume! store workflow-id owner-id 1 "two" {:n 2}))))
     (is (empty? (get-in (p/load-workflow-state store workflow-id) [:signals "approval"])))

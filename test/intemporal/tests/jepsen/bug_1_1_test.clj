@@ -45,7 +45,7 @@
       (future-cancel f1)
       (intemporal/shutdown-engine e1))
     (let [e2 (intemporal/start-engine :store store-b :threads 2
-                                              :poll-ms 50 :owner-id "bug11-w")]
+               :poll-ms 50 :owner-id "bug11-w")]
       (try
         ;; Signal delivered through the SECOND store instance.
         (intemporal/send-signal store-b wid "go" {})

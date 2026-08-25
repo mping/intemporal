@@ -19,7 +19,7 @@
 
 (intemporal/defn-workflow engine-api-detaching-parent [child-id]
   (intemporal/run-child-workflow-detached engine-api-waiting-child []
-                                           :child-id child-id)
+    :child-id child-id)
   :parent-done)
 
 (intemporal/defn-workflow engine-api-cancellable []
@@ -61,7 +61,7 @@
     (try
       (let [{:keys [workflow-id]}
             (intemporal/submit-workflow engine engine-api-workflow [41]
-                                         :workflow-id "engine-api-test-workflow")]
+              :workflow-id "engine-api-test-workflow")]
         (is (= {:status :completed :workflow-id workflow-id :result 42}
                (intemporal/await-workflow engine workflow-id :timeout-ms 2000))))
       (finally
@@ -102,12 +102,12 @@
                                         :poll-ms 1)]
     (try
       (intemporal/submit-workflow engine engine-api-cancellable []
-                                   :workflow-id "engine-api-cancel")
+        :workflow-id "engine-api-cancel")
       (Thread/sleep 20)
       (intemporal/cancel-workflow workflow-store "engine-api-cancel")
       (is (= :cancelled
              (:status (intemporal/await-workflow engine "engine-api-cancel"
-                                                  :timeout-ms 2000))))
+                        :timeout-ms 2000))))
       (finally
         (intemporal/shutdown-engine engine)))))
 
@@ -117,7 +117,7 @@
                                         :poll-ms 1)]
     (try
       (intemporal/submit-workflow engine engine-api-signalled []
-                                   :workflow-id "engine-api-signal")
+        :workflow-id "engine-api-signal")
       (Thread/sleep 20)
       (is (= {:signal-id "signal-one"}
              (intemporal/send-signal workflow-store "engine-api-signal" "go" :approved

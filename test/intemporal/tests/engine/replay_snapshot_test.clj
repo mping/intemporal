@@ -64,7 +64,7 @@
                                         :owner-id "replay-snapshot-engine")]
     (try
       (let [result (intemporal/start-workflow engine linear-workflow [8]
-                                               :workflow-id "replay-snapshot-workflow")]
+                     :workflow-id "replay-snapshot-workflow")]
         (is (= :completed (:status result)))
         (is (= 56 (:result result)))
         (is (= (vec (range 8)) @execution-log))

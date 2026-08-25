@@ -211,7 +211,7 @@
                                        :events [{:event-type :workflow-terminated :seq 0}]}]}))))
           (is (= :completed (p/get-workflow-status store parent-id)))
           (is (= :terminated (p/get-workflow-status store child-id)))))
-    (p/release-owner! store owner-id))))
+      (p/release-owner! store owner-id))))
 
 (defn run-store-tests [store]
   (s/check-asserts true)
@@ -226,7 +226,7 @@
                                                          :workflow-id workflow-id))]
           (Thread/sleep 100)
           (intemporal/send-signal store workflow-id "approval" {:approved true}
-                                   :signal-id "approval-1")
+            :signal-id "approval-1")
           (is (match? {:status :completed
                        :result {:activity-result 50
                                 :async-result 60

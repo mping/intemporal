@@ -1,7 +1,7 @@
 (ns intemporal.internal.activity
   (:require
-   [intemporal.internal.error :as error]
    [intemporal.internal.clock :as clock]
+   [intemporal.internal.error :as error]
    #?(:cljs [clojure.string :as str])))
 
 ;; ============================================================================

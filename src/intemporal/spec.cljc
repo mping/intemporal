@@ -360,9 +360,9 @@
 
 (s/def ::snapshot
   (s/and (s/keys :req-un [::workflow-id ::status ::run-state ::revision
-                           ::history-revision ::wake-version ::cancel-requested?
-                           ::signals ::history]
-                  :opt-un [::owner-id ::next-run-at ::parent])
+                          ::history-revision ::wake-version ::cancel-requested?
+                          ::signals ::history]
+           :opt-un [::owner-id ::next-run-at ::parent])
          ;; A snapshot must represent an actual workflow, never the public
          ;; status sentinel used by get-workflow-status.
          #(not= :not-found (:status %))))
