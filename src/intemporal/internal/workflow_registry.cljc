@@ -64,7 +64,7 @@
    workflow vars at startup for cross-process resume to work.
 
    The thrown ex-info carries {:error/type ::not-registered}; callers (e.g. the
-   recovery worker via `not-registered?`) use that to terminate an unresolvable
+   recovery engine via `not-registered?`) use that to terminate an unresolvable
    workflow instead of retrying it forever."
   [name]
   (or (get @registry name)

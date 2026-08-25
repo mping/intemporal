@@ -28,7 +28,7 @@
 
 (deftest test-signal-blocking
   (testing "Workflow blocks until signal is sent"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (let [wf-id "signal-test"
             result-future (future
                             (intemporal/start-workflow engine
@@ -47,7 +47,7 @@
 
 (deftest test-signal-timeout-received
   (testing "Signal received before timeout"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (let [wf-id "signal-timeout-test"
             result-future (future
                             (intemporal/start-workflow engine
@@ -63,7 +63,7 @@
 
 (deftest test-signal-timeout-expired
   (testing "Signal times out when not received"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (let [result (intemporal/start-workflow engine
                                               signal-timeout-flow [789 100])]
         (is (match? {:status :completed
@@ -73,7 +73,7 @@
 
 (deftest test-multiple-signals
   (testing "Multiple signals can be sent to same workflow"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       ;; Two independent workflow runs, each waiting for a signal
       (let [wf-id-1 "multi-signal-test-1"
             wf-id-2 "multi-signal-test-2"
@@ -90,13 +90,13 @@
 
 (deftest test-send-signal-not-found
   (testing "send-signal throws when workflow does not exist"
-    (intemporal/with-workflow-engine [engine {}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) }]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not active"
                             (intemporal/send-signal (:store engine) "no-such-wf" "approval" {}))))))
 
 (deftest test-send-signal-to-completed-workflow
   (testing "send-signal throws when workflow is already completed"
-    (intemporal/with-workflow-engine [engine {}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) }]
       (let [wf-id "completed-signal-test"]
         (intemporal/start-workflow engine (fn [] :done) [] :workflow-id wf-id)
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not active"

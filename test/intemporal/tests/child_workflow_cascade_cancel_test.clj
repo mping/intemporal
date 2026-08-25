@@ -41,7 +41,7 @@
 ;; ── check ───────────────────────────────────────────────────────────────────────
 
 (defn- check [store]
-  (u/with-worker store
+  (u/with-engine store
     (fn [engine]
       (let [pid (str "order-" (random-uuid))
             cid (str pid "/fulfill")]

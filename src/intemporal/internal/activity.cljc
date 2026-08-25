@@ -177,7 +177,7 @@
 (defn retry-pending?
   "True when the recovered state grants another attempt that is NOT yet due, i.e.
    the activity is mid-backoff. The workflow body consults this to refuse an
-   early attempt: a worker poll (or any other wake) can re-drive a workflow at
+   early attempt: an engine poll (or any other wake) can re-drive a workflow at
    any moment, and only the body can decline to run before the deadline."
   ([attempt-state] (retry-pending? attempt-state (clock/now-ms)))
   ([attempt-state now]

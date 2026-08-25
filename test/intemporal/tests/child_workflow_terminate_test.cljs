@@ -42,7 +42,7 @@
     (async done
       (let [store (u/in-memory)
             pid   "order-tm-1" cid "order-tm-1/fulfill"]
-        (-> (u/with-worker store
+        (-> (u/with-engine store
               (fn [engine]
                 (intemporal/submit-workflow engine #'place-order ["ord-3" 300 cid] :workflow-id pid)
                 (-> (u/await-status store cid :running 3000)

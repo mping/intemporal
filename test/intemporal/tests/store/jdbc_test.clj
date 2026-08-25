@@ -6,15 +6,15 @@
    [intemporal.tests.store.test-suite :as suite]
    [next.jdbc :as jdbc]))
 
-(def db-spec (jdbc-store/resolve-jdbc-url "jdbc:postgresql://localhost:5432/intemporal_test?user=root&password=root"))
+(def db-spec (jdbc-store/resolve-jdbc-url "jdbc:postgresql://localhost:5432/intemporal_fsm_test?user=root&password=root"))
 
 (def admin-spec "jdbc:postgresql://localhost:5432/postgres?user=root&password=root")
 
 (defn ensure-database! []
   (let [ds (jdbc/get-datasource admin-spec)]
-    (when-not (seq (jdbc/execute! ds ["SELECT 1 FROM pg_database WHERE datname = 'intemporal_test'"]))
+    (when-not (seq (jdbc/execute! ds ["SELECT 1 FROM pg_database WHERE datname = 'intemporal_fsm_test'"]))
       (with-open [conn (.getConnection ds)]
-        (.execute (.createStatement conn) "CREATE DATABASE intemporal_test")))))
+        (.execute (.createStatement conn) "CREATE DATABASE intemporal_fsm_test")))))
 
 (deftest jdbc-store-test
   (testing "JDBC Store Implementation"

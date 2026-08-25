@@ -24,7 +24,7 @@
     {:winner index :result result}))
 
 (defn- check-join-any-waits-for-child [store]
-  (u/with-worker store
+  (u/with-engine store
     (fn [engine]
       (let [pid (str "ja-" (random-uuid))
             c1  (str pid "/c1")

@@ -45,20 +45,25 @@
           (> (System/currentTimeMillis) deadline) v
           :else (do (Thread/sleep 25) (recur)))))))
 
-(defn- check-worker-cancel-compensates [store]
+(defn- check-engine-cancel-compensates [store]
   (reset! step-calls 0)
   (reset! undo-calls 0)
-  (u/with-worker store
+  (u/with-engine store
     (fn [engine]
       (let [wid (str "cc-" (random-uuid))]
         (intemporal/submit-workflow engine #'cancel-comp-wf [42] :workflow-id wid)
         ;; Wait until the step activity completed and the workflow is suspended
         ;; on its signal.
-        (is (some? (await-pred #(p/find-event store wid :activity-completed 0) 3000))
+        (is (some? (await-pred #(some (fn [event]
+                                        (when (and (= :activity-completed (:event-type event))
+                                                   (= 0 (:seq event)))
+                                          event))
+                                      (p/load-history store wid))
+                               3000))
             "step activity completed before cancel")
         (is (= :running (u/await-status store wid :running 3000)))
         (intemporal/cancel-workflow store wid)
-        ;; The worker must re-drive the cancelled workflow: compensation runs,
+        ;; The engine must re-drive the cancelled workflow: compensation runs,
         ;; then the terminal :workflow-cancelled event is written.
         (is (some? (await-pred #(->> (p/load-history store wid)
                                      (filter (fn [e] (= :workflow-cancelled (:event-type e))))
@@ -69,9 +74,9 @@
         (is (= 1 @step-calls) "step ran exactly once")
         (is (= 1 @undo-calls) "compensation ran exactly once under worker drive")))))
 
-(deftest worker-cancel-runs-compensations
-  (testing "in-memory" (check-worker-cancel-compensates (u/in-memory))))
-(deftest ^:integration worker-cancel-compensation-jdbc
-  (testing "jdbc" (let [s (u/jdbc)] (try (check-worker-cancel-compensates s) (finally (.close s))))))
-(deftest ^:integration worker-cancel-compensation-fdb
-  (testing "fdb" (check-worker-cancel-compensates (u/fdb))))
+(deftest engine-cancel-runs-compensations
+  (testing "in-memory" (check-engine-cancel-compensates (u/in-memory))))
+(deftest ^:integration engine-cancel-compensation-jdbc
+  (testing "jdbc" (let [s (u/jdbc)] (try (check-engine-cancel-compensates s) (finally (.close s))))))
+(deftest ^:integration engine-cancel-compensation-fdb
+  (testing "fdb" (check-engine-cancel-compensates (u/fdb))))

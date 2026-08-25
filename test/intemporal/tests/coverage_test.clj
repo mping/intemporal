@@ -21,7 +21,7 @@
 
 (deftest test-signal-fifo-ordering
   (testing "Multiple signals for the same name are consumed in FIFO order"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (let [wf-id   "signal-fifo-test"
             result-f (future (intemporal/start-workflow engine
                                                         collect-three-signals-flow [nil]
@@ -55,7 +55,7 @@
 
 (deftest test-cancel-mid-activity
   (testing "Cancelling while an activity executes results in :cancelled status"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (reset! mid-activity-counter 0)
       (let [wf-id   "cancel-mid-activity"
             result-f (future (intemporal/start-workflow engine
@@ -86,7 +86,7 @@
 
 (deftest test-replay-budget-enforced
   (testing "A workflow that never terminates is killed after max-iterations"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (with-result [result (intemporal/start-workflow engine
                                                       infinite-loop-flow [nil]
                                                       :max-iterations 5)]

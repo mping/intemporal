@@ -26,7 +26,12 @@
   {:a-claimed? :b-claimed? :pending-for-loser}."
   [store]
   (let [wid (str "bug12-" (random-uuid))]
-    (p/save-event store wid {:event-type :workflow-started :seq -1 :workflow-id wid :args []})
+    (p/create-workflow!
+      store
+      {:workflow-id wid
+       :owner-id "owner-A"
+       :started-event {:event-type :workflow-started :seq -1 :workflow-id wid :args []
+                       :workflow-fn-name "bug-1-2"}})
     (let [a (some #(when (= wid (:workflow-id %)) %)
                   (p/claim-runnable! store "owner-A" 1000 (System/currentTimeMillis)))
           b (some #(when (= wid (:workflow-id %)) %)

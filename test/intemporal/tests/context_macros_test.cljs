@@ -13,7 +13,7 @@
   (testing "bthen and bfinally propagate context"
     (let [bthen-ctx (atom nil)
           bfinally-ctx (atom nil)
-          engine (intemporal/make-workflow-engine :threads 2)
+          engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)
           my-wf (fn []
                   (let [prom (p/resolved :val)]
                     (-> (bthen prom (fn [v]
@@ -31,7 +31,7 @@
 (deftest test-blet-propagation
   (testing "blet propagates context"
     (let [blet-ctx (atom nil)
-          engine (intemporal/make-workflow-engine :threads 2)
+          engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)
           my-wf (fn []
                   (blet [a (p/resolved 1)
                          b (p/resolved 2)]
@@ -44,7 +44,7 @@
 
 (deftest test-regular-plet
   (testing "blet propagates context"
-    (let [engine (intemporal/make-workflow-engine :threads 2)
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)
           my-wf (fn []
                   (p/let [a (p/resolved 1)
                           b (p/resolved 2)]
@@ -57,7 +57,7 @@
 (deftest catch-default-must-rethrow-engine-suspensions
   (testing "suspension? supports the documented catch :default guard"
     (let [saw-suspension? (atom false)
-          engine (intemporal/make-workflow-engine :threads 2)
+          engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)
           my-wf (fn []
                   (try
                     (intemporal/sleep 1)

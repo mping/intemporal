@@ -28,14 +28,14 @@
          ;; skip jdbc and fdb
          {:id           :in-memory
           :kaocha.filter/skip-meta [:integration]
-          :ns-patterns  ["-test$"]
+          :ns-patterns  ["intemporal\\.tests\\..*-test$"]
           :source-paths ["src"]
           :test-paths   ["test"]}
 
          ;; jvm based tests
          {:id                    :test
           ;:kaocha.filter/skip-meta [:crash]
-          :ns-patterns           ["-test$"]
+          :ns-patterns           ["intemporal\\.tests\\..*-test$"]
           ;; Exclude the jepsen namespace — it is not a kaocha test suite and
           ;; its ns name ends in .runner / .worker (not -test) anyway, but
           ;; exclude explicitly to be safe.
@@ -46,7 +46,7 @@
           :type :kaocha.type/cljs
           :cljs/repl-env cljs.repl.node/repl-env
           ;:cljs/timeout 20000
-          :ns-patterns  ["-test$"]
+          :ns-patterns  ["intemporal\\.tests\\..*-test$"]
           :source-paths ["src"]
           :test-paths   ["test"]}]}
 

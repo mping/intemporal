@@ -113,7 +113,8 @@
             <pre><code>
 (defn run-demo! []
   (let [regions (parse-regions)
-        engine  (intemporal/make-workflow-engine
+        engine  (intemporal/start-engine
+                  :owner-id "doc-child-workflows"
                   :threads 4 :enable-logging true :poll-ms 30)
         store   (:store engine)]
     (reset! app-state {:engine engine :store store})

@@ -1,7 +1,7 @@
 (ns intemporal.tests.child-workflow-util
-  "Shared harness for the worker-driven Tier 2 (independent child workflow) tests
-   (ClojureScript). CLJS has no thread pool: the recovery worker is promise /
-   setTimeout based and drives the seeded parent plus every descendant child.
+  "Shared harness for independent child workflow tests (ClojureScript). CLJS has
+   no thread pool: the engine is promise / setTimeout based and drives the seeded
+   parent plus every descendant child.
    In-memory store only."
   (:require
    [intemporal.core :as intemporal]
@@ -22,11 +22,12 @@
                   (prom/then (prom/delay 20) (fn [_] (step))))))]
       (step))))
 
-(defn with-worker
-  "Run `body-fn` (1-arg: the engine -> promise) with a worker driving `store`; tear
+(defn with-engine
+  "Run `body-fn` (1-arg: the engine -> promise) with an engine driving `store`; tear
    down when the promise settles. Returns the promise."
   [store body-fn]
-  (let [engine (intemporal/make-workflow-engine :store store :threads 2 :poll-ms 20)]
+  (let [engine (intemporal/start-engine :store store :threads 2 :poll-ms 20
+                                        :owner-id (str "child-engine-" (random-uuid)))]
     (-> (body-fn engine)
         (prom/finally (fn [_ _] (intemporal/shutdown-engine engine))))))
 

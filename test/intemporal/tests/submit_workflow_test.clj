@@ -18,7 +18,7 @@
 (deftest submit-returns-id-then-await-completes
   (testing "submit-workflow returns an id immediately; a worker runs it; await yields the result"
     (let [st (store/create-store)
-          e  (intemporal/make-workflow-engine :store st :threads 2 :poll-ms 25)]
+          e  (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st :threads 2 :poll-ms 25)]
       (try
         (let [{:keys [workflow-id]} (intemporal/submit-workflow e #'submit-wf [21])]
           (is (string? workflow-id) "submit-workflow returns a workflow-id immediately")
@@ -30,7 +30,7 @@
 (deftest submit-honours-explicit-id
   (testing "submit-workflow uses a caller-supplied :workflow-id"
     (let [st (store/create-store)
-          e  (intemporal/make-workflow-engine :store st :threads 2 :poll-ms 25)]
+          e  (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st :threads 2 :poll-ms 25)]
       (try
         (let [{:keys [workflow-id]} (intemporal/submit-workflow e #'submit-wf [50]
                                                                 :workflow-id "explicit-1")]

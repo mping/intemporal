@@ -43,7 +43,7 @@
 
 (deftest test-async-workflow
   (testing "Async workflow"
-    (intemporal/with-workflow-engine [engine {:threads 4 :enable-logging true}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 4 :enable-logging true}]
       ;; Activities are automatically registered via stub call
       (let [result (intemporal/start-workflow engine
                      my-parallel-flow [999])]
@@ -53,7 +53,7 @@
 
 (deftest test-race-workflow
   (testing "Async race workflow"
-    (intemporal/with-workflow-engine [engine {:threads 4 :enable-logging true}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 4 :enable-logging true}]
       ;; Activities are automatically registered via stub call
       (let [result (intemporal/start-workflow engine
                                               my-race-flow [999])]

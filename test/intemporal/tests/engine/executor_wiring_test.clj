@@ -1,7 +1,7 @@
 (ns intemporal.tests.engine.executor-wiring-test
   "Regression tests for bounded executor wiring and backpressure.
 
-   E7 — the `:threads` option never reached the executor. `make-workflow-engine`
+   E7 — the `:threads` option never reached the executor. `start-engine`
    passed `:threads`, but `make-vthreads-executor` destructures `:max-concurrent`
    only, so the bound was always nil and EVERY engine ran an unbounded
    `newVirtualThreadPerTaskExecutor`. `create-bounded-executor` was dead code in
@@ -123,8 +123,8 @@
                     (fn [_registry & opts]
                       (reset! seen (apply hash-map opts))
                       fake-executor)]
-        (let [engine (intemporal/make-workflow-engine
-                       :worker? false
+        (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid))
+
                        :submit-timeout-ms 1234)]
           (try
             (is (= 1234 (:submit-timeout-ms @seen)))
@@ -138,7 +138,7 @@
 (deftest test-threads-option-bounds-activity-concurrency
   (testing ":threads N caps the number of activities executing at once"
     (reset-probes!)
-    (let [engine (intemporal/make-workflow-engine :store (store/create-store) :threads 2)
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store (store/create-store) :threads 2)
           result (try
                    (intemporal/start-workflow engine fanout-workflow [6])
                    (finally (intemporal/shutdown-engine engine)))]
@@ -159,7 +159,7 @@
 (deftest test-default-engine-stays-unbounded
   (testing "omitting :threads keeps one virtual thread per activity"
     (reset-probes!)
-    (let [engine (intemporal/make-workflow-engine :store (store/create-store))
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store (store/create-store))
           result (try
                    (intemporal/start-workflow engine fanout-workflow [6])
                    (finally (intemporal/shutdown-engine engine)))]

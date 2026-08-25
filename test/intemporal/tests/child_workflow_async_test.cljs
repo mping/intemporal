@@ -70,7 +70,7 @@
     (async done
       (let [store (u/in-memory)
             pid   "cljs-parent-1" cid "cljs-parent-1/child"]
-        (-> (u/with-worker store
+        (-> (u/with-engine store
               (fn [engine]
                 (intemporal/submit-workflow engine #'parent-join-wf [5 cid] :workflow-id pid)
                 (-> (u/await-status store cid :running 3000)
@@ -91,7 +91,7 @@
     (async done
       (let [store (u/in-memory)
             pid   "cljs-sleepy-1" cid "cljs-sleepy-1/child"]
-        (-> (u/with-worker store
+        (-> (u/with-engine store
               (fn [engine]
                 (intemporal/submit-workflow engine #'sleepy-parent-wf [21 cid] :workflow-id pid)
                 (-> (intemporal/await-workflow engine pid :timeout-ms 5000)
@@ -111,7 +111,7 @@
             term-id   "cljs-pcp-1/term"
             keep-id   "cljs-pcp-1/keep"
             gc-id     "cljs-pcp-1/grandchild"]
-        (-> (u/with-worker store
+        (-> (u/with-engine store
               (fn [engine]
                 (intemporal/submit-workflow engine #'pcp-parent-wf [cancel-id term-id keep-id gc-id]
                                             :workflow-id pid)

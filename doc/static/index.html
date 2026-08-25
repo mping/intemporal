@@ -35,22 +35,18 @@
             <h3>Requirements</h3>
             <pre><code>
 (ns intemporal.doc
-  (:require [intemporal.store :as s]
-            [intemporal.workflow :as w]
-            [promesa.core :as p]
-  (:require-macros [intemporal.macros :refer [stub-function stub-protocol defn-workflow]]
+  (:require [intemporal.core :as intemporal]
+            [promesa.core :as p])
+  (:require-macros
+    [intemporal.core :as intemporal :refer [defn-workflow]]))
 </code>
 </pre>
 
             <h3>Let's define some side effects functions</h3>
             <pre><code>
 
-(defn nested-fn [a]
-  [a :nested])
-
 (defn activity-fn [a]
-  (let [f (stub-function nested-fn)]
-    (f :sub)))
+  [:some a])
 
 (defprotocol MyActivities
   (some-stuff [this a]))
@@ -65,17 +61,17 @@
             <h3>Workflow definition</h3>
             <p>
                 Since the js runtime does not allow blocking calls,
-                the results of stubbed functions and protocols is a promise.
+                the results of stubbed functions and protocols are promises.
                 The clojure version of this does not rely on promises.
             </p>
             <pre><code>
 (defn-workflow my-workflow [i]
-  (let [sf (stub-function activity-fn)
-        pr (stub-protocol MyActivities {})
+  (let [sf (intemporal/stub activity-fn)
+        pr (intemporal/stub-protocol MyActivities)
 
         sres (sf [1])
         pres (some-stuff pr :X)]
-    ;; use promesa to wait for promises to be realized
+    ;; Use Promesa to await the activity results.
     (p/let [v1 sres
             v2 pres]
       (conj [:root]
@@ -88,20 +84,21 @@
             <h3>Execution</h3>
             <pre><code>
 (defn init []
-  (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)
+  (let [engine (intemporal/start-engine :owner-id "doc-main"
+                                        :threads 4 :enable-logging true)
         res    (intemporal/start-workflow engine my-workflow [1] :workflow-id "my-wflow"
                                           :protocols {MyActivities (->MyActivitiesImpl)})]
 
-    ;; set-results!
     (-> res
-        (bthen (fn [r]
+        (p/then (fn [r]
                   (js/console.log "res" (clj->js r))
                   (set-results! (prn-str r))
                   (render-tables! engine "my-wflow")))
 
         (p/catch (fn [r]
                    (js/console.error "error" r)
-                   (set-results! (prn-str r)))))))
+                   (set-results! (prn-str r))))
+        (p/finally #(intemporal/shutdown-engine engine)))))
 </code>
 </pre>
             <h3>Live example</h3>

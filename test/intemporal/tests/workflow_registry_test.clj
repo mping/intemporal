@@ -51,7 +51,7 @@
     (let [st  (store/create-store)
           wid "reg-resume-1"]
       ;; Phase 1: start, run until it suspends on signal, then simulate a crash.
-      (let [e1 (intemporal/make-workflow-engine :store st :threads 2)
+      (let [e1 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st :threads 2)
             f1 (future (intemporal/start-workflow e1 reg-workflow [10 5]
                                                   :workflow-id wid))]
         (Thread/sleep 300)
@@ -59,7 +59,7 @@
         (intemporal/shutdown-engine e1))
       (is (= 1 @exec-count) "only the first activity ran before suspension")
       ;; Phase 2: fresh engine, deliver signal, resume BY ID ONLY.
-      (let [e2 (intemporal/make-workflow-engine :store st :threads 2)]
+      (let [e2 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st :threads 2)]
         (intemporal/send-signal st wid "go" {})
         (let [r (intemporal/resume-workflow e2 wid)]   ; no fn, no args
           (is (= :completed (:status r)) "resumed-by-id workflow completes")

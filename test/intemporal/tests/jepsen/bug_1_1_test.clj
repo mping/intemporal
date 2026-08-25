@@ -39,12 +39,12 @@
   over the same backing) delivers the signal; a worker resumes it."
   [store-a store-b]
   (let [wid (str "bug11-" (random-uuid))]
-    (let [e1 (intemporal/make-workflow-engine :store store-a :threads 2)
+    (let [e1 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store store-a :threads 2)
           f1 (future (intemporal/start-workflow e1 sig-wf [6] :workflow-id wid))]
       (Thread/sleep 300)
       (future-cancel f1)
       (intemporal/shutdown-engine e1))
-    (let [e2 (intemporal/make-workflow-engine :store store-b :threads 2
+    (let [e2 (intemporal/start-engine :store store-b :threads 2
                                               :poll-ms 50 :owner-id "bug11-w")]
       (try
         ;; Signal delivered through the SECOND store instance.

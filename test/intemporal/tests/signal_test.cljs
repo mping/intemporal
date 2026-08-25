@@ -31,7 +31,7 @@
 (deftest test-signal-blocking
   (testing "Workflow blocks until signal is sent"
     (let [wf-id  "signal-test"
-          engine (intemporal/make-workflow-engine :threads 2)]
+          engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       ;; Send signal after a short delay
       (js/setTimeout
         #(intemporal/send-signal (:store engine) wf-id "approval" {:user "alice"})
@@ -47,7 +47,7 @@
 (deftest test-signal-timeout-received
   (testing "Signal received before timeout"
     (let [wf-id  "signal-timeout-test"
-          engine (intemporal/make-workflow-engine :threads 2)]
+          engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (js/setTimeout
         #(intemporal/send-signal (:store engine) wf-id "approval" {:user "bob"})
         100)
@@ -60,7 +60,7 @@
 
 (deftest test-signal-timeout-expired
   (testing "Signal times out when not received"
-    (let [engine (intemporal/make-workflow-engine :threads 2)]
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (with-result [result (intemporal/start-workflow engine signal-timeout-flow [789 100])]
         (is (match? {:status :completed
                      :result {:timed-out true
@@ -69,7 +69,7 @@
 
 (deftest test-multiple-signals
   (testing "Multiple signals can be sent to same workflow"
-    (let [engine (intemporal/make-workflow-engine :threads 2)
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)
           wf-id-1 "multi-signal-test-1"
           wf-id-2 "multi-signal-test-2"]
       ;; Each workflow gets its own delayed signal. blet sequences r1 then r2,

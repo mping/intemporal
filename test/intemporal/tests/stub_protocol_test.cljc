@@ -25,7 +25,7 @@
 
 (deftest test-stub-protocol
   (testing "Protocol stubbing via :protocols map"
-    (let [engine (intemporal/make-workflow-engine :threads 2)]
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (with-result [result (intemporal/start-workflow engine my-workflow [21]
                                                       :protocols {MyProto (->MyProtoImpl)})]
         (is (match? {:status :completed

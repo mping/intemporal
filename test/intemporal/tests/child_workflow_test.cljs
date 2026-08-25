@@ -41,7 +41,7 @@
 
 (deftest test-simple-child-workflow
   (testing "Parent workflow can run child workflow"
-    (let [engine (intemporal/make-workflow-engine :threads 2)]
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (with-result [result (intemporal/start-workflow engine parent-flow [5])]
         (is (match? {:status      :completed
                      :workflow-id string?
@@ -51,7 +51,7 @@
 
 (deftest test-nested-child-workflows
   (testing "Child workflows can have their own child workflows"
-    (let [engine (intemporal/make-workflow-engine :threads 2)]
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (with-result [result (intemporal/start-workflow engine nested-parent-flow [3])]
         (is (match? {:status :completed
                      :result {:parent-result [:processed 3]
@@ -69,7 +69,7 @@
                                 {:success true}
                                 (catch js/Error e
                                   {:error (ex-message e)})))
-          engine            (intemporal/make-workflow-engine :threads 2)]
+          engine            (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (with-result [result (intemporal/start-workflow engine parent-with-error [42])]
         (is (match? {:status :completed
                      :result {:error string?}}
@@ -82,7 +82,7 @@
                                    c2 (intemporal/run-child-workflow child-flow [2])
                                    c3 (intemporal/run-child-workflow child-flow [3])]
                                {:children [c1 c2 c3] :id id}))
-          engine           (intemporal/make-workflow-engine :threads 2)]
+          engine           (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (with-result [result (intemporal/start-workflow engine multi-child-flow [99])]
         (is (match? {:status :completed
                      :result {:children [{:child-result [:processed 1]}

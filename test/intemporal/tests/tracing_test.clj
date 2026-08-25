@@ -97,7 +97,7 @@
 
 (deftest workflow-and-activity-spans-nest
   (testing "activity span is a child of the workflow span in the same trace"
-    (intemporal/with-workflow-engine [engine {:enable-telemetry true}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :enable-telemetry true}]
       (let [result (intemporal/start-workflow engine simple-flow [21] :workflow-id "wf-simple")]
         (is (= :completed (:status result)))
         (is (= 42 (:result result)))
@@ -117,7 +117,7 @@
 (deftest tracecontext-persisted-on-start-event
   (testing ":workflow-started event carries the W3C traceparent of the workflow span"
     (let [st (store/create-store)]
-      (intemporal/with-workflow-engine [engine {:enable-telemetry true :store st}]
+      (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :enable-telemetry true :store st}]
         (intemporal/start-workflow engine simple-flow [21] :workflow-id "wf-tc")
         (let [started (->> (p/load-history st "wf-tc")
                            (filter #(= :workflow-started (:event-type %)))
@@ -132,7 +132,7 @@
 
 (deftest child-workflow-nested-in-parent-trace
   (testing "child workflow span and its activity nest under the parent workflow trace"
-    (intemporal/with-workflow-engine [engine {:enable-telemetry true}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :enable-telemetry true}]
       (let [result (intemporal/start-workflow engine parent-flow [5] :workflow-id "wf-parent")]
         (is (= :completed (:status result)))
         (let [spans      (finished-spans)
@@ -158,7 +158,7 @@
 
 (deftest error-status-on-failure
   (testing "workflow span status is ERROR when the workflow fails"
-    (intemporal/with-workflow-engine [engine {:enable-telemetry true}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :enable-telemetry true}]
       (let [result (intemporal/start-workflow engine failing-flow [1] :workflow-id "wf-fail")]
         (is (= :failed (:status result)))
         (let [wf-span (span-named (finished-spans) "/failing-flow")]
@@ -171,7 +171,7 @@
     (let [st (store/create-store)]
       ;; First engine: submit-workflow anchors the trace (worker-style entry),
       ;; persisting tracecontext without driving the workflow.
-      (intemporal/with-workflow-engine [engine {:enable-telemetry true :store st}]
+      (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :enable-telemetry true :store st}]
         (intemporal/submit-workflow engine simple-flow [21] :workflow-id "wf-resume"))
       (let [started     (->> (p/load-history st "wf-resume")
                              (filter #(= :workflow-started (:event-type %)))
@@ -180,7 +180,7 @@
                                 (get-in started [:tracecontext "traceparent"]) #"-") 1)]
         (is (some? anchor-trace) "anchor tracecontext persisted by submit-workflow")
         ;; Second engine (fresh "process") resumes — no live root span on the stack.
-        (intemporal/with-workflow-engine [engine2 {:enable-telemetry true :store st}]
+        (intemporal/with-workflow-engine [engine2 {:owner-id (str "migrated-test-" (random-uuid)) :enable-telemetry true :store st}]
           (let [result (intemporal/resume-workflow engine2 "wf-resume")]
             (is (= :completed (:status result)))
             (let [spans     (finished-spans)

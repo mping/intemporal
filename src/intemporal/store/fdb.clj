@@ -38,45 +38,6 @@
 (defn ->tuple [v]
   (Tuple/from (into-array Object (map #(if (keyword? %) (name %) %) v))))
 
-;; ============================================================================
-;; Durable scheduling indexes
-;;
-;; wf-owner indexes every non-terminal workflow for ownership recovery/release.
-;; wf-ready contains only RUNNABLE workflows. wf-due contains only timed WAITING
-;; workflows, keyed by deadline. Indefinite WAITING workflows have no scheduling
-;; index entry and therefore cost nothing to poll.
-;; ============================================================================
-
-(defn- read-owner [tx root-subspace workflow-id]
-  (<-bytes (fdb-core/get tx root-subspace (->tuple ["owner" workflow-id]))))
-
-(defn- owner-index-key [bucket workflow-id]
-  (->tuple ["wf-owner" bucket workflow-id]))
-
-(defn- schedule-key [workflow-id]
-  (->tuple ["schedule" workflow-id]))
-
-(defn- ready-index-key [bucket workflow-id]
-  (->tuple ["wf-ready" bucket workflow-id]))
-
-(defn- due-index-key [bucket next-run-at workflow-id]
-  (->tuple ["wf-due" bucket next-run-at workflow-id]))
-
-(defn- read-schedule [tx root-subspace workflow-id]
-  (or (<-bytes (fdb-core/get tx root-subspace (schedule-key workflow-id)))
-      {:run-state :runnable :next-run-at nil :wake-version 0}))
-
-(defn- workflow-exists?
-  [^Transaction tx root-subspace workflow-id]
-  (let [history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))]
-    (boolean (first (.getRange tx (fsub/range history-sub) 1)))))
-
-(defn- range-workflow-ids
-  [^Transaction tx subspace ^Range key-range limit]
-  (mapv (fn [^KeyValue kv]
-          (last (fimpl/decode subspace (.getKey kv))))
-        (.getRange tx key-range (int limit))))
-
 (defn- ordered-range
   "Return decoded relative keys and values in FoundationDB key order. The
    clj-fdb get-range wrapper returns a hash map and therefore discards order."
@@ -89,115 +50,266 @@
            [(fimpl/decode subspace (.getKey kv)) (<-bytes (.getValue kv))])
          (.getRange tx key-range (int limit)))))
 
-(defn- clear-schedule-index!
-  [tx root-subspace bucket workflow-id schedule]
-  (case (:run-state schedule)
-    :runnable (fdb-core/clear tx root-subspace (ready-index-key bucket workflow-id))
-    :waiting  (when-let [at (:next-run-at schedule)]
-                (fdb-core/clear tx root-subspace (due-index-key bucket at workflow-id)))
-    nil))
+;; ============================================================================
+;; Clean FSM v2 keyspace
+;; ============================================================================
 
-(defn- index-schedule!
-  [tx root-subspace bucket workflow-id schedule]
-  (case (:run-state schedule)
-    :runnable (fdb-core/set tx root-subspace (ready-index-key bucket workflow-id)
-                            (->bytes (:wake-version schedule)))
-    :waiting  (when-let [at (:next-run-at schedule)]
-                (fdb-core/set tx root-subspace (due-index-key bucket at workflow-id)
-                              (->bytes (:wake-version schedule))))
-    nil))
+;; The old key layout above remains readable only by the retired replay
+;; fallback.  The FSM uses this versioned subspace exclusively, so an existing
+;; database is never reinterpreted or destructively rewritten.
 
-(defn- write-schedule!
-  [tx root-subspace workflow-id old-schedule new-schedule]
-  (let [bucket (or (read-owner tx root-subspace workflow-id) "")]
-    (clear-schedule-index! tx root-subspace bucket workflow-id old-schedule)
-    (fdb-core/set tx root-subspace (schedule-key workflow-id) (->bytes new-schedule))
-    (index-schedule! tx root-subspace bucket workflow-id new-schedule))
-  new-schedule)
+(def ^:private fsm-terminal-statuses
+  #{:completed :failed :cancelled :terminated})
 
-;; Tier 2: parent->child index. Children of `parent-id` live under
-;; ["wf-child" <parent-id> <child-id>] with value {:parent-seq .. :policy ..},
-;; so list-children can range-scan a parent's children for close-policy.
-(defn- child-index-key [parent-id child-id]
-  (->tuple ["wf-child" parent-id child-id]))
+(defn- fsm-root [root-subspace]
+  (fsub/get root-subspace (->tuple ["fsm-v2"])))
 
-(defn- terminal-status-value? [status]
-  (boolean (some-> status keyword domain/terminal-status?)))
+(defn- fsm-key [& parts]
+  (->tuple parts))
 
-(defn- history-identity-key [workflow-id event]
-  (->tuple ["history-identity" workflow-id
-            (pr-str (domain/event-identity event))]))
+(defn- fsm-workflow-key [workflow-id]
+  (fsm-key "workflow" workflow-id))
 
-(defn- append-history-events!
-  "Append previously unseen event identities in transaction commit order.
-   The per-workflow counter is transactionally contended, so concurrent writers
-   retry and receive a total order. The separate identity index supplies
-   first-write-wins idempotency and point lookup."
-  [tx root-subspace workflow-id events]
-  (let [history-sub  (fsub/get root-subspace (->tuple ["history" workflow-id]))
-        next-key     (->tuple ["history-next" workflow-id])
-        max-key      (->tuple ["history-max-seq" workflow-id])
-        initial-next (long (or (<-bytes (fdb-core/get tx root-subspace next-key)) 0))
-        initial-max  (<-bytes (fdb-core/get tx root-subspace max-key))
-        {:keys [next-ordinal max-seq]}
-        (reduce
-          (fn [{:keys [next-ordinal max-seq] :as state} event]
-            (let [identity-key (history-identity-key workflow-id event)]
-              (if (some? (fdb-core/get tx root-subspace identity-key))
-                state
-                (do
-                  (fdb-core/set tx history-sub (->tuple [next-ordinal]) (->bytes event))
-                  (fdb-core/set tx root-subspace identity-key (->bytes next-ordinal))
-                  {:next-ordinal (inc next-ordinal)
-                   :max-seq (max (or max-seq (:seq event)) (:seq event))}))))
-          {:next-ordinal initial-next :max-seq initial-max}
-          events)]
-    (when (not= initial-next next-ordinal)
-      (fdb-core/set tx root-subspace next-key (->bytes next-ordinal))
-      (fdb-core/set tx root-subspace max-key (->bytes max-seq)))))
+(defn- fsm-history-sub [root workflow-id]
+  (fsub/get root (fsm-key "history" workflow-id)))
 
-(defn- maintain-scheduling! [tx root-subspace workflow-id events]
-  (let [started?  (some #(= :workflow-started (:event-type %)) events)
-        terminal? (some domain/terminal-event? events)
-        bucket    (or (read-owner tx root-subspace workflow-id) "")
-        raw       (fdb-core/get tx root-subspace (schedule-key workflow-id))
-        current   (or (<-bytes raw)
-                      {:run-state :runnable :next-run-at nil :wake-version 0})
-        status    (<-bytes (fdb-core/get tx root-subspace
-                                         (->tuple ["state" workflow-id "status"])))]
-    (when (and started? (nil? status))
-      (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "status"])
-                    (->bytes "running")))
+(defn- fsm-history-identity-key [workflow-id event]
+  (fsm-key "history-id" workflow-id (pr-str (domain/event-identity event))))
+
+(defn- fsm-history-next-key [workflow-id]
+  (fsm-key "history-next" workflow-id))
+
+(defn- fsm-signal-sub [root workflow-id]
+  (fsub/get root (fsm-key "signal" workflow-id)))
+
+(defn- fsm-signal-id-key [workflow-id signal-id]
+  (fsm-key "signal-id" workflow-id signal-id))
+
+(defn- fsm-child-sub [root workflow-id]
+  (fsub/get root (fsm-key "child" workflow-id)))
+
+(defn- fsm-workflow-index-sub [root]
+  (fsub/get root (fsm-key "workflow-index")))
+
+(defn- fsm-owner-index-key [owner-id workflow-id]
+  (fsm-key "owner" (or owner-id "") workflow-id))
+
+(defn- fsm-ready-index-key [owner-id workflow-id]
+  (fsm-key "ready" (or owner-id "") workflow-id))
+
+(defn- fsm-due-index-key [owner-id next-run-at workflow-id]
+  (fsm-key "due" (or owner-id "") next-run-at workflow-id))
+
+(defn- fsm-terminal? [workflow]
+  (contains? fsm-terminal-statuses (:status workflow)))
+
+(defn- fsm-read-workflow [tx root workflow-id]
+  (<-bytes (fdb-core/get tx root (fsm-workflow-key workflow-id))))
+
+(defn- fsm-clear-indexes!
+  [tx root workflow-id workflow]
+  (when workflow
+    (let [{:keys [owner-id run-state next-run-at]} workflow]
+      (fdb-core/clear tx root (fsm-owner-index-key owner-id workflow-id))
+      (case run-state
+        :runnable (fdb-core/clear tx root (fsm-ready-index-key owner-id workflow-id))
+        :waiting (when next-run-at
+                   (fdb-core/clear tx root
+                                   (fsm-due-index-key owner-id next-run-at workflow-id)))
+        nil))))
+
+(defn- fsm-index-workflow!
+  [tx root workflow-id workflow]
+  (when-not (fsm-terminal? workflow)
+    (let [{:keys [owner-id run-state next-run-at]} workflow]
+      (fdb-core/set tx root (fsm-owner-index-key owner-id workflow-id) (->bytes true))
+      (case run-state
+        :runnable (fdb-core/set tx root (fsm-ready-index-key owner-id workflow-id)
+                                (->bytes true))
+        :waiting (when next-run-at
+                   (fdb-core/set tx root
+                                 (fsm-due-index-key owner-id next-run-at workflow-id)
+                                 (->bytes true)))
+        nil))))
+
+(defn- fsm-write-workflow!
+  [tx root workflow-id old-workflow new-workflow]
+  (fsm-clear-indexes! tx root workflow-id old-workflow)
+  (fdb-core/set tx root (fsm-workflow-key workflow-id) (->bytes new-workflow))
+  (fsm-index-workflow! tx root workflow-id new-workflow)
+  new-workflow)
+
+(defn- fsm-workflow-history
+  [tx root workflow-id]
+  (let [subspace (fsm-history-sub root workflow-id)]
+    (->> (ordered-range tx subspace (fsub/range subspace))
+         (mapv second))))
+
+(defn- fsm-workflow-signals
+  [tx root workflow-id]
+  (let [subspace (fsm-signal-sub root workflow-id)]
+    (reduce (fn [signals [[signal-name queue-id] envelope]]
+              (update signals signal-name (fnil conj [])
+                      (assoc envelope :queue-id (long queue-id))))
+            {}
+            (ordered-range tx subspace (fsub/range subspace)))))
+
+(defn- fsm-workflow-state
+  ([tx root workflow-id] (fsm-workflow-state tx root workflow-id false))
+  ([tx root workflow-id include-history?]
+   (when-let [workflow (fsm-read-workflow tx root workflow-id)]
+     (cond-> (assoc workflow
+                    :workflow-id workflow-id
+                    :signals (fsm-workflow-signals tx root workflow-id))
+       include-history? (assoc :history (fsm-workflow-history tx root workflow-id))))))
+
+(defn- fsm-matching-started-event?
+  [existing requested]
+  (= (select-keys existing [:event-type :seq :workflow-id :workflow-fn-name
+                            :args :max-iterations :parent-id :parent-seq])
+     (select-keys requested [:event-type :seq :workflow-id :workflow-fn-name
+                             :args :max-iterations :parent-id :parent-seq])))
+
+(defn- fsm-matching-creation?
+  [tx root workflow-id workflow {:keys [started-event parent]}]
+  (and (= 1 (count (fsm-workflow-history tx root workflow-id)))
+       (fsm-matching-started-event? (first (fsm-workflow-history tx root workflow-id))
+                                    started-event)
+       (= (:parent workflow) parent)))
+
+(defn- fsm-append-events!
+  "Append first-write-wins event identities in one FDB transaction and update
+   the two history counters once when at least one identity was new."
+  [tx root workflow-id workflow events]
+  (let [history-sub (fsm-history-sub root workflow-id)
+        start-next (long (or (<-bytes (fdb-core/get tx root
+                                                    (fsm-history-next-key workflow-id)))
+                             0))
+        [next-ordinal appended?]
+        (reduce (fn [[ordinal appended?] event]
+                  (let [identity-key (fsm-history-identity-key workflow-id event)]
+                    (if (some? (fdb-core/get tx root identity-key))
+                      [ordinal appended?]
+                      (do
+                        (fdb-core/set tx history-sub (->tuple [ordinal]) (->bytes event))
+                        (fdb-core/set tx root identity-key (->bytes ordinal))
+                        [(inc ordinal) true]))))
+                [start-next false]
+                events)
+        workflow (if appended?
+                   (-> workflow
+                       (update :revision inc)
+                       (update :history-revision inc))
+                   workflow)]
+    (when appended?
+      (fdb-core/set tx root (fsm-history-next-key workflow-id) (->bytes next-ordinal)))
+    workflow))
+
+(defn- fsm-wake-workflow
+  [workflow]
+  (cond-> (-> workflow
+              (update :wake-version inc)
+              (update :revision inc))
+    (= :waiting (:run-state workflow))
+    (assoc :run-state :runnable :next-run-at nil)))
+
+(declare fsm-create-workflow!)
+
+(defn- fsm-close-tree
+  [tx root workflow-id]
+  (when-let [workflow (fsm-read-workflow tx root workflow-id)]
+    (let [subspace (fsm-child-sub root workflow-id)
+          next-terminal-seq (inc (reduce max -1 (map :seq (fsm-workflow-history tx root workflow-id))))]
+      {:workflow-id workflow-id
+       :revision (:revision workflow)
+       :status (:status workflow)
+       :next-terminal-seq next-terminal-seq
+       :children (mapv (fn [[[child-id] edge]]
+                         (assoc (fsm-close-tree tx root child-id)
+                                :policy (:policy edge)
+                                :parent-seq (:parent-seq edge)))
+                       (ordered-range tx subspace (fsub/range subspace)))})))
+
+(defn- fsm-create-workflow!
+  [tx root {:keys [workflow-id owner-id started-event parent] :as creation}]
+  (if-let [existing (fsm-read-workflow tx root workflow-id)]
+    (if (fsm-matching-creation? tx root workflow-id existing creation)
+      :exists
+      :conflict)
+    (let [workflow {:workflow-id workflow-id
+                    :owner-id owner-id
+                    :status :running
+                    :run-state :runnable
+                    :next-run-at nil
+                    :wake-version 0
+                    :revision 0
+                    :history-revision 0
+                    :next-signal-id 0
+                    :cancel-requested? false
+                    :parent parent}
+          workflow (fsm-append-events! tx root workflow-id workflow [started-event])]
+      (fsm-write-workflow! tx root workflow-id nil workflow)
+      (fdb-core/set tx (fsm-workflow-index-sub root) (->tuple [workflow-id]) (->bytes true))
+      (when-let [{parent-id :workflow-id parent-seq :seq policy :policy} parent]
+        (fdb-core/set tx (fsm-child-sub root parent-id) (->tuple [workflow-id])
+                      (->bytes {:parent-seq parent-seq :policy policy}))
+        (when-let [parent-workflow (fsm-read-workflow tx root parent-id)]
+          (fsm-write-workflow! tx root parent-id parent-workflow
+                               (update parent-workflow :revision inc))))
+      :created)))
+
+(defn- fsm-transition-status
+  [tx root transition workflows]
+  (let [{:keys [workflow-id owner-id kind expected-wake-version consume-signals
+                expected-related-revisions]} transition
+        root-workflow (get workflows workflow-id)
+        signal-consumable?
+        (fn [{:keys [signal-name queue-id signal-id]}]
+          (let [subspace (fsm-signal-sub root workflow-id)
+                ;; FIFO is per signal name, not lexicographic globally.
+                first-entry (first (filter #(= signal-name (ffirst %))
+                                           (ordered-range tx subspace (fsub/range subspace))))]
+            (and first-entry
+                 (= (long queue-id) (long (second (first first-entry))))
+                 (= signal-id (:signal-id (second first-entry))))))]
     (cond
-      terminal? (do
-                  (clear-schedule-index! tx root-subspace bucket workflow-id current)
-                  (fdb-core/clear tx root-subspace (owner-index-key bucket workflow-id))
-                  (fdb-core/set tx root-subspace (schedule-key workflow-id)
-                                (->bytes (assoc current :run-state :terminal :next-run-at nil))))
-      (and started?
-           (nil? raw)
-           (not (terminal-status-value? status)))
-      (let [schedule {:run-state :runnable :next-run-at nil :wake-version 0}]
-        (fdb-core/set tx root-subspace (owner-index-key bucket workflow-id)
-                      (->bytes {}))
-        (write-schedule! tx root-subspace workflow-id current schedule)))))
+      (nil? root-workflow) :not-running
+      (fsm-terminal? root-workflow) :terminal
+      (not= :running (:run-state root-workflow)) :not-running
+      (not= owner-id (:owner-id root-workflow)) :not-owner
+      (and (= kind :park) (nil? expected-wake-version)) :conflict
+      (and (some? expected-wake-version)
+           (not= expected-wake-version (:wake-version root-workflow))) :wake-raced
+      (not (every? (fn [[id revision]]
+                     (= revision (get-in workflows [id :revision])))
+                   expected-related-revisions)) :conflict
+      (not (every? signal-consumable? consume-signals)) :conflict
+      :else :committed)))
 
-(defn- wake-schedule!
-  [tx root-subspace workflow-id]
-  (let [raw      (fdb-core/get tx root-subspace (schedule-key workflow-id))
-        current  (or (<-bytes raw)
-                     {:run-state :runnable :next-run-at nil :wake-version 0})
-        status   (<-bytes (fdb-core/get tx root-subspace
-                                        (->tuple ["state" workflow-id "status"])))
-        active?  (and (or raw (workflow-exists? tx root-subspace workflow-id))
-                      (not= :terminal (:run-state current))
-                      (not (terminal-status-value? status)))]
-    (when active?
-      (let [woken (cond-> (update current :wake-version (fnil inc 0))
-                    (= :waiting (:run-state current))
-                    (assoc :run-state :runnable :next-run-at nil))]
-        (write-schedule! tx root-subspace workflow-id current woken)
-        true))))
+(defn- fsm-workflow-ids
+  [tx root]
+  (let [subspace (fsm-workflow-index-sub root)]
+    (mapv (fn [[[workflow-id] _]] workflow-id)
+          (ordered-range tx subspace (fsub/range subspace)))))
+
+(defn- fsm-read-workflows
+  [tx root workflow-ids]
+  (into {}
+        (keep (fn [workflow-id]
+                (when-let [workflow (fsm-read-workflow tx root workflow-id)]
+                  [workflow-id workflow])))
+        (sort workflow-ids)))
+
+(defn- fsm-terminalize
+  [tx root workflow-id workflow terminal-status events]
+  (let [workflow (fsm-append-events! tx root workflow-id workflow events)
+        workflow (-> workflow
+                     (assoc :status terminal-status
+                            :run-state :terminal
+                            :next-run-at nil)
+                     (update :revision inc))]
+    (fsm-write-workflow! tx root workflow-id (fsm-read-workflow tx root workflow-id) workflow)
+    workflow))
 
 ;; ============================================================================
 ;; FDB Store Implementation
@@ -207,277 +319,253 @@
   AutoCloseable
   (close [this]
     this)
-  p/IStore
+  p/IEngineStore
   (load-history [_ workflow-id]
-    (let [history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))]
-      (ftr/run db
-        (fn [tx]
-          (->> (ordered-range tx history-sub (fsub/range history-sub))
-               (map (fn [[_key event]]
-                      (update event :event-type keyword)))
-               vec)))))
-
-  (save-events [_ workflow-id events]
-    (when (seq events)
-      (let [term (some-> (domain/terminal-status-in events) name)]
-        (ftr/run db
-          (fn [tx]
-            (append-history-events! tx root-subspace workflow-id events)
-            (when term
-              (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "status"]) (->bytes term)))
-            (maintain-scheduling! tx root-subspace workflow-id events)))))
-    events)
-
-  (save-events-and-wake! [_ workflow-id events]
-    (let [woke? (ftr/run db
-                  (fn [tx]
-                    (append-history-events! tx root-subspace workflow-id events)
-                    (when-let [term (some-> (domain/terminal-status-in events) name)]
-                      (fdb-core/set tx root-subspace
-                                    (->tuple ["state" workflow-id "status"])
-                                    (->bytes term)))
-                    (maintain-scheduling! tx root-subspace workflow-id events)
-                    (wake-schedule! tx root-subspace workflow-id)))]
-      (boolean woke?)))
-
-  (find-event [_ workflow-id event-type seq-num]
-    (let [event       {:event-type event-type :seq seq-num}
-          history-sub (fsub/get root-subspace (->tuple ["history" workflow-id]))]
-      (ftr/run db
-        (fn [tx]
-          (when-let [ordinal (<-bytes
-                              (fdb-core/get tx root-subspace
-                                            (history-identity-key workflow-id event)))]
-            (some-> (fdb-core/get tx history-sub (->tuple [ordinal]))
-                    <-bytes
-                    (update :event-type keyword)))))))
-
-  (max-seq [_ workflow-id]
-    (ftr/run db
-      (fn [tx]
-        (<-bytes (fdb-core/get tx root-subspace
-                              (->tuple ["history-max-seq" workflow-id]))))))
-
-  (get-pending-signals [_ workflow-id]
-    (let [signals-sub (fsub/get root-subspace (->tuple ["signals" workflow-id]))]
-      (ftr/run db
-        (fn [tx]
-          (->> (ordered-range tx signals-sub (fsub/range signals-sub))
-               (reduce (fn [acc [key value]]
-                         (let [signal-name (first key)]
-                           (update acc signal-name (fnil conj []) value)))
-                       {}))))))
-
-  (add-signal [_ workflow-id signal-name signal-data]
-    (let [signals-sub (fsub/get root-subspace (->tuple ["signals" workflow-id signal-name]))
-          counter-key (->tuple ["signal-next" workflow-id signal-name])]
-      (ftr/run db
-        (fn [tx]
-          (let [ordinal (long (or (<-bytes
-                                   (fdb-core/get tx root-subspace counter-key)) 0))]
-            (fdb-core/set tx signals-sub (->tuple [ordinal]) (->bytes signal-data))
-            (fdb-core/set tx root-subspace counter-key (->bytes (inc ordinal))))
-          (wake-schedule! tx root-subspace workflow-id)))
-
-      signal-data))
-
-  (consume-signal [_ workflow-id signal-name]
-    (let [signals-sub (fsub/get root-subspace (->tuple ["signals" workflow-id signal-name]))]
-      (ftr/run db
-        (fn [tx]
-          (let [r (ordered-range tx signals-sub (fsub/range signals-sub) 1)]
-            (when (seq r)
-              (let [[relative-key value] (first r)]
-                (fdb-core/clear tx signals-sub relative-key)
-                value)))))))
-
-  (wake-workflow [_ workflow-id]
-    (boolean (ftr/run db
-               (fn [tx]
-                 (wake-schedule! tx root-subspace workflow-id)))))
-
-  (is-cancelled? [_ workflow-id]
-    (ftr/run db
-      (fn [tx]
-        (boolean (<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "cancelled"])))))))
-
-  (mark-cancelled [_ workflow-id]
-    (ftr/run db
-      (fn [tx]
-        (fdb-core/set tx root-subspace
-                      (->tuple ["state" workflow-id "cancelled"])
-                      (->bytes true))
-        (wake-schedule! tx root-subspace workflow-id)))
-    nil)
+    (let [root (fsm-root root-subspace)]
+      (ftr/run db #(fsm-workflow-history % root workflow-id))))
 
   (get-workflow-status [_ workflow-id]
-    ;; Read both status and cancelled flag in one transaction so that a late
-    ;; mark-cancelled cannot override a workflow that already completed or failed.
-    (let [[cached cancelled?]
-          (ftr/run db
-            (fn [tx]
-              [(<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "status"])))
-               (boolean (<-bytes (fdb-core/get tx root-subspace (->tuple ["state" workflow-id "cancelled"]))))]))]
-      (cond
-        ;; Check terminal status first: takes precedence over the cancelled flag.
-        (terminal-status-value? cached) (keyword cached)
-        cancelled? :cancelled
-        (= "running" cached) :running
-        :else :not-found)))
+    (let [root (fsm-root root-subspace)]
+      (or (ftr/run db #(some-> (fsm-read-workflow % root workflow-id) :status))
+          :not-found)))
 
   ;; --- Durable scheduling + ownership-based recovery ---
   (claim-runnable! [_ owner-id limit now-ms]
-    (ftr/run db
-      (fn [tx]
-        (let [scan-ready (fn [bucket]
-                           (let [sub (fsub/get root-subspace (->tuple ["wf-ready" bucket]))]
-                             (range-workflow-ids tx sub (fsub/range sub) limit)))
-              scan-due   (fn [bucket]
-                           ;; The upper bound is the end of the exact deadline
-                           ;; prefix, so the range includes every key whose
-                           ;; deadline is <= now without reading future waits.
-                           (let [sub     (fsub/get root-subspace (->tuple ["wf-due" bucket]))
-                                 whole   (fsub/range sub)
-                                 through (Range/startsWith
-                                           (fsub/pack sub (->tuple [now-ms])))
-                                 due     (Range. (.-begin whole) (.-end through))]
-                             (range-workflow-ids tx sub due limit)))
-              candidates (->> (concat (scan-ready owner-id) (scan-ready "")
-                                (scan-due owner-id) (scan-due ""))
-                              distinct
-                              (take limit)
-                              vec)
-              claims (->> candidates
-                          (keep
-                            (fn [workflow-id]
-                              (let [owner    (read-owner tx root-subspace workflow-id)
-                                    bucket   (or owner "")
-                                    schedule (read-schedule tx root-subspace workflow-id)
-                                    status   (<-bytes (fdb-core/get tx root-subspace
-                                                        (->tuple ["state" workflow-id "status"])))
-                                    eligible? (or (= :runnable (:run-state schedule))
-                                                  (and (= :waiting (:run-state schedule))
-                                                       (:next-run-at schedule)
-                                                       (<= (:next-run-at schedule) now-ms)))]
-                                (when (and eligible?
-                                           (not (terminal-status-value? status))
-                                           (or (nil? owner) (= owner owner-id)))
-                                  (clear-schedule-index! tx root-subspace bucket workflow-id schedule)
-                                  (when (not= bucket owner-id)
-                                    (fdb-core/clear tx root-subspace
-                                                    (owner-index-key bucket workflow-id))
-                                    (fdb-core/set tx root-subspace
-                                                  (owner-index-key owner-id workflow-id)
-                                                  (->bytes {})))
-                                  (fdb-core/set tx root-subspace (->tuple ["owner" workflow-id])
-                                                (->bytes owner-id))
-                                  (fdb-core/set tx root-subspace (schedule-key workflow-id)
-                                                (->bytes (assoc schedule :run-state :running
-                                                           :next-run-at nil)))
-                                  {:workflow-id workflow-id
-                                   :wake-version (:wake-version schedule)}))))
-                          vec)]
-          claims))))
-
-  (park-workflow! [_ workflow-id expected-wake-version events next-run-at-ms]
-    (ftr/run db
-      (fn [tx]
-        (let [schedule    (read-schedule tx root-subspace workflow-id)
-              status      (<-bytes (fdb-core/get tx root-subspace
-                                     (->tuple ["state" workflow-id "status"])))
-              term        (some-> (domain/terminal-status-in events) name)]
-          (cond
-            (some-> status keyword domain/terminal-status?)
-            {:park-status :terminal}
-            term
-            (do
-              (append-history-events! tx root-subspace workflow-id events)
-              (fdb-core/set tx root-subspace (->tuple ["state" workflow-id "status"])
-                            (->bytes term))
-              (maintain-scheduling! tx root-subspace workflow-id events)
-              {:park-status :terminal})
-            (not= :running (:run-state schedule)) {:park-status :not-running}
-            (not= expected-wake-version (:wake-version schedule))
-            {:park-status :wake-raced :wake-version (:wake-version schedule)}
-            :else (do
-                    (append-history-events! tx root-subspace workflow-id events)
-                    (write-schedule! tx root-subspace workflow-id schedule
-                                     (assoc schedule :run-state :waiting
-                                                     :next-run-at next-run-at-ms))
-                    {:park-status :parked}))))))
-
-  (requeue-running! [_ workflow-id]
-    (boolean
+    (let [root (fsm-root root-subspace)]
       (ftr/run db
         (fn [tx]
-          (let [schedule (read-schedule tx root-subspace workflow-id)]
-            (when (= :running (:run-state schedule))
-              (write-schedule! tx root-subspace workflow-id schedule
-                               (assoc schedule :run-state :runnable :next-run-at nil))
-              true))))))
+          (let [claimable
+                (->> (fsm-workflow-ids tx root)
+                     (keep (fn [workflow-id]
+                             (let [workflow (fsm-read-workflow tx root workflow-id)
+                                   eligible? (or (= :runnable (:run-state workflow))
+                                                 (and (= :waiting (:run-state workflow))
+                                                      (:next-run-at workflow)
+                                                      (<= (:next-run-at workflow) now-ms)))]
+                               (when (and eligible? (not (fsm-terminal? workflow))
+                                          (or (nil? (:owner-id workflow))
+                                              (= owner-id (:owner-id workflow))))
+                                 [workflow-id workflow]))))
+                     (sort-by (fn [[workflow-id workflow]]
+                                [(if (= owner-id (:owner-id workflow)) 0 1)
+                                 workflow-id]))
+                     (take limit)
+                     vec)]
+            (mapv (fn [[workflow-id workflow]]
+                    (fsm-write-workflow!
+                      tx root workflow-id workflow
+                      (-> workflow
+                          (assoc :owner-id owner-id :run-state :running :next-run-at nil)
+                          (update :revision inc)))
+                    {:workflow-id workflow-id
+                     :wake-version (:wake-version workflow)})
+                  claimable))))))
+
+  (requeue-running! [_ workflow-id owner-id]
+    (let [root (fsm-root root-subspace)]
+      (boolean
+        (ftr/run db
+          (fn [tx]
+            (when-let [workflow (fsm-read-workflow tx root workflow-id)]
+              (when (and (= owner-id (:owner-id workflow))
+                         (= :running (:run-state workflow))
+                         (not (fsm-terminal? workflow)))
+                (fsm-write-workflow! tx root workflow-id workflow
+                                     (-> workflow
+                                         (assoc :run-state :runnable :next-run-at nil)
+                                         (update :revision inc)))
+                true)))))))
 
   (recover-running! [_ owner-id]
-    (ftr/run db
-      (fn [tx]
-        (let [sub     (fsub/get root-subspace (->tuple ["wf-owner" owner-id]))
-              entries (mapv (fn [[key _]] (nth key (dec (count key))))
-                            (fdb-core/get-range tx (fsub/range sub)))
-              running (filterv #(= :running (:run-state
-                                              (read-schedule tx root-subspace %)))
-                               (distinct entries))]
-          (doseq [workflow-id running]
-            (let [schedule (read-schedule tx root-subspace workflow-id)]
-              (write-schedule! tx root-subspace workflow-id schedule
-                               (assoc schedule :run-state :runnable :next-run-at nil))))
-          (count running)))))
+    (let [root (fsm-root root-subspace)]
+      (ftr/run db
+        (fn [tx]
+          (let [running (->> (fsm-workflow-ids tx root)
+                             (keep (fn [workflow-id]
+                                     (let [workflow (fsm-read-workflow tx root workflow-id)]
+                                       (when (and (= owner-id (:owner-id workflow))
+                                                  (= :running (:run-state workflow))
+                                                  (not (fsm-terminal? workflow)))
+                                         [workflow-id workflow])))))]
+            (doseq [[workflow-id workflow] running]
+              (fsm-write-workflow! tx root workflow-id workflow
+                                   (-> workflow
+                                       (assoc :run-state :runnable :next-run-at nil)
+                                       (update :revision inc))))
+            (count running))))))
 
-  (release-owner [_ owner-id]
-    (ftr/run db
-      (fn [tx]
-        (let [sub     (fsub/get root-subspace (->tuple ["wf-owner" owner-id]))
-              entries (->> (fdb-core/get-range tx (fsub/range sub))
-                           (mapv (fn [[key _]] (nth key (dec (count key))))))]
-          (doseq [wid entries]
-            (let [schedule (read-schedule tx root-subspace wid)
-                  schedule' (cond-> schedule
-                              (= :running (:run-state schedule))
-                              (assoc :run-state :runnable :next-run-at nil))]
-              (clear-schedule-index! tx root-subspace owner-id wid schedule)
-              (fdb-core/set tx root-subspace (schedule-key wid) (->bytes schedule'))
-              (index-schedule! tx root-subspace "" wid schedule'))
-            (fdb-core/clear tx root-subspace (->tuple ["owner" wid]))
-            (fdb-core/clear tx root-subspace (owner-index-key owner-id wid))
-            (fdb-core/set tx root-subspace (owner-index-key "" wid)
-                          (->bytes {}))))))
-    nil)
+  p/IFsmStore
 
-  ;; --- Tier 2: independent child workflows ---
-  (link-child! [_ parent-id parent-seq child-id policy]
-    ;; The child's :workflow-started event (and thus its ownership-index entry)
-    ;; was already written; here we just record the parent->child relationship.
-    (ftr/run db
-      (fn [tx]
-        (when (workflow-exists? tx root-subspace child-id)
-          (fdb-core/set tx root-subspace (child-index-key parent-id child-id)
-                        (->bytes {:parent-seq parent-seq :policy (name policy)})))))
-    nil)
+  (create-workflow! [_ creation]
+    (let [root (fsm-root root-subspace)]
+      (ftr/run db
+        (fn [tx]
+          (let [status (fsm-create-workflow! tx root creation)]
+            {:create-status status
+             :state (fsm-workflow-state tx root (:workflow-id creation))})))))
 
-  (list-children [this parent-id]
-    (let [entries (ftr/run db
-                    (fn [tx]
-                      (let [sub (fsub/get root-subspace (->tuple ["wf-child" parent-id]))]
-                        (->> (fdb-core/get-range tx (fsub/range sub))
-                             (mapv (fn [[key value]]
-                                     [(nth key (dec (count key))) (<-bytes value)]))))))]
-      (mapv (fn [[child-id entry]]
-              {:child-id   child-id
-               :parent-seq (:parent-seq entry)
-               :policy     (keyword (:policy entry))
-               :status     (p/get-workflow-status this child-id)})
-            entries))))
+  (load-workflow-state [_ workflow-id]
+    (let [root (fsm-root root-subspace)]
+      (ftr/run db #(fsm-workflow-state % root workflow-id))))
+
+  (load-snapshot [_ workflow-id]
+    (let [root (fsm-root root-subspace)]
+      (ftr/run db #(fsm-workflow-state % root workflow-id true))))
+
+  (load-close-tree [_ workflow-id]
+    (let [root (fsm-root root-subspace)]
+      (ftr/run db #(fsm-close-tree % root workflow-id))))
+
+  (add-signal! [_ workflow-id signal-name signal]
+    (let [root (fsm-root root-subspace)
+          signal-id (or (:signal-id signal) (:id signal))
+          payload (if (contains? signal :payload) (:payload signal) signal)]
+      (ftr/run db
+        (fn [tx]
+          (if-let [workflow (fsm-read-workflow tx root workflow-id)]
+            (cond
+              (fsm-terminal? workflow) {:signal-status :terminal}
+              :else
+              (if-let [existing (<-bytes (fdb-core/get tx root
+                                                       (fsm-signal-id-key workflow-id signal-id)))]
+                (if (and (= signal-name (:signal-name existing))
+                         (= payload (:payload existing)))
+                  {:signal-status :duplicate :signal-id signal-id}
+                  {:signal-status :conflict :signal-id signal-id})
+                (let [queue-id (:next-signal-id workflow)
+                      envelope {:signal-id signal-id :payload payload :signal-name signal-name}
+                      workflow (-> workflow
+                                   (update :next-signal-id inc)
+                                   fsm-wake-workflow)]
+                  (fdb-core/set tx (fsm-signal-sub root workflow-id)
+                                (->tuple [signal-name queue-id]) (->bytes envelope))
+                  (fdb-core/set tx root (fsm-signal-id-key workflow-id signal-id)
+                                (->bytes envelope))
+                  (fsm-write-workflow! tx root workflow-id
+                                       (fsm-read-workflow tx root workflow-id) workflow)
+                  {:signal-status :accepted :signal-id signal-id
+                   :state (fsm-workflow-state tx root workflow-id)})))
+            {:signal-status :not-found})))))
+
+  (request-cancel! [_ workflow-id]
+    (let [root (fsm-root root-subspace)]
+      (ftr/run db
+        (fn [tx]
+          (if-let [workflow (fsm-read-workflow tx root workflow-id)]
+            (cond
+              (fsm-terminal? workflow) {:cancel-status :terminal}
+              (:cancel-requested? workflow) {:cancel-status :already-requested}
+              :else (let [updated (fsm-wake-workflow
+                                    (assoc workflow :cancel-requested? true))]
+                      (fsm-write-workflow! tx root workflow-id workflow updated)
+                      {:cancel-status :requested
+                       :state (fsm-workflow-state tx root workflow-id)}))
+            {:cancel-status :not-found})))))
+
+  (wake! [_ workflow-id]
+    (let [root (fsm-root root-subspace)]
+      (ftr/run db
+        (fn [tx]
+          (if-let [workflow (fsm-read-workflow tx root workflow-id)]
+            (if (fsm-terminal? workflow)
+              {:wake-status :terminal-or-not-found
+               :state (fsm-workflow-state tx root workflow-id)}
+              (let [updated (fsm-wake-workflow workflow)]
+                (fsm-write-workflow! tx root workflow-id workflow updated)
+                {:wake-status :woken
+                 :state (fsm-workflow-state tx root workflow-id)}))
+            {:wake-status :terminal-or-not-found})))))
+
+  (commit-transition! [_ {:keys [workflow-id events consume-signals create-workflows
+                                 next-run-at terminal-status parent-notification
+                                 close-actions expected-related-revisions] :as transition}]
+    (let [root (fsm-root root-subspace)]
+      (ftr/run db
+        (fn [tx]
+          (let [related-ids (into #{workflow-id}
+                                  (concat (keys expected-related-revisions)
+                                          (map :workflow-id create-workflows)
+                                          (when parent-notification [(:workflow-id parent-notification)])
+                                          (map :workflow-id close-actions)))
+                workflows (fsm-read-workflows tx root related-ids)
+                status (fsm-transition-status tx root transition workflows)]
+            (if (not= :committed status)
+              {:commit-status status
+               :state (fsm-workflow-state tx root workflow-id)}
+              (if (some (fn [creation]
+                          (when-let [workflow (get workflows (:workflow-id creation))]
+                            (not (fsm-matching-creation? tx root (:workflow-id creation)
+                                                        workflow creation))))
+                        create-workflows)
+                {:commit-status :conflict
+                 :state (fsm-workflow-state tx root workflow-id)}
+                (let [creation-statuses (mapv #(fsm-create-workflow! tx root %) create-workflows)]
+                  ;; An FDB retry restarts the transaction body, so an anomaly
+                  ;; here cannot leave a prefix of the creation set durable.
+                  (when (some #{:conflict} creation-statuses)
+                    (throw (ex-info "Concurrent workflow creation conflict"
+                                    {:workflow-id workflow-id})))
+                  (let [root-workflow (get workflows workflow-id)
+                        root-workflow (reduce
+                                        (fn [workflow {:keys [signal-name queue-id signal-id]}]
+                                          (fdb-core/clear tx (fsm-signal-sub root workflow-id)
+                                                          (->tuple [signal-name queue-id]))
+                                          (fdb-core/clear tx root
+                                                          (fsm-signal-id-key workflow-id signal-id))
+                                          workflow)
+                                        root-workflow consume-signals)
+                        root-workflow (fsm-append-events! tx root workflow-id root-workflow events)
+                        transition-kind (:kind transition)
+                        root-workflow (case transition-kind
+                                        :park (-> root-workflow
+                                                  (assoc :run-state :waiting :next-run-at next-run-at)
+                                                  (update :revision inc))
+                                        :terminal (-> root-workflow
+                                                      (assoc :status terminal-status
+                                                             :run-state :terminal
+                                                             :next-run-at nil)
+                                                      (update :revision inc))
+                                        root-workflow)]
+                    (fsm-write-workflow! tx root workflow-id (get workflows workflow-id)
+                                         root-workflow)
+                    (when-let [{parent-id :workflow-id parent-events :events} parent-notification]
+                      (when-let [parent (get workflows parent-id)]
+                        (when-not (fsm-terminal? parent)
+                          (let [parent (fsm-append-events! tx root parent-id parent parent-events)
+                                parent (fsm-wake-workflow parent)]
+                            (fsm-write-workflow! tx root parent-id
+                                                 (get workflows parent-id) parent)))))
+                    (doseq [{:keys [op workflow-id events terminal-status]} close-actions]
+                      (when-let [child (get workflows workflow-id)]
+                        (when-not (fsm-terminal? child)
+                          (case op
+                            :cancel (fsm-write-workflow! tx root workflow-id child
+                                                         (fsm-wake-workflow
+                                                           (assoc child :cancel-requested? true)))
+                            :terminate (fsm-terminalize tx root workflow-id child
+                                                        (or terminal-status :terminated) events)
+                            nil))))
+                    {:commit-status :committed
+                     :state (fsm-workflow-state tx root workflow-id)})))))))))
+
+  (release-owner! [_ owner-id]
+    (let [root (fsm-root root-subspace)]
+      (ftr/run db
+        (fn [tx]
+          (doseq [workflow-id (fsm-workflow-ids tx root)
+                  :let [workflow (fsm-read-workflow tx root workflow-id)]
+                  :when (and (= owner-id (:owner-id workflow))
+                             (not (fsm-terminal? workflow)))]
+            (fsm-write-workflow!
+              tx root workflow-id workflow
+              (cond-> (assoc workflow :owner-id nil)
+                (= :running (:run-state workflow))
+                (assoc :run-state :runnable :next-run-at nil)
+                true (update :revision inc))))
+          nil)))))
 
 (defn create-store
-  "Creates a new FoundationDB-backed IStore, optionally wrapped with
+  "Creates a new FoundationDB-backed workflow store, optionally wrapped with
   intemporal.spec assertions.
 
   Options:

@@ -251,21 +251,29 @@
 
 (def ^:private terminal? #{:completed :failed :cancelled})
 
-(defn- stop-engine! []
-  (when-let [engine (:engine @app-state)]
-    (intemporal/shutdown-engine engine))
-  (swap! app-state assoc :engine nil :store nil))
+(defn- stop-engine!
+  ([]
+   (when-let [engine (:engine @app-state)]
+     (stop-engine! engine)))
+  ([engine]
+   (intemporal/shutdown-engine engine)
+   (swap! app-state
+          #(if (identical? engine (:engine %))
+             (assoc % :engine nil :store nil)
+             %))))
 
-(defn- poll! [store root]
-  (render-tree-svg! store root)
-  (render-trees! store root)
-  (let [status (p/get-workflow-status store root)]
-    (set-results! (str "Status: " (name status)
-                       (when (= status :completed)
-                         (str "\n\n" (prn-str (intemporal/get-workflow-result store root))))))
-    (if (terminal? status)
-      (stop-engine!)
-      (js/setTimeout #(poll! store root) 200))))
+(defn- poll! [engine store root]
+  ;; Ignore a timer left behind by a superseded demo run.
+  (when (identical? engine (:engine @app-state))
+    (render-tree-svg! store root)
+    (render-trees! store root)
+    (let [status (p/get-workflow-status store root)]
+      (set-results! (str "Status: " (name status)
+                         (when (= status :completed)
+                           (str "\n\n" (prn-str (intemporal/get-workflow-result store root))))))
+      (if (terminal? status)
+        (stop-engine! engine)
+        (js/setTimeout #(poll! engine store root) 200)))))
 
 (defn run-demo! []
   (stop-engine!)
@@ -273,12 +281,13 @@
                          (str/split #"[,\s]+"))
                      (remove str/blank?)
                      (mapv keyword))
-        n-workers (inc (* 2 (max 1 (count regions))))
-        engine  (intemporal/make-workflow-engine
+        workflow-concurrency (inc (* 2 (max 1 (count regions))))
+        engine  (intemporal/start-engine
+                  :owner-id "doc-child-workflows"
                   :threads 4
                   :enable-logging true
                   :poll-ms 30
-                  :workflow-concurrency n-workers)
+                  :workflow-concurrency workflow-concurrency)
         store   (:store engine)]
     (reset! app-state {:engine engine
                        :store  store})
@@ -289,7 +298,7 @@
     ;; submission styles use this same engine-owned recovery loop.
     (intemporal/submit-workflow engine #'deploy-service ["billing-api" regions]
                                 :workflow-id wf-id)
-    (poll! store wf-id)))
+    (poll! engine store wf-id)))
 
 ;;;;
 ;; Cancelling — demonstrates :cascade-cancel: the parent's still-running children

@@ -17,8 +17,8 @@
     (let [inner  (store/create-store)
           raced? (atom false)
           store  (->ParkRacingStore inner raced? "go"
-                                    {:id "race" :payload {:payload :arrived}})
-          engine (intemporal/make-workflow-engine :store store :threads 2)
+                                    {:signal-id "race" :payload {:payload :arrived}})
+          engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store store :threads 2)
           wf-id  (str "wake-race-" (random-uuid))]
       (try
         (is (= {:status :completed
@@ -27,20 +27,19 @@
                (intemporal/start-workflow engine waiting-workflow [] :workflow-id wf-id)))
         (is @raced? "the signal was injected immediately before park")
         (is (= :completed (p/get-workflow-status inner wf-id)))
-        (is (empty? (get (p/get-pending-signals inner wf-id) "go")))
+        (is (empty? (get-in (p/load-workflow-state inner wf-id) [:signals "go"])))
         (finally
           (intemporal/shutdown-engine engine))))))
 
-(deftest signal-between-worker-drive-and-park-is-not-lost
-  (testing "a worker-owned RUNNING workflow continues under the same owner"
+(deftest signal-between-engine-drive-and-park-is-not-lost
+  (testing "an engine-owned RUNNING workflow continues under the same owner"
     (let [inner  (store/create-store)
           raced? (atom false)
           store  (->ParkRacingStore inner raced? "go"
-                                    {:id "worker-race"
+                                    {:signal-id "engine-race"
                                      :payload {:payload :arrived}})
-          engine (intemporal/make-workflow-engine
-                   :store store :threads 2
-                   :owner-id "wake-race-worker"
+          engine (intemporal/start-engine :store store :threads 2
+                   :owner-id "wake-race-engine"
                    :poll-ms 20
                    :workflow-concurrency 1)
           wf-id  (str "worker-wake-race-" (random-uuid))]
@@ -50,6 +49,6 @@
                 :result {:payload :arrived}
                 :workflow-id wf-id}
                (intemporal/await-workflow engine wf-id :timeout-ms 3000)))
-        (is @raced? "the signal was injected immediately before worker park")
+        (is @raced? "the signal was injected immediately before engine park")
         (finally
           (intemporal/shutdown-engine engine))))))

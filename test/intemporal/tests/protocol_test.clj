@@ -22,7 +22,7 @@
 
 (deftest test-stub-protocol-workflow
   (testing "Async workflow"
-    (intemporal/with-workflow-engine [engine {:threads 4 :enable-logging true}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 4 :enable-logging true}]
       ;; Activities are automatically registered via stub call
       (let [result (intemporal/start-workflow engine my-proto-flow [999]
                                               :protocols {MyActivities (->MyActivitiesImpl)})]

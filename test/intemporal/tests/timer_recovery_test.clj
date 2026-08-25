@@ -45,7 +45,7 @@
 (defn- check-determinism [store]
   (let [wid (str "det-" (random-uuid))]
     ;; Start with a long sleep so it suspends on the timer, then crash.
-    (let [e1 (intemporal/make-workflow-engine :store store :threads 2)
+    (let [e1 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store store :threads 2)
           f1 (future (intemporal/start-workflow e1 sleeper-wf [7 60000] :workflow-id wid))]
       (Thread/sleep 300)
       (future-cancel f1)
@@ -53,7 +53,7 @@
     (let [fire-at-1 (fire-at-for store wid)]
       (is (some? fire-at-1) "a :timer-scheduled fire-at was persisted")
       ;; Resume on a fresh engine; it re-suspends on the same timer.
-      (let [e2 (intemporal/make-workflow-engine :store store :threads 2)
+      (let [e2 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store store :threads 2)
             f2 (future (intemporal/resume-workflow e2 wid))]
         (Thread/sleep 300)
         (future-cancel f2)
@@ -85,7 +85,7 @@
 (defn- check-timer-recovery [store]
   (let [wid (str "trec-" (random-uuid))]
     ;; Short sleep (300ms) so the timer becomes due quickly after the crash.
-    (let [e1 (intemporal/make-workflow-engine :store store :threads 2)
+    (let [e1 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store store :threads 2)
           f1 (future (intemporal/start-workflow e1 sleeper-wf [8 300] :workflow-id wid))]
       (Thread/sleep 150)            ; suspend on the timer, before it fires
       (future-cancel f1)
@@ -93,7 +93,7 @@
     (is (= :running (p/get-workflow-status store wid))
         "workflow is durably suspended on the timer after the crash")
     ;; A worker on a fresh engine picks it up once the timer is due.
-    (let [e2 (intemporal/make-workflow-engine :store store :threads 2
+    (let [e2 (intemporal/start-engine :store store :threads 2
                                               :poll-ms 50 :owner-id "trec-w")]
       (try
         (is (= :completed (await-status store wid :completed 5000))
@@ -124,40 +124,52 @@
 (defn- check-next-run-at-filter [store]
   (let [wid (str "wake-" (random-uuid))]
     (try
-      (p/save-event store wid {:event-type :workflow-started :seq -1 :workflow-id wid :args []})
+      (p/create-workflow!
+        store
+        {:workflow-id wid
+         :owner-id "timer-owner"
+         :started-event {:event-type :workflow-started :seq -1 :workflow-id wid :args []
+                         :workflow-fn-name "timer-recovery"}})
       (let [{:keys [wake-version]}
             (some #(when (= wid (:workflow-id %)) %)
                   (p/claim-runnable! store "timer-owner" 10000
                                      (System/currentTimeMillis)))]
         ;; Persistent integration stores may contain unrelated runnable rows from
         ;; earlier test runs, so assertions below inspect only this workflow.
-        (p/park-workflow! store wid wake-version []
-                          (+ (System/currentTimeMillis) 3600000))
+        (p/commit-transition!
+          store {:workflow-id wid :owner-id "timer-owner" :kind :park
+                 :expected-wake-version wake-version :events []
+                 :next-run-at (+ (System/currentTimeMillis) 3600000)})
         (is (not-any? #(= wid (:workflow-id %))
                       (p/claim-runnable! store "timer-owner" 10000
                                          (System/currentTimeMillis)))
             "a workflow waiting on a future deadline is skipped")
         ;; Waking and parking with a past deadline makes it due.
-        (p/wake-workflow store wid)
+        (p/wake! store wid)
         (let [{version-2 :wake-version}
               (some #(when (= wid (:workflow-id %)) %)
                     (p/claim-runnable! store "timer-owner" 10000
                                        (System/currentTimeMillis)))]
-          (p/park-workflow! store wid version-2 []
-                            (- (System/currentTimeMillis) 1000)))
+          (p/commit-transition!
+            store {:workflow-id wid :owner-id "timer-owner" :kind :park
+                   :expected-wake-version version-2 :events []
+                   :next-run-at (- (System/currentTimeMillis) 1000)}))
         (let [claim (some #(when (= wid (:workflow-id %)) %)
                           (p/claim-runnable! store "timer-owner" 10000
                                              (System/currentTimeMillis)))]
           (is (some? claim)
               "a workflow whose deadline has passed is atomically claimed")
           ;; An indefinite WAITING workflow is not runnable until explicitly woken.
-          (p/park-workflow! store wid (:wake-version claim) [] nil)
+          (p/commit-transition!
+            store {:workflow-id wid :owner-id "timer-owner" :kind :park
+                   :expected-wake-version (:wake-version claim) :events []
+                   :next-run-at nil})
           (is (not-any? #(= wid (:workflow-id %))
                         (p/claim-runnable! store "timer-owner" 10000
                                            (System/currentTimeMillis)))
               "next-run-at nil means wait indefinitely, not poll continuously")))
       (finally
-        (p/release-owner store "timer-owner")))))
+        (p/release-owner! store "timer-owner")))))
 
 (deftest next-run-at-filter-in-memory
   (testing "InMemoryStore"

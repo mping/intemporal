@@ -40,7 +40,7 @@
 
 (deftest test-store-event-validation
   (testing "Validate store events for workflow with activity, async, timer, and signal"
-    (intemporal/with-workflow-engine [engine {:threads 4}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 4}]
       (let [wf-id "store-validation-test"
             initial-value 5
 
@@ -342,7 +342,7 @@
 
 (deftest test-store-replay-consistency
   (testing "Store events allow deterministic replay"
-    (intemporal/with-workflow-engine [engine {:threads 4}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 4}]
       (let [wf-id "replay-consistency-test"
             initial-value 7
 

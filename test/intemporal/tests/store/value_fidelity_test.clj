@@ -3,8 +3,7 @@
   FDB stores. cheshire's `(parse-string s true)` keywordizes map *keys* but
   not values: the canonical activity result `[:processed 5]` is read back as
   `[\"processed\" 5]`, and `{:status :active}` becomes `{:status \"active\"}`.
-  Signal payloads stored via `add-signal` and retrieved via `consume-signal`
-  suffer the same loss.
+  Signal payloads stored in FSM inbox envelopes suffer the same loss.
   A workflow branching on a keyword value (`=`, `case`, keyword lookup) behaves
   differently after resume on JDBC/FDB than on InMemory — a silent
   replay-determinism break whose store dependency is invisible to the caller.
@@ -12,7 +11,7 @@
   `:activity-completed` event and the `:workflow-completed` event in the
   persisted history must carry keyword values exactly as returned by the
   activity/workflow fn — on all three stores.  Signal payloads consumed via
-  `p/consume-signal` must likewise preserve keyword values."
+  The persisted signal envelope must likewise preserve keyword values."
   (:require
    [clojure.test :refer [deftest is testing]]
    [intemporal.core :as intemporal]
@@ -51,19 +50,22 @@
 
 (defn run-value-fidelity-test [store]
 
-  ;; 1. Signal payload round-trip at the store level.
-  ;; `send-signal` wraps the caller's payload in {:id <uuid> :payload <data>}
-  ;; before calling `p/add-signal`; mirror that wrapper here so the test
-  ;; exercises the same byte path.
+  ;; 1. Signal payload round-trip at the FSM store boundary. Signals are queued
+  ;; envelopes and are consumed only by a guarded commit-transition!.
   (testing "signal payload preserves keyword values through store round-trip"
     (let [wf-id   (str "vf-sig-" (random-uuid))
-          payload {:type :confirmed :status :ok}
-          wrapped {:id "test-signal-id" :payload payload}]
-      (p/add-signal store wf-id "approval" wrapped)
-      (let [consumed (p/consume-signal store wf-id "approval")]
-        (is (some? consumed)
-            "consume-signal returned a value")
-        (let [returned-payload (:payload consumed)]
+          payload {:type :confirmed :status :ok}]
+      (p/create-workflow!
+        store
+        {:workflow-id wf-id
+         :owner-id "value-fidelity-signal"
+         :started-event {:event-type :workflow-started :seq -1 :workflow-id wf-id :args []
+                         :workflow-fn-name "value-fidelity-signal"}})
+      (p/add-signal! store wf-id "approval"
+                     {:signal-id "test-signal-id" :payload payload})
+      (let [returned-payload (get-in (p/load-workflow-state store wf-id)
+                                     [:signals "approval" 0 :payload])]
+        (is (some? returned-payload) "signal envelope was persisted")
           (is (keyword? (:type returned-payload))
               (str ":type should be a keyword after store round-trip, got: "
                    (pr-str (:type returned-payload))))
@@ -73,12 +75,12 @@
               (str ":status should be a keyword after store round-trip, got: "
                    (pr-str (:status returned-payload))))
           (is (= :ok (:status returned-payload))
-              ":status value is :ok, not \"ok\"")))))
+              ":status value is :ok, not \"ok\""))))
 
   ;; 2. Activity result and workflow result round-trip through persisted history.
   (testing "activity and workflow results preserve keyword values in persisted history"
     (let [wf-id (str "vf-wf-" (random-uuid))]
-      (intemporal/with-workflow-engine [engine {:store store :threads 2}]
+      (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :store store :threads 2}]
         (let [result (intemporal/start-workflow engine kw-workflow [5]
                        :workflow-id wf-id)]
           (is (= :completed (:status result))
@@ -151,16 +153,16 @@
 
 (def ^:private db-spec
   (jdbc-store/resolve-jdbc-url
-    "jdbc:postgresql://localhost:5432/intemporal_test?user=root&password=root"))
+    "jdbc:postgresql://localhost:5432/intemporal_fsm_test?user=root&password=root"))
 
 (def ^:private admin-spec
   "jdbc:postgresql://localhost:5432/postgres?user=root&password=root")
 
 (defn- ensure-database! []
   (let [ds (jdbc/get-datasource admin-spec)]
-    (when-not (seq (jdbc/execute! ds ["SELECT 1 FROM pg_database WHERE datname = 'intemporal_test'"]))
+    (when-not (seq (jdbc/execute! ds ["SELECT 1 FROM pg_database WHERE datname = 'intemporal_fsm_test'"]))
       (with-open [conn (.getConnection ds)]
-        (.execute (.createStatement conn) "CREATE DATABASE intemporal_test")))))
+        (.execute (.createStatement conn) "CREATE DATABASE intemporal_fsm_test")))))
 
 (deftest ^:integration value-fidelity-jdbc
   (testing "JdbcStore: keyword values survive JSON serialization round-trip"
@@ -172,5 +174,5 @@
   (testing "FDBStore: keyword values survive JSON serialization round-trip"
     (let [db (cfdb/select-api-version 710)
           db (cfdb/open db "docker/fdb.cluster")]
-      (with-open [store (fdb-store/create-store db "intemporal-tests")]
+      (with-open [store (fdb-store/create-store db (str "value-fidelity-" (random-uuid)))]
         (run-value-fidelity-test store)))))

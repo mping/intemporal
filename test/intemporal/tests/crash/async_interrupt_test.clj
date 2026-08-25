@@ -60,7 +60,7 @@
       ;; ======================================================================
       ;; Phase 1: begin shutdown while the batch is in flight
       ;; ======================================================================
-      (let [engine-1 (intemporal/make-workflow-engine :store st)
+      (let [engine-1 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st)
             fut      (future
                        (try
                          (intemporal/start-workflow engine-1 async-batch-workflow [1]
@@ -94,7 +94,7 @@
       ;; Phase 2: a fresh engine observes the terminal history without replaying
       ;; either activity.
       ;; ======================================================================
-      (let [engine-2 (intemporal/make-workflow-engine :store st)
+      (let [engine-2 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st)
             fut      (future
                        (try
                          (intemporal/resume-workflow engine-2 workflow-id)

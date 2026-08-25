@@ -43,7 +43,8 @@
             <h3>Requirements</h3>
             <pre><code>
 (ns intemporal.provision-automata
-  (:require [clojure.string :as str]
+  (:require [cljs.reader :as reader]
+            [clojure.string :as str]
             [promesa.core :as p]
             [intemporal.core :as intemporal]
             [intemporal.store :as store]
@@ -51,7 +52,7 @@
             [hiccups.runtime :as hiccupsrt])
   (:require-macros [hiccups.core :as hiccups :refer [html]]
                    [intemporal.core :refer [defn-workflow]]
-                   [intemporal.internal.context :refer [blet bthen]]))
+                   [intemporal.internal.context :refer [bthen]]))
 </code></pre>
 
             <h3>State machine — VM provisioning lifecycle</h3>

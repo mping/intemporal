@@ -93,7 +93,7 @@
 (deftest test-happy-path-no-compensation
   (testing "When the workflow succeeds, no compensation runs"
     (reset! events [])
-    (let [engine (intemporal/make-workflow-engine :threads 2)]
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (with-result [result (intemporal/start-workflow engine happy-saga ["o1"])]
         (is (match? {:status :completed :result :booked} result))
         (is (= [[:book-hotel "o1"] [:book-flight "o1"] [:charge-card "o1"]]
@@ -102,7 +102,7 @@
 (deftest test-compensation-runs-lifo-on-failure
   (testing "On a later failure, compensations run in reverse order with the forward result"
     (reset! events [])
-    (let [engine (intemporal/make-workflow-engine :threads 2)]
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (with-result [result (intemporal/start-workflow engine failing-saga ["o2"])]
         (is (match? {:status :failed} result))
         (is (= [[:book-hotel "o2"]
@@ -115,7 +115,7 @@
 (deftest test-failed-step-registers-no-compensation
   (testing "A step whose own body fails registers no compensation; earlier steps still compensate"
     (reset! events [])
-    (let [engine (intemporal/make-workflow-engine :threads 2)]
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (with-result [result (intemporal/start-workflow engine fail-on-flight-saga ["o3"])]
         (is (match? {:status :failed} result))
         (is (= [[:book-hotel "o3"]

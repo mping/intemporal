@@ -30,7 +30,7 @@
 
 (deftest test-workflow-cancellation
   (testing "Workflow can be cancelled mid-execution"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (let [wf-id "cancel-test"
             result-future (future
                             (intemporal/start-workflow engine
@@ -49,7 +49,7 @@
 
 (deftest test-cancellation-with-timer
   (testing "Workflow cancelled while waiting on timer"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (let [wf-id "cancel-timer-test"
             result-future (future
                             (intemporal/start-workflow engine
@@ -65,25 +65,27 @@
                        :error (m/embeds {:message #"cancelled"})}
                       result)))))))
 
-(deftest test-cancel-before-start
-  (testing "Workflow cancelled before it starts"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+(deftest test-cancel-before-start-is-rejected
+  (testing "Cancelling an unknown workflow does not create a cancellation tombstone"
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (let [wf-id "cancel-before-start"]
-        ;; Cancel before starting
-        (intemporal/cancel-workflow (:store engine) wf-id)
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"workflow is not active"
+                              (intemporal/cancel-workflow (:store engine) wf-id)))
 
-        ;; Try to start cancelled workflow - should return failed status
+        ;; A later creation is a new workflow, not a replay of a cancellation
+        ;; request for a workflow that did not yet exist.
         (let [result (intemporal/start-workflow engine
                                                 cancellable-flow [1]
                                                 :workflow-id wf-id)]
-          (is (match? {:status :cancelled
+          (is (match? {:status :completed
                        :workflow-id wf-id
-                       :error (m/embeds {:message #"cancelled"})}
+                       :result {:done true}}
                       result)))))))
 
 (deftest test-workflow-status-after-cancel
   (testing "Workflow status is cancelled after cancellation"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (let [wf-id "cancel-status-test"
             result-future (future
                             (intemporal/start-workflow engine
@@ -101,7 +103,7 @@
 
 (deftest test-cancel-completed-workflow-is-noop
   (testing "cancel-workflow on an already-completed workflow is a no-op"
-    (intemporal/with-workflow-engine [engine {}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) }]
       (let [wf-id "cancel-completed-test"]
         (intemporal/start-workflow engine (fn [] :done) [] :workflow-id wf-id)
         (is (= :completed (p/get-workflow-status (:store engine) wf-id)))
@@ -110,7 +112,7 @@
 
 (deftest test-cancel-idempotent
   (testing "cancel-workflow called twice does not throw"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (let [wf-id "cancel-twice-test"
             result-future (future
                             (intemporal/start-workflow engine long-flow [1]

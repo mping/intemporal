@@ -1,10 +1,9 @@
 (ns intemporal.tests.child-workflow-util
-  "Shared harness for the worker-driven Tier 2 (independent child workflow) tests.
+  "Shared harness for independent-child workflow tests.
 
-   These tests drive everything through the recovery worker (the ownership scan):
-   the parent is submitted with `submit-workflow` (not started via start-workflow's
-   blocking loop, which would race the worker on the same workflow) and the worker
-   runs it plus every descendant child. Each `check-*` is store-agnostic and run
+   These tests drive everything through an engine ownership scan: the parent is
+   submitted with `submit-workflow` and the engine runs it plus every descendant
+   child. Each `check-*` is store-agnostic and run
    against InMemory (always) plus JDBC and FDB (^:integration)."
   (:require
    [intemporal.core :as intemporal]
@@ -27,12 +26,12 @@
           (> (System/currentTimeMillis) deadline) s
           :else (do (Thread/sleep 25) (recur)))))))
 
-(defn with-worker
-  "Run `body-fn` (1-arg: the engine) with a worker driving `store`; tear the worker
-   + engine down afterwards. Returns body-fn's value. The captured `store`
+(defn with-engine
+  "Run `body-fn` (1-arg: the engine) with an engine driving `store`; tear it
+   down afterwards. Returns body-fn's value. The captured `store`
    (= (:store engine)) is still used for point reads / signals in the body."
   [store body-fn]
-  (let [engine (intemporal/make-workflow-engine
+  (let [engine (intemporal/start-engine
                  :store store :threads 4 :poll-ms 25
                  :owner-id (str "w-" (random-uuid)))]
     (try (body-fn engine)

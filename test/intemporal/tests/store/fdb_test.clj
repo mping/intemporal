@@ -12,5 +12,8 @@
           db (cfdb/open db "docker/fdb.cluster")]
 
       ;; Run shared suite
-      (with-open [store (fdb-store/create-store db "intemporal-tests")]
+      ;; Keep this conformance run isolated.  The FSM store is deliberately
+      ;; non-destructive, so reusing one FDB subspace makes each run scan and
+      ;; contend with every workflow created by previous test runs.
+      (with-open [store (fdb-store/create-store db (str "intemporal-tests-" (random-uuid)))]
         (suite/run-store-tests store)))))

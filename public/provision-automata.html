@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en-us">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@latest/css/pico.min.css">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/default.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/languages/clojure.min.js"></script>
+    <script>hljs.highlightAll();</script>
+
+    <!-- Mermaid renders the live state-machine diagram (optional: the demo falls
+         back to a text diagram if mermaid is absent). -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+
+    <title>Intemporal — provision state machine</title>
+    <style>
+        table {font-size: small}
+        #results {white-space: pre-wrap}
+        #diagram {margin: 1rem 0}
+    </style>
+</head>
+<body>
+<main class="container">
+    <h1>Provision with a state machine</h1>
+    <p>
+        A workflow driven by an explicit finite state machine. The workflow suspends
+        waiting for the next event; click a transition button to emit it and advance
+        the machine. State is persisted, so the workflow replays from history — reload
+        the page and it resumes where you left off. Use <b>Clear</b> to reset.
+    </p>
+
+    <ul>
+        <li><a href="index.html">main</a></li>
+        <li><a href="provision-automata.html">provision with state machine</a></li>
+        <li><a href="provision-saga.html">provision saga</a></li>
+        <li><a href="child-workflows.html">child workflows</a></li>
+    </ul>
+
+    <div class="grid">
+        <div>
+            <h3>Requirements</h3>
+            <pre><code>
+(ns intemporal.provision-automata
+  (:require [clojure.string :as str]
+            [promesa.core :as p]
+            [intemporal.core :as intemporal]
+            [intemporal.store :as store]
+            [intemporal.fsm :as fsm]
+            [hiccups.runtime :as hiccupsrt])
+  (:require-macros [hiccups.core :as hiccups :refer [html]]
+                   [intemporal.core :refer [defn-workflow]]
+                   [intemporal.internal.context :refer [blet bthen bloop]]))
+</code></pre>
+
+            <h3>State machine — VM provisioning lifecycle</h3>
+            <p>
+                Two kinds of states: <b>user-driven</b> (the workflow waits for a
+                button click) and <b>I/O</b> (an activity runs I/O and emits the next
+                event). The rules are plain data.
+            </p>
+            <pre><code>
+(def provision-rules
+  {:state/init          [{::fsm/event :event/provision      ::fsm/to :state/provisioning}]
+   :state/provisioning  [{::fsm/event :event/provisioned    ::fsm/to :state/attaching}
+                         {::fsm/event :event/error          ::fsm/to :state/failed}]
+   :state/attaching     [{::fsm/event :event/attached       ::fsm/to :state/booting}
+                         {::fsm/event :event/error          ::fsm/to :state/deprovisioning}]
+   :state/booting       [{::fsm/event :event/booted         ::fsm/to :state/running}
+                         {::fsm/event :event/error          ::fsm/to :state/detaching}]
+   :state/running       [{::fsm/event :event/halt           ::fsm/to :state/halting}]
+   :state/halting       [{::fsm/event :event/halted         ::fsm/to :state/detaching}]
+   :state/detaching     [{::fsm/event :event/detached       ::fsm/to :state/deprovisioning}]
+   :state/deprovisioning [{::fsm/event :event/deprovisioned ::fsm/to :state/done}]
+   :state/done          []
+   :state/failed        []})
+</code></pre>
+
+            <h3>Activities</h3>
+            <p>
+                Each I/O activity handles its own errors and returns a map with
+                <code>:event</code> (the next FSM event) plus any data produced.
+            </p>
+            <pre><code>
+(defn provision-vm! []
+  (try (maybe-fail! :provision) {:event :event/provisioned :instance-id "i-demo"}
+       (catch js/Error _ {:event :event/error})))
+
+(defn attach-volume! [instance-id]
+  (try {:event :event/attached :volume-id "vol-demo"}
+       (catch js/Error _ {:event :event/error})))
+
+;; :state/init and :state/running pause for a user button click:
+(defn apply-transition [rules current-state]
+  (render-all!)
+  (js/Promise. (fn [resolve _] (reset! pending-resolve resolve))))
+</code></pre>
+
+            <h3>Workflow — a loop driven by the FSM</h3>
+            <p>
+                I/O stubs are called inside a <code>bloop</code>. Each returns
+                <code>{:event &lt;kw&gt; & data}</code>; the event drives
+                <code>fsm/transit</code> and data merges into ctx so downstream
+                activities receive ids from upstream ones.
+            </p>
+            <pre><code>
+(defn-workflow run-fsm-workflow [rules init-state]
+  (let [get-next-event (intemporal/stub #'apply-transition)
+        provision-vm   (intemporal/stub #'provision-vm!)
+        attach-vol     (intemporal/stub #'attach-volume!)]
+    (bloop [current init-state ctx {}]
+      (let [transitions (get rules current)]
+        (if (empty? transitions)
+          current                                       ; terminal state
+          (let [[evt ctx']
+                (case current
+                  :state/provisioning (let [r (provision-vm)]
+                                        [(:event r) (merge ctx (dissoc r :event))])
+                  :state/attaching    (let [r (attach-vol (:instance-id ctx))]
+                                        [(:event r) (merge ctx (dissoc r :event))])
+                  ;; ... other I/O states ...
+                  [(get-next-event rules current) ctx])] ; user-driven states
+            (p/recur (::fsm/state (fsm/transit {::fsm/rules rules ::fsm/state current} evt))
+                     ctx')))))))
+</code></pre>
+
+            <h3>Persistence &amp; replay</h3>
+            <p>
+                History is saved to <code>localStorage</code>, so reloading the page
+                rebuilds the engine from saved history and the workflow replays to its
+                current state — resuming where you left off. <b>Clear</b> resets it.
+            </p>
+        </div>
+    </div>
+
+    <div>
+        <button id="clear-btn" class="secondary">Clear saved state</button>
+    </div>
+
+    <h4>State machine</h4>
+    <div id="diagram"></div>
+
+    <h4>Emit an event</h4>
+    <div id="controls"></div>
+
+    <h4>Results</h4>
+    <pre id="results">;;Results go here</pre>
+
+    <h4>Events</h4>
+    <div id="events"></div>
+</main>
+<script src="js/shared.js"></script>
+<script src="js/provision-automata.js"></script>
+</body>
+</html>

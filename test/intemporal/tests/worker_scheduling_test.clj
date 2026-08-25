@@ -30,19 +30,18 @@
         :else false))))
 
 (deftest indefinite-waiters-do-not-crowd-out-runnable-work
-  (testing "more WAITING workflows than batch-size disappear from scans"
+  (testing "more WAITING workflows than batch-size disappear from engine scans"
     (let [store       (store/create-store)
-          engine      (intemporal/make-workflow-engine
-                        :store store :threads 4
-                        :owner-id "waiting-scan-worker"
+          engine      (intemporal/start-engine :store store :threads 4
+                        :owner-id "waiting-scan-engine"
                         :poll-ms 20
                         :batch-size 2
                         :workflow-concurrency 2)
           waiter-ids  (mapv #(str "waiter-" % "-" (random-uuid)) (range 6))
           loads       (atom {})
-          original-load p/load-history]
+          original-load p/load-snapshot]
       (try
-        (with-redefs [p/load-history (fn [s workflow-id]
+        (with-redefs [p/load-snapshot (fn [s workflow-id]
                                        (swap! loads update workflow-id (fnil inc 0))
                                        (original-load s workflow-id))]
           (doseq [workflow-id waiter-ids]
@@ -63,7 +62,7 @@
             (is (< (- (System/currentTimeMillis) started-at) 1000))
             (Thread/sleep 150)
             (is (= parked-loads (select-keys @loads waiter-ids))
-                "indefinite waiter histories stop loading after park")))
+                "indefinite waiter snapshots stop loading after park")))
         (finally
           (intemporal/shutdown-engine engine))))))
 
@@ -74,9 +73,8 @@
           _           (reset! activity-gate gate)
           _           (reset! activity-entered entered)
           store       (store/create-store)
-          engine      (intemporal/make-workflow-engine
-                        :store store :threads 2
-                        :owner-id "bounded-drive-worker"
+          engine      (intemporal/start-engine :store store :threads 2
+                        :owner-id "bounded-drive-engine"
                         :poll-ms 20
                         :batch-size 10
                         :workflow-concurrency 2)

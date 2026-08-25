@@ -1,5 +1,6 @@
 (ns intemporal.provision-automata
-  (:require [clojure.string :as str]
+  (:require [cljs.reader :as reader]
+            [clojure.string :as str]
             [promesa.core :as p]
             [intemporal.core :as intemporal]
             [intemporal.store :as store]
@@ -7,7 +8,7 @@
             [hiccups.runtime :as hiccupsrt])
   (:require-macros [hiccups.core :as hiccups :refer [html]]
                    [intemporal.core :refer [defn-workflow]]
-                   [intemporal.internal.context :refer [blet bthen]]))
+                   [intemporal.internal.context :refer [bthen]]))
 
 ;;;;
 ;; State machine — VM provisioning lifecycle
@@ -44,6 +45,7 @@
 
 (def init-state :state/init)
 (def wf-id "provision-automata-wflow")
+(def owner-id "doc-provision-automata")
 
 ;;;;
 ;; Failure injection
@@ -124,7 +126,7 @@
 (defn load-history []
   (try
     (when-let [s (.getItem js/localStorage storage-key)]
-      (cljs.reader/read-string s))
+      (reader/read-string s))
     (catch :default e
       (js/console.warn "Failed to parse saved history, clearing storage:" (.-message e))
       (.removeItem js/localStorage storage-key)
@@ -339,12 +341,13 @@
                          ;; Valid saved history: create store with it so the workflow can replay
                          (let [store (store/create-store
                                        :state (atom {:workflows {wf-id {:history saved-history}}}))]
-                           (intemporal/make-workflow-engine
-                             :store store :threads 4 :enable-logging true
+                           (intemporal/start-engine
+                             :owner-id owner-id :store store :threads 4 :enable-logging true
                              :default-timeout-ms nil))
                          ;; No (compatible) saved history: fresh engine
-                         (intemporal/make-workflow-engine :threads 4 :enable-logging true
-                                                          :default-timeout-ms nil))]
+                         (intemporal/start-engine :owner-id owner-id
+                                                  :threads 4 :enable-logging true
+                                                  :default-timeout-ms nil))]
 
     (reset! app-state {:engine engine :state current-state})
     (setup-controls-listener!)
@@ -361,7 +364,8 @@
                  (render-tables! engine)))
         (p/catch (fn [err]
                    (js/console.error "error" err)
-                   (set-results! (prn-str err)))))
+                   (set-results! (prn-str err))))
+        (p/finally #(intemporal/shutdown-engine engine)))
 
     (js/setTimeout #(render-tables! engine) 0)))
 

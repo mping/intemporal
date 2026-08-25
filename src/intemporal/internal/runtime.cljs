@@ -165,7 +165,7 @@
                              :or   {default-timeout-ms 30000}}]
   ;; Accept :threads too, mirroring the CLJ arity (the public :threads engine
   ;; option maps onto :max-concurrent). Debug, not warn: there is nothing the
-  ;; caller can do about it, and make-workflow-engine forwards the option
+  ;; caller can do about it, and start-engine forwards the option
   ;; unconditionally, so warning here fires on every engine construction.
   (when (or max-concurrent threads)
     (log/debug "max-concurrent is not supported in ClojureScript - all activities run concurrently via event loop"))

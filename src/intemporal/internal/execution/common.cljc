@@ -1,9 +1,7 @@
 (ns intemporal.internal.execution.common
   (:require
    [intemporal.internal.activity :as activity]
-   [intemporal.internal.context :as context]
-   [intemporal.protocol :as p]
-   [intemporal.internal.clock :as clock]))
+   [intemporal.internal.context :as context]))
 
 (defn continue-decision []
   {:op :continue})
@@ -31,45 +29,24 @@
     decision))
 
 (defn make-workflow-context
-  ([workflow-id history store registry observer]
-   (make-workflow-context workflow-id history store registry observer nil))
-  ([workflow-id history store registry observer extra]
+  ([workflow-id history registry observer]
+   (make-workflow-context workflow-id history registry observer nil))
+  ([workflow-id history registry observer extra]
    (merge
      {:history (atom history)
       :history-index (context/index-history history)
       :workflow-id workflow-id
       :seq-counter (atom 0)
       :pending-events (atom [])
+      ;; Child creation is declarative replay output. The engine combines it
+      ;; with the parent's scheduled marker in one store transition.
+      :pending-creations (atom [])
       :pending-asyncs (atom [])
       :compensating? (atom false)
-      :store store
+      ;; A pass normally supplies this through `extra`; retain nil for direct
+      ;; low-level callers while those are removed.
+      :now-ms nil
+      :cancel-requested? false
       :registry registry
       :observer observer}
      extra)))
-
-(defn next-terminal-seq [store workflow-id]
-  (inc (or (p/max-seq store workflow-id) -1)))
-
-(defn parent-link [store workflow-id]
-  (let [started (some #(when (= :workflow-started (:event-type %)) %)
-                      (p/load-history store workflow-id))]
-    (when (:parent-id started)
-      {:parent-id (:parent-id started)
-       :parent-seq (:parent-seq started)})))
-
-(defn has-children? [store workflow-id]
-  (boolean (some #(= :child-workflow-scheduled (:event-type %))
-                 (p/load-history store workflow-id))))
-
-(defn run-once [thunk]
-  (context/check-cancelled!)
-  (let [seq-num (context/next-seq!)
-        existing (context/history-event :run-once-completed seq-num)]
-    (if existing
-      (:result existing)
-      (let [result (thunk)]
-        (context/add-pending-event! {:event-type :run-once-completed
-                                     :seq seq-num
-                                     :result result
-                                     :timestamp (clock/now-ms)})
-        result))))

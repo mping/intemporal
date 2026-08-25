@@ -73,7 +73,7 @@
           st          (store/create-store)]
 
       ;; Phase 1: run one attempt, then crash while the handle backs off.
-      (let [engine-1 (intemporal/make-workflow-engine :store st :threads 2)
+      (let [engine-1 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st :threads 2)
             fut      (future
                        (try
                          (intemporal/start-workflow engine-1 async-retry-workflow [1]
@@ -97,7 +97,7 @@
             "sanity check: the crash did not durably finalize the workflow"))
 
       ;; Phase 2: resume elsewhere — the sequence continues rather than restarting.
-      (let [engine-2 (intemporal/make-workflow-engine :store st :threads 2)
+      (let [engine-2 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st :threads 2)
             result   (drive-to-terminal engine-2 workflow-id)]
         (intemporal/shutdown-engine engine-2)
 
@@ -119,8 +119,7 @@
 
     (let [workflow-id "async-retry-durability-2"
           st          (store/create-store)
-          engine      (intemporal/make-workflow-engine
-                        :store st :threads 2
+          engine      (intemporal/start-engine :store st :threads 2
                         :owner-id "async-retry-parking-worker"
                         :poll-ms 5 :workflow-concurrency 1)
           start       (System/currentTimeMillis)]
@@ -177,7 +176,7 @@
     (reset! slow-attempt-log [])
 
     (let [st     (store/create-store)
-          engine (intemporal/make-workflow-engine :store st :threads 2)
+          engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st :threads 2)
           result (intemporal/start-workflow engine slow-async-workflow [7]
                                             :workflow-id "async-retry-durability-3")]
       (intemporal/shutdown-engine engine)

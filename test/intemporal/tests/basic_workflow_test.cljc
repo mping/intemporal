@@ -23,7 +23,7 @@
     ;; finally) must be its bound value. Nested the other way around, the async
     ;; marker gets wrapped in a promise, so cljs.test never waits for the
     ;; assertions ("Test ran without assertions").
-    (with-result [result (intemporal/with-workflow-engine [engine {:threads 4}]
+    (with-result [result (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 4}]
                            (intemporal/start-workflow engine
                                                       basic-workflow ["arg"]
                                                       :workflow-id "basic"))]

@@ -94,11 +94,13 @@
             <pre><code>
 (defn run-demo! []
   (reset! fail-at (scenario-from-select))          ; which step to fail
-  (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)]
+  (let [engine (intemporal/start-engine :owner-id "doc-provision-saga"
+                                        :threads 4 :enable-logging true)]
     (-> (intemporal/start-workflow engine run-provision-saga [] :workflow-id wf-id)
         (bthen  (fn [res] (set-results! (prn-str res)) (render-tables! engine)))
         (p/catch (fn [err] (set-results! (str "Error: " (ex-message err)))
-                           (render-tables! engine))))))
+                           (render-tables! engine))))
+        (p/finally #(intemporal/shutdown-engine engine)))))
 </code></pre>
         </div>
     </div>

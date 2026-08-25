@@ -48,7 +48,7 @@
 ;; ── check ───────────────────────────────────────────────────────────────────────
 
 (defn- check [store]
-  (u/with-worker store
+  (u/with-engine store
     (fn [engine]
       (let [pid (str "order-" (random-uuid))
             cid (str pid "/fulfill")]
@@ -79,7 +79,7 @@
 (deftest synchronous-child-forwards-close-policy
   (testing "run-child-workflow preserves a non-default parent close policy"
     (let [store (u/in-memory)]
-      (u/with-worker store
+      (u/with-engine store
         (fn [engine]
           (let [pid (str "sync-parent-" (random-uuid))
                 cid (str pid "/child")]

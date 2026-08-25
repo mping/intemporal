@@ -56,8 +56,8 @@
     (is (identical? (first @left) (first @right)))))
 
 (deftest logging-is-explicit
-  (let [quiet (intemporal/make-workflow-engine)
-        noisy (intemporal/make-workflow-engine :enable-logging true)]
+  (let [quiet (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)))
+        noisy (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :enable-logging true)]
     (try
       (is (nil? (:log quiet)))
       (is (some? (:log noisy)))

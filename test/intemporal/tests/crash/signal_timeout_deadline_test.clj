@@ -43,7 +43,7 @@
           ;; Phase 1: drive the workflow to the signal-timeout suspension point,
           ;; then simulate a crash before the timeout can fire on its own.
           ;; ==================================================================
-          engine-1         (intemporal/make-workflow-engine
+          engine-1         (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid))
                              :store persistent-store
                              :threads 2)
           result-future-1  (future
@@ -78,7 +78,7 @@
           (is (>= (System/currentTimeMillis) deadline-before)
               "test setup: real time has already passed the original deadline")
 
-          (let [engine-2 (intemporal/make-workflow-engine
+          (let [engine-2 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid))
                            :store persistent-store
                            :threads 2)
                 start    (System/currentTimeMillis)

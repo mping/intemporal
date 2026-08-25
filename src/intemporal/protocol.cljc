@@ -4,71 +4,55 @@
 ;; Protocols
 ;; ============================================================================
 
-(defprotocol IStore
-  "Protocol for workflow persistence"
-  (load-history [store workflow-id] "Load history for a workflow")
-  (save-events [store workflow-id events] "Append multiple events atomically")
-  (save-events-and-wake! [store workflow-id events]
-    "Atomically append events and durably wake a non-terminal workflow. Used
-     when another workflow completes work that makes this workflow runnable.")
-  (find-event [store workflow-id event-type seq-num] "Finds the given event type by its sequence number")
-  (max-seq [store workflow-id]
-    "Return the highest :seq recorded in this workflow's history, or nil if it
-     has no history yet. Used to derive a deterministic seq for terminal control
-     events (:workflow-completed/-failed/-cancelled/-terminated) without paying
-     for a full history load. Implementations should serve this from an index
-     rather than scanning/deserializing the whole history.")
-  (get-pending-signals [store workflow-id] "Get pending signals for workflow")
-  (add-signal [store workflow-id signal-name signal-data] "Add a signal to workflow")
-  (consume-signal [store workflow-id signal-name] "Consume and remove a signal")
-  (wake-workflow [store workflow-id]
-    "Durably wake a non-terminal workflow. WAITING becomes RUNNABLE; RUNNING
-     stays RUNNING but advances wake-version so
-     a concurrent park cannot lose the wake. Returns true when the workflow exists
-     and is non-terminal, false otherwise.")
-  (is-cancelled? [store workflow-id] "Check if workflow is cancelled")
-  (mark-cancelled [store workflow-id] "Mark workflow as cancelled")
-  (get-workflow-status [store workflow-id] "Get current workflow status")
+(defprotocol IEngineStore
+  "Private scheduling and inspection surface.
 
-  ;; --- Durable scheduling + ownership-based recovery ---
+  The engine's durable decisions use IFsmStore below. No public workflow code
+  receives either storage capability."
+  (load-history [store workflow-id] "Load history for a workflow")
+  (get-workflow-status [store workflow-id] "Get current workflow status")
   (claim-runnable! [store owner-id limit now-ms]
     "Atomically claim up to `limit` eligible workflows owned by owner-id or
-     unowned. RUNNABLE and due WAITING workflows become RUNNING. Returns maps
-     containing :workflow-id and the :wake-version captured by the drive.")
-  (park-workflow! [store workflow-id expected-wake-version events next-run-at-ms]
-    "Atomically append `events` and park RUNNING as WAITING. Returns a map with
-     :park-status. A stale version returns
-     {:park-status :wake-raced :wake-version current}; the workflow stays
-     RUNNING and the same claimed drive continues.")
-  (requeue-running! [store workflow-id]
+     unowned. Work already assigned to owner-id is selected before unowned
+     takeover work, so recovery backlog cannot starve an engine's own newly
+     submitted workflows. RUNNABLE and due WAITING workflows become RUNNING.
+     Returns maps containing :workflow-id and the :wake-version captured by the
+     drive.")
+  (requeue-running! [store workflow-id owner-id]
     "Move a non-terminal RUNNING workflow back to RUNNABLE after an interrupted
-     or failed drive. Returns true when a row changed.")
+     or failed drive. The owner-checked three-argument form is used by engine
+     drives.")
   (recover-running! [store owner-id]
-    "At worker startup, requeue RUNNING workflows owned by owner-id.
+    "At engine startup, requeue RUNNING workflows owned by owner-id.
      Returns the number of workflows recovered. Requires the existing invariant
-     that a stable owner-id identifies only one live worker process.")
-  (release-owner [store owner-id]
-    "Clear ownership (owner=NULL) for this owner's non-terminal workflows, so
-     other pods may pick them up. Any RUNNING rows are requeued first. Called on
-     clean shutdown.")
+     that a stable owner-id identifies only one live engine process."))
 
-  ;; --- Tier 2: independent child workflows ---
-  (link-child! [store parent-id parent-seq child-id policy]
-    "Record a parent->child relationship for a child whose :workflow-started
-     event is already durable. `parent-seq` is the parent's sequence number for
-     the :child-workflow-scheduled marker (used to write the parent's completion
-     event back). `policy` is the parent-close-policy keyword (:cascade-cancel,
-     :abandon, :terminate). Idempotent: re-linking an existing child is a no-op.
-     This operation never manufactures an empty, claimable workflow.")
-  (list-children [store parent-id]
-    "Return a seq of {:child-id .. :parent-seq .. :policy .. :status ..} maps for
-     every child linked to `parent-id`. Empty if the workflow has no children."))
+(defprotocol IFsmStore
+  "The atomic persistence boundary used by the pure workflow FSM.
 
-(defn save-event
-  "Append one event through the store's canonical batch operation."
-  [store workflow-id event]
-  (save-events store workflow-id [event])
-  event)
+  This is the transaction boundary used by the engine. Backends and decorators
+  implement it directly; no public caller should depend on storage internals."
+  (create-workflow! [store creation]
+    "Atomically create one workflow and its :workflow-started event.  Returns
+     {:create-status :created|:exists|:conflict ...}.")
+  (load-workflow-state [store workflow-id]
+    "Load live workflow metadata and signal envelopes, but not history.")
+  (load-snapshot [store workflow-id]
+    "Load one consistent workflow state/history/signal snapshot, or nil.")
+  (load-close-tree [store workflow-id]
+    "Load the workflow's descendant relationship tree for a terminal close
+     transition.  Each node includes its revision and next terminal seq.")
+  (add-signal! [store workflow-id signal-name signal]
+    "Idempotently enqueue a signal envelope and wake a non-terminal workflow.")
+  (request-cancel! [store workflow-id]
+    "Request cancellation and wake a non-terminal workflow atomically.")
+  (wake! [store workflow-id]
+    "Wake a non-terminal workflow atomically.")
+  (commit-transition! [store transition]
+    "Commit one declarative FSM transition atomically.  See
+     intemporal.internal.fsm for transition data shapes.")
+  (release-owner! [store owner-id]
+    "FSM spelling of release-owner; clears/requeues this owner's active work."))
 
 (defprotocol IActivityExecutor
   "Protocol for executing activities.

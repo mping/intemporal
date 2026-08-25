@@ -64,7 +64,7 @@
       ;; Phase 1: Execute workflow until suspension point ("crash")
       ;; ======================================================================
       (testing "Phase 1: Execute until crash point (signal wait)"
-        (let [engine-1 (intemporal/make-workflow-engine
+        (let [engine-1 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid))
                          :store persistent-store
                          :threads 2)
               result-future-1 (future
@@ -96,7 +96,7 @@
         (let [pre-resume-count    @execution-counter
               history-before-resume (p/load-history persistent-store workflow-id)
               ;; Create NEW engine with SAME store (simulates process restart)
-              engine-2 (intemporal/make-workflow-engine
+              engine-2 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid))
                          :store persistent-store
                          :threads 2)]
 

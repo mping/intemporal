@@ -28,7 +28,7 @@
 
 (deftest test-simple-timer
   (testing "Workflow with timer completes after sleep"
-    (let [engine (intemporal/make-workflow-engine :threads 2)]
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (with-result [result (intemporal/start-workflow engine timed-flow [456])]
         (is (match? {:status :completed
                      :workflow-id string?
@@ -37,7 +37,7 @@
 
 (deftest test-multiple-timers
   (testing "Workflow with multiple sleep calls"
-    (let [engine (intemporal/make-workflow-engine :threads 2)]
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (with-result [result (intemporal/start-workflow engine multi-sleep-flow [789])]
         (is (match? {:status :completed
                      :workflow-id string?
@@ -47,7 +47,7 @@
 
 (deftest test-timer-replay
   (testing "Timer workflow is deterministic on replay"
-    (let [engine (intemporal/make-workflow-engine :threads 2)]
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
       (with-result [[result1 result2]
                     (blet [r1 (intemporal/start-workflow engine
                                 timed-flow [100]

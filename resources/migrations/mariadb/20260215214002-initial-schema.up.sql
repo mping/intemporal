@@ -1,67 +1,54 @@
+-- Clean FSM storage baseline. Existing pre-FSM schemas are intentionally not
+-- migrated; initialize an empty database instead.
 CREATE TABLE IF NOT EXISTS intemporal_workflows (
     id VARCHAR(512) PRIMARY KEY,
-    cancelled BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    -- O(1) workflow status, instead of scanning intemporal_history to derive it.
     status VARCHAR(64) NOT NULL DEFAULT 'running',
-    -- Ownership-based recovery. A workflow is owned by at most one process
-    -- (a stable owner-id). A worker resumes the non-terminal workflows it
-    -- owns-or-null; a crashed pod's work is reclaimed when it restarts with the
-    -- same owner-id. No time-based leases.
-    owner VARCHAR(255),
-    -- Durable scheduling is independent of the public workflow status.
     run_state VARCHAR(32) NOT NULL DEFAULT 'RUNNABLE',
-    next_run_at TIMESTAMP(3) NULL,
+    owner VARCHAR(255) NULL,
+    next_run_at BIGINT NULL,
     wake_version BIGINT NOT NULL DEFAULT 0,
-    -- Tier 2: independent child workflows. A child is a first-class workflow
-    -- row that also records its parent linkage.
-    parent_workflow_id   VARCHAR(512),
-    parent_seq           INTEGER,
-    parent_close_policy  TEXT
+    revision BIGINT NOT NULL DEFAULT 0,
+    history_revision BIGINT NOT NULL DEFAULT 0,
+    next_signal_id BIGINT NOT NULL DEFAULT 0,
+    cancelled BOOLEAN NOT NULL DEFAULT FALSE,
+    parent_workflow_id VARCHAR(512) NULL,
+    parent_seq INTEGER NULL,
+    parent_close_policy VARCHAR(32) NULL,
+    created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    CHECK ((parent_workflow_id IS NULL AND parent_seq IS NULL AND parent_close_policy IS NULL)
+           OR (parent_workflow_id IS NOT NULL AND parent_seq IS NOT NULL
+               AND parent_close_policy IN ('cascade-cancel', 'abandon', 'terminate')))
 );
 --;;
-CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_status
-    ON intemporal_workflows (status);
---;;
-CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_schedule
+CREATE INDEX idx_intemporal_workflows_schedule
     ON intemporal_workflows (owner, run_state, next_run_at, created_at);
 --;;
--- MariaDB does not support partial indexes. The application filters NULL
--- parent_workflow_id values in list-children via SQL WHERE clause.
-CREATE INDEX IF NOT EXISTS idx_intemporal_workflows_parent
+CREATE INDEX idx_intemporal_workflows_parent
     ON intemporal_workflows (parent_workflow_id);
 --;;
--- The engine records multiple event types at the same seq, so history is
--- keyed per event type rather than per seq alone (see the postgres migration
--- of the same era for the full rationale). event_type is VARCHAR, not TEXT, so
--- it can participate in the unique key below.
---
--- seq is NOT NULL — the engine assigns every event a deterministic seq
--- (:workflow-started = -1, terminal events = one past the last real op seq).
---
--- Bug #22: data is LONGTEXT, not JSON — the stores serialize payloads with EDN
--- (intemporal.internal.codec) instead of cheshire, so keyword VALUES survive
--- the round-trip. EDN is not valid JSON, and MariaDB's JSON type carries an
--- implicit CHECK (json_valid(col)), so this column must be plain text.
--- LONGTEXT, not TEXT: MariaDB implements JSON as LONGTEXT (4 GiB); TEXT would
--- cap payloads at 64 KiB and silently truncate large events.
 CREATE TABLE IF NOT EXISTS intemporal_history (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    workflow_id VARCHAR(512),
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    workflow_id VARCHAR(512) NOT NULL,
+    event_key CHAR(64) NOT NULL,
     seq INTEGER NOT NULL,
-    event_type VARCHAR(128),
-    data LONGTEXT,
-    UNIQUE (workflow_id, seq, event_type),
-    FOREIGN KEY (workflow_id) REFERENCES intemporal_workflows(id) ON DELETE CASCADE
+    event_type VARCHAR(128) NOT NULL,
+    data LONGTEXT NOT NULL,
+    CONSTRAINT uq_intemporal_history_workflow_event UNIQUE (workflow_id, event_key)
 );
 --;;
--- Bug #22: payload is LONGTEXT (EDN), not JSON — see intemporal_history.data
--- above.
+CREATE INDEX idx_intemporal_history_lookup
+    ON intemporal_history (workflow_id, event_type, seq);
+--;;
 CREATE TABLE IF NOT EXISTS intemporal_signals (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    workflow_id VARCHAR(512),
-    signal_name TEXT,
-    payload LONGTEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (workflow_id) REFERENCES intemporal_workflows(id) ON DELETE CASCADE
+    workflow_id VARCHAR(512) NOT NULL,
+    queue_id BIGINT NOT NULL,
+    signal_key CHAR(64) NOT NULL,
+    signal_id TEXT NOT NULL,
+    signal_name VARCHAR(255) NOT NULL,
+    payload LONGTEXT NOT NULL,
+    PRIMARY KEY (workflow_id, signal_key),
+    CONSTRAINT uq_intemporal_signals_queue UNIQUE (workflow_id, queue_id)
 );
+--;;
+CREATE INDEX idx_intemporal_signals_fifo
+    ON intemporal_signals (workflow_id, signal_name(128), queue_id);

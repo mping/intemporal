@@ -1,6 +1,6 @@
 (ns intemporal.spec
-  "clojure.spec definitions for every data shape that crosses the `IStore`
-   boundary (see `intemporal.protocol/IStore`), plus `check!` — an opt-in,
+  "clojure.spec definitions for every data shape that crosses the IFsmStore
+   boundary (see `intemporal.protocol/IFsmStore`), plus `check!` — an opt-in,
    dev/test-only assertion helper used inline by each store implementation.
 
    Enforcement is OFF by default. Enable it with `(s/check-asserts true)` or
@@ -53,7 +53,13 @@
 ;; ============================================================================
 
 (s/def ::workflow-id       string?)
+(s/def ::owner-id          (s/nilable (s/and string? seq)))
 (s/def ::wake-version      nat-int?)
+(s/def ::expected-wake-version (s/nilable nat-int?))
+(s/def ::revision          nat-int?)
+(s/def ::history-revision  nat-int?)
+(s/def ::queue-id          nat-int?)
+(s/def ::next-terminal-seq nat-int?)
 
 ;; int?, NOT nat-int? — :workflow-started uses the -1 sentinel.
 (s/def ::seq               int?)
@@ -70,6 +76,7 @@
 (s/def ::fire-at           number?)
 (s/def ::deadline          number?)
 (s/def ::next-run-at-ms    (s/nilable number?))
+(s/def ::next-run-at       (s/nilable number?))
 (s/def ::attempts          (s/nilable pos-int?))
 (s/def ::will-retry        boolean?)
 ;; number?, not int?, for the same reason as ::fire-at: CLJS clocks are doubles.
@@ -97,6 +104,8 @@
 (s/def ::policy            parent-close-policies)
 (s/def ::status            workflow-statuses)
 (s/def ::workflow-status   workflow-statuses)
+(s/def ::run-state         domain/workflow-run-states)
+(s/def ::cancel-requested? boolean?)
 
 ;; ============================================================================
 ;; Retry policy
@@ -280,10 +289,6 @@
   (s/keys :req-un [::event-type ::seq]
           :opt-un [::workflow-id ::timestamp]))
 
-(defmethod event-spec :run-once-completed [_]
-  (s/keys :req-un [::event-type ::seq]
-          :opt-un [::result ::timestamp]))
-
 (s/def ::event (s/multi-spec event-spec :event-type))
 (s/def ::maybe-event (s/nilable ::event))
 
@@ -292,14 +297,14 @@
 ;; realizes a lazy seq, but every save-events implementation consumes it
 ;; eagerly anyway, so that is a no-op in practice.)
 (s/def ::events (s/nilable (s/coll-of ::event :kind sequential?)))
+(s/def ::history (s/coll-of ::event :kind sequential?))
 
 ;; ============================================================================
 ;; Other store return shapes
 ;; ============================================================================
 
-;; `add-signal` accepts an arbitrary payload at the store boundary: only
-;; core/send-signal applies the {:id :payload} envelope, and tests call
-;; p/add-signal directly with bare maps.
+;; Signals carry arbitrary payloads inside the durable signal envelope created
+;; by core/send-signal.
 (s/def ::signal-data any?)
 
 ;; Keys are signal names, normalized to strings at the API boundary (see
@@ -308,7 +313,14 @@
   (s/map-of string? (s/coll-of ::signal-data :kind sequential?)))
 
 (s/def ::child-entry (s/keys :req-un [::child-id ::parent-seq ::policy ::status]))
-(s/def ::children    (s/coll-of ::child-entry :kind sequential?))
+;; `:children` accepts both the internal scheduling listing and the FSM close
+;; tree shape while the replay adapter still contains interruption helpers.
+(s/def ::close-tree-child
+  (s/keys :req-un [::workflow-id ::revision ::status ::next-terminal-seq]
+          :opt-un [::policy ::parent-seq ::children]))
+(s/def ::children
+  (s/coll-of (s/or :listing ::child-entry :close-tree ::close-tree-child)
+             :kind sequential?))
 
 (s/def ::drive-claim (s/keys :req-un [::workflow-id ::wake-version]))
 (s/def ::drive-claims (s/coll-of ::drive-claim :kind sequential?))
@@ -326,6 +338,111 @@
 (s/def ::max-seq-result (s/nilable number?))
 
 (s/def ::boolean-result boolean?)
+
+;; ============================================================================
+;; FSM store boundary
+;; ============================================================================
+
+(s/def ::signals
+  (s/map-of string?
+            (s/coll-of (s/keys :req-un [::queue-id ::signal-id ::payload])
+                       :kind sequential?)))
+
+(s/def ::parent
+  (s/nilable (s/keys :req-un [::workflow-id ::seq ::policy])))
+
+(s/def ::workflow-state
+  (s/keys :req-un [::workflow-id ::status ::run-state ::revision
+                   ::history-revision ::wake-version ::cancel-requested?
+                   ::signals]
+          :opt-un [::owner-id ::next-run-at ::parent]))
+(s/def ::maybe-workflow-state (s/nilable ::workflow-state))
+
+(s/def ::snapshot
+  (s/and (s/keys :req-un [::workflow-id ::status ::run-state ::revision
+                           ::history-revision ::wake-version ::cancel-requested?
+                           ::signals ::history]
+                  :opt-un [::owner-id ::next-run-at ::parent])
+         ;; A snapshot must represent an actual workflow, never the public
+         ;; status sentinel used by get-workflow-status.
+         #(not= :not-found (:status %))))
+(s/def ::maybe-snapshot (s/nilable ::snapshot))
+
+(s/def ::started-event
+  (s/and ::event #(= :workflow-started (:event-type %))))
+
+(s/def ::workflow-creation
+  (s/and (s/keys :req-un [::workflow-id ::owner-id ::started-event]
+                 :opt-un [::parent])
+         #(some? (:owner-id %))))
+
+(s/def ::create-status #{:created :exists :conflict})
+(s/def ::create-result
+  (s/keys :req-un [::create-status]
+          :opt-un [::workflow-state]))
+
+(s/def ::signal-consumption
+  (s/keys :req-un [::signal-name ::queue-id ::signal-id]))
+(s/def ::consume-signals
+  (s/coll-of ::signal-consumption :kind sequential?))
+
+(s/def ::create-workflows
+  (s/coll-of ::workflow-creation :kind sequential?))
+
+(s/def ::terminal-status domain/terminal-statuses)
+
+(s/def ::parent-notification
+  (s/keys :req-un [::workflow-id ::events]))
+
+(s/def ::op #{:cancel :terminate})
+(s/def ::close-action
+  (s/keys :req-un [::op ::workflow-id]
+          :opt-un [::events ::terminal-status]))
+
+(s/def ::close-actions (s/coll-of ::close-action :kind sequential?))
+(s/def ::expected-related-revisions (s/map-of string? nat-int?))
+(s/def ::kind #{:continue :park :terminal})
+
+(s/def ::transition
+  (s/and
+    (s/keys :req-un [::workflow-id ::owner-id ::kind ::events]
+            :opt-un [::expected-wake-version ::consume-signals ::create-workflows
+                     ::next-run-at ::terminal-status ::parent-notification
+                     ::close-actions ::expected-related-revisions])
+    (fn [{:keys [kind expected-wake-version next-run-at terminal-status
+                 expected-related-revisions close-actions]}]
+      (case kind
+        :continue (and (nil? next-run-at) (nil? terminal-status)
+                       (empty? close-actions))
+        :park     (some? expected-wake-version)
+        :terminal (and terminal-status (map? expected-related-revisions))
+        false))))
+
+(s/def ::commit-status #{:committed :wake-raced :conflict :not-owner
+                         :not-running :terminal})
+(s/def ::commit-result
+  (s/keys :req-un [::commit-status]
+          :opt-un [::workflow-state]))
+
+(s/def ::signal-status #{:accepted :duplicate :conflict :terminal :not-found})
+(s/def ::signal-result
+  (s/keys :req-un [::signal-status]
+          :opt-un [::signal-id ::workflow-state]))
+
+(s/def ::cancel-status #{:requested :already-requested :terminal :not-found})
+(s/def ::cancel-result
+  (s/keys :req-un [::cancel-status]
+          :opt-un [::workflow-state]))
+
+(s/def ::wake-status #{:woken :terminal-or-not-found})
+(s/def ::wake-result
+  (s/keys :req-un [::wake-status]
+          :opt-un [::workflow-state]))
+
+(s/def ::close-tree-node
+  (s/keys :req-un [::workflow-id ::revision ::status ::next-terminal-seq]
+          :opt-un [::policy ::parent-seq ::children]))
+(s/def ::close-tree (s/nilable ::close-tree-node))
 
 ;; ============================================================================
 ;; Assertion helper

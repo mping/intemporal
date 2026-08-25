@@ -8,8 +8,7 @@
     :signal-wait-scheduled :signal-received :signal-wait-completed
     :child-workflow-scheduled :child-workflow-completed :child-workflow-failed
     :workflow-started :workflow-completed :workflow-failed
-    :workflow-cancelled :workflow-cancelling :workflow-terminated
-    :run-once-completed})
+    :workflow-cancelled :workflow-cancelling :workflow-terminated})
 
 (def terminal-event->status
   {:workflow-completed :completed

@@ -6,7 +6,6 @@
   (:require
    [intemporal.internal.error :as error]
    [intemporal.internal.logging :as log]
-   [intemporal.protocol :as p]
    [promesa.core]
    #?(:clj [net.cgrand.macrovich :as macros])))
 
@@ -26,7 +25,6 @@
     :pending-events pending-events
     :pending-asyncs pending-asyncs
     :compensating? (atom false)
-    :store store
     :registry registry
     :observer observer
   "
@@ -37,8 +35,14 @@
 (defn current-workflow-id []
   (:workflow-id (current-context)))
 
-(defn current-store []
-  (:store (current-context)))
+(defn current-time-ms
+  "The replay pass's supplied wall-clock reading.
+
+  Workflow code must never sample the process clock directly: deadline creation
+  is replay input, just like the history snapshot.  The engine supplies this
+  value once per pass; tests and the pure FSM can therefore script it exactly."
+  []
+  (:now-ms (current-context)))
 
 (defn compensating?
   "True while the workflow is inside intemporal/compensate. Used to suppress the
@@ -189,7 +193,7 @@
     ;; Suppress while compensating: the cancel exception was already caught by
     ;; the user and the compensating activities must run.
     (when (and (not (compensating?))
-               (p/is-cancelled? (:store ctx) (:workflow-id ctx)))
+               (:cancel-requested? ctx))
       (surface-cancellation! ctx @(:seq-counter ctx)))))
 
 (defn next-seq! []

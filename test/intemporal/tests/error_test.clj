@@ -27,7 +27,7 @@
 
 (deftest test-activity-retry-succeeds
   (testing "Activity succeeds after retries"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (reset! attempt-counter 0)
       (with-result [result (intemporal/start-workflow engine
                                                       retry-flow [42])]
@@ -47,7 +47,7 @@
 
 (deftest test-activity-retry-exhausted
   (testing "Activity fails after exhausting retries"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (with-result [result (intemporal/start-workflow engine
                                                       failing-retry-flow [99])]
         (is (match? {:status      :failed
@@ -66,7 +66,7 @@
 
 (deftest test-workflow-error-handling
   (testing "Workflow can catch and handle activity errors"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (with-result [result (intemporal/start-workflow engine
                                                       error-handling-flow [123])]
         (is (match? {:status      :completed
@@ -78,7 +78,7 @@
 
 (deftest test-no-retry-policy
   (testing "Activity without retry policy fails immediately"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       ;; Register without retry policy
       (with-result [result (intemporal/start-workflow engine
                                                       failing-retry-flow [456])]
@@ -99,7 +99,7 @@
 
 (deftest test-retry-with-exponential-backoff
   (testing "Retry policy applies exponential backoff"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (reset! attempt-counter 0)
       (let [start-time (utils/current-time-ms)]
         (with-result [result (intemporal/start-workflow engine retry-flow2 [42])]
@@ -113,7 +113,7 @@
 
 (deftest test-error-details-preserved
   (testing "Error details are preserved in workflow result"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (with-result [result (intemporal/start-workflow engine
                                                       failing-retry-flow [789])]
         (is (match? {:status      :failed

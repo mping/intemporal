@@ -21,8 +21,16 @@
   Returns the claim for this workflow (or nil) from each claimant."
   [trial]
   (let [store (store/create-store)
-        wid   (str "cas-" trial "-" (random-uuid))]
-    (p/save-event store wid {:event-type :workflow-started :seq -1 :workflow-id wid :args []})
+        wid   (str "cas-" trial "-" (random-uuid))
+        seed-owner "cas-seed"]
+    (p/create-workflow!
+      store
+      {:workflow-id wid
+       :owner-id seed-owner
+       :started-event {:event-type :workflow-started :seq -1 :workflow-id wid :args []}})
+    ;; Ownership is part of creation. Release the simulated dead owner before
+    ;; racing replacement engines for the runnable workflow.
+    (p/release-owner! store seed-owner)
     (let [ready   (CountDownLatch. n-threads)
           go      (CountDownLatch. 1)
           results (atom [])]

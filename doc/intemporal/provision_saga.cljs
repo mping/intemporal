@@ -104,14 +104,27 @@
 ;;;;
 ;; Running the workflow
 
+(defn- stop-engine!
+  ([]
+   (when-let [engine (:engine @app-state)]
+     (stop-engine! engine)))
+  ([engine]
+   (intemporal/shutdown-engine engine)
+   (swap! app-state
+          #(if (identical? engine (:engine %))
+             (assoc % :engine nil)
+             %))))
+
 (defn run-demo! []
+  (stop-engine!)
   (let [scen   (-> js/document (.getElementById "scenario") .-value)
         fa     (case scen
                  "provision" :provision
                  "attach"    :attach
                  "boot"      :boot
                  nil)
-        engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)]
+        engine (intemporal/start-engine :owner-id "doc-provision-saga"
+                                        :threads 4 :enable-logging true)]
     (reset! fail-at fa)
     (swap! app-state assoc :engine engine)
     (set-results! "Running…")
@@ -122,7 +135,8 @@
                  (render-tables! engine)))
         (p/catch (fn [err]
                    (set-results! (str "Error: " (ex-message err)))
-                   (render-tables! engine))))))
+                   (render-tables! engine)))
+        (p/finally #(stop-engine! engine)))))
 
 ;;;;
 ;; Bootstrap

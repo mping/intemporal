@@ -46,12 +46,12 @@
   resumes after a signal. Returns the terminal status + result."
   [store]
   (let [wid (str "bug13-" (random-uuid))]
-    (let [e1 (intemporal/make-workflow-engine :store store :threads 2)
+    (let [e1 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store store :threads 2)
           f1 (future (intemporal/start-workflow e1 recover-wf [4] :workflow-id wid))]
       (Thread/sleep 300)
       (future-cancel f1)
       (intemporal/shutdown-engine e1))
-    (let [e2 (intemporal/make-workflow-engine :store store :threads 2
+    (let [e2 (intemporal/start-engine :store store :threads 2
                                               :poll-ms 50 :owner-id "bug13-w")]
       (try
         (intemporal/send-signal store wid "go" {})

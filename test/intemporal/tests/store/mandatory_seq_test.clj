@@ -10,15 +10,13 @@
   rows (P6).
   FIX: the engine now assigns every event a real, deterministic :seq —
   :workflow-started = -1 (a fixed sentinel below every op seq, which start at
-  0), terminal events = one past the highest seq already recorded
-  (`next-terminal-seq`, execution.clj/.cljs), served by the new `p/max-seq`
-  protocol method instead of a full history load. FDB now keys history
+  0), terminal events = one past the highest seq already recorded by the FSM
+  transition. FDB now keys history
   entries by (seq, event-type) instead of [seq random-uuid], and JDBC enforces
   seq NOT NULL (migration 20260803000006).
   REGRESSION GUARD: every event in a completed workflow's history carries a
   non-nil :seq, :workflow-started uses the -1 sentinel, :workflow-completed
-  carries the highest seq in history, and p/max-seq agrees — on InMemory,
-  JDBC, and FDB alike."
+  carries the highest seq in history — on InMemory, JDBC, and FDB alike."
   (:require
    [clojure.test :refer [deftest is testing]]
    [intemporal.core :as intemporal]
@@ -45,7 +43,7 @@
   [workflow-id history]."
   [store]
   (let [wf-id (str "seq-mand-" (random-uuid))]
-    (intemporal/with-workflow-engine [engine {:store store :threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :store store :threads 2}]
       (let [result (intemporal/start-workflow engine seq-test-workflow [5]
                                               :workflow-id wf-id)]
         (is (= :completed (:status result)) (str "workflow did not complete: " (pr-str result)))))
@@ -65,8 +63,6 @@
     (is (some? completed) "a :workflow-completed event was recorded")
     (is (= (:seq completed) (apply max (map :seq history)))
         ":workflow-completed carries the highest seq in the whole history")
-    (is (= (:seq completed) (p/max-seq store wf-id))
-        "p/max-seq agrees with the terminal event's own seq")
     [wf-id history]))
 
 (deftest mandatory-seq-in-memory
@@ -78,15 +74,15 @@
 
 ;; --- JDBC (mirrors jdbc_test.clj setup) ---
 
-(def db-spec (jdbc-store/resolve-jdbc-url "jdbc:postgresql://localhost:5432/intemporal_test?user=root&password=root"))
+(def db-spec (jdbc-store/resolve-jdbc-url "jdbc:postgresql://localhost:5432/intemporal_fsm_test?user=root&password=root"))
 
 (def admin-spec "jdbc:postgresql://localhost:5432/postgres?user=root&password=root")
 
 (defn ensure-database! []
   (let [ds (jdbc/get-datasource admin-spec)]
-    (when-not (seq (jdbc/execute! ds ["SELECT 1 FROM pg_database WHERE datname = 'intemporal_test'"]))
+    (when-not (seq (jdbc/execute! ds ["SELECT 1 FROM pg_database WHERE datname = 'intemporal_fsm_test'"]))
       (with-open [conn (.getConnection ds)]
-        (.execute (.createStatement conn) "CREATE DATABASE intemporal_test")))))
+        (.execute (.createStatement conn) "CREATE DATABASE intemporal_fsm_test")))))
 
 (deftest ^:integration mandatory-seq-jdbc
   (testing "JdbcStore: seq column is NOT NULL and every persisted row satisfies it"
@@ -106,7 +102,7 @@
   (testing "FDBStore: load-history sorts :workflow-started first (no random-uuid tie-break)"
     (let [db (cfdb/select-api-version 710)
           db (cfdb/open db "docker/fdb.cluster")]
-      (with-open [store (fdb-store/create-store db "intemporal-tests")]
+      (with-open [store (fdb-store/create-store db (str "mandatory-seq-" (random-uuid)))]
         (let [[_ history] (check-mandatory-seq store)]
           (is (= :workflow-started (:event-type (first history)))
               "workflow-started sorts first by :seq"))))))

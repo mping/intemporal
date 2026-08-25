@@ -3,7 +3,7 @@
             [promesa.core :as p]
             [hiccups.runtime :as hiccupsrt])
   (:require-macros [hiccups.core :as hiccups :refer [html]]
-                   [intemporal.core :refer [stub-protocol defn-workflow]]
+                   [intemporal.core :as intemporal :refer [defn-workflow]]
                    [intemporal.internal.context :refer [blet bthen]]))
 ;;;;
 ;; main code
@@ -65,7 +65,8 @@
 ;;;;
 ;; bootstrap
 (defn init []
-  (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)
+  (let [engine (intemporal/start-engine :owner-id "doc-main"
+                                        :threads 4 :enable-logging true)
         res    (intemporal/start-workflow engine my-workflow [1] :workflow-id "my-wflow"
                                           :protocols {MyActivities (->MyActivitiesImpl)})]
 
@@ -78,7 +79,8 @@
 
         (p/catch (fn [r]
                    (js/console.error "error" r)
-                   (set-results! (prn-str r)))))))
+                   (set-results! (prn-str r))))
+        (p/finally #(intemporal/shutdown-engine engine)))))
 
 (comment
   (require '[shadow.cljs.devtools.api :as shadow])

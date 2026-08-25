@@ -67,7 +67,7 @@
 
       ;; Phase 1: run until the flight compensation suspends waiting for a signal
       (testing "Phase 1: fails, begins compensation, suspends mid-compensation"
-        (let [engine-1 (intemporal/make-workflow-engine :store persistent-store :threads 2)
+        (let [engine-1 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store persistent-store :threads 2)
               fut      (future
                          (intemporal/start-workflow engine-1 crash-saga ["o1"]
                                                     :workflow-id workflow-id))]
@@ -85,7 +85,7 @@
 
       ;; Phase 2: fresh engine, signal + resume -> finishes compensating, fails
       (testing "Phase 2: resume completes compensation and finalizes :failed"
-        (let [engine-2 (intemporal/make-workflow-engine :store persistent-store :threads 2)]
+        (let [engine-2 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store persistent-store :threads 2)]
           (intemporal/send-signal persistent-store workflow-id "continue-compensation" {})
           (let [result (intemporal/resume-workflow engine-2 workflow-id)]
             (is (= :failed (:status result)))

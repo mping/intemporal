@@ -147,7 +147,7 @@
                                         (rejecting-pool inner #{2 3})
                                         registry
                                         30000))]
-                        (intemporal/make-workflow-engine :store st))
+                        (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st))
           fut         (future
                         (try
                           (intemporal/start-workflow engine three-async-workflow [1]

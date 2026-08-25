@@ -55,7 +55,7 @@
 
 (deftest test-async-workflow
   (testing "Async workflow"
-    (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)]
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 4 :enable-logging true)]
       (with-result [result (intemporal/start-workflow engine my-parallel-flow [999])]
         (is (match? {:status :completed
                      :result {:args 999, :slow 0, :prom4 4, :results [2 4 6 4], :id 999}}
@@ -63,7 +63,7 @@
 
 (deftest test-race-workflow
   (testing "Async race workflow"
-    (let [engine (intemporal/make-workflow-engine :threads 4 :enable-logging true)]
+    (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 4 :enable-logging true)]
       (with-result [result (intemporal/start-workflow engine my-race-flow [999])]
         (is (match? {:status :completed
                      :result {:race-result {:index 0, :result 200}
@@ -71,7 +71,7 @@
                     result))))))
 
 (deftest activity-result-cannot-collide-with-timeout-sentinel
-  (let [engine (intemporal/make-workflow-engine :threads 2)]
+  (let [engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :threads 2)]
     (with-result [sequential-result (intemporal/start-workflow engine timeout-shaped-result-flow [])]
       (is (= {:intemporal.internal.runtime/timeout true}
              (:result sequential-result)))

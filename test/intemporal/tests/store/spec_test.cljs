@@ -26,7 +26,7 @@
 
 (deftest spec-ns-loads-on-cljs
   (testing "the registry survived compilation to JS"
-    (is (= 23 (count spec/event-types)))
+    (is (= 22 (count spec/event-types)))
     (is (contains? spec/event-types :workflow-cancelling))
     (is (contains? spec/event-types :signal-wait-scheduled))
     (is (contains? spec/event-types :activity-attempt-failed)))

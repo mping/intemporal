@@ -37,11 +37,11 @@
 (defn- run-scenario
   "Starts a workflow that sleeps on a signal, cancels it, and observes whether
   the cancellation actually terminates it.  Returns
-    :terminated? :cancelled-flag-set? :status."
+    :terminated? :cancel-requested? :status."
   [store]
   (let [wf-id  (str "bug23-" (random-uuid))
         result (promise)
-        engine (intemporal/make-workflow-engine :store store :threads 2)]
+        engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store store :threads 2)]
     (future
       (try
         (deliver result (intemporal/start-workflow engine cancel-sleep-wf []
@@ -52,18 +52,18 @@
     ;; Cancel: sets the flag AND wakes the sleeper (Phase A2)
     (intemporal/cancel-workflow store wf-id)
     (let [r      (deref result 2000 :stuck)
-          flag?  (p/is-cancelled? store wf-id)
+          flag?  (:cancel-requested? (p/load-workflow-state store wf-id))
           status (p/get-workflow-status store wf-id)]
       (intemporal/shutdown-engine engine)
       {:terminated?         (not= :stuck r)
-       :cancelled-flag-set? flag?
+       :cancel-requested? flag?
        :status              status})))
 
-(defn- assert-cancelled [{:keys [terminated? cancelled-flag-set? status]}]
+(defn- assert-cancelled [{:keys [terminated? cancel-requested? status]}]
   (is terminated?
       "Workflow terminated after cancel — wake-workflow forced loop re-entry (bug 2.3 fixed)")
-  (is cancelled-flag-set?
-      "Cancelled flag is set in the store")
+  (is cancel-requested?
+      "Cancellation request remains recorded in FSM state")
   ;; A finalized cancelled workflow has a first-class :workflow-cancelled event in
   ;; history (finalize-cancelled), so the derived terminal status is :cancelled.
   (is (= :cancelled status)

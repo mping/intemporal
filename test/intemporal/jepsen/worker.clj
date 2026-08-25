@@ -143,7 +143,7 @@
         main-ds  (:datasource (checked/unwrap store))
         side-ds  (make-pool db-url 2 true)   ; auto-commit for side-channel
         _        (wf/configure-side-channel! side-ds test-run owner)
-        engine   (intemporal/make-workflow-engine :store store :threads 8
+        engine   (intemporal/start-engine :store store :threads 8
                                                    :owner-id owner)
         stop-fn  (start-poll-loop! engine main-ds test-run owner)]
 

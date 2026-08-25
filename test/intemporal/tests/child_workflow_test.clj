@@ -40,7 +40,7 @@
 
 (deftest test-simple-child-workflow
   (testing "Parent workflow can run child workflow"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (with-result [result (intemporal/start-workflow engine
                                                       parent-flow [5])]
         (is (match? {:status      :completed
@@ -51,7 +51,7 @@
 
 (deftest test-nested-child-workflows
   (testing "Child workflows can have their own child workflows"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (with-result [result (intemporal/start-workflow engine
                                                       nested-parent-flow [3])]
         (is (match? {:status :completed
@@ -62,7 +62,7 @@
 
 (deftest test-child-workflow-with-error
   (testing "Parent handles child workflow errors"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (let [failing-child     (fn [x]
                                 (throw (ex-info "Child failed" {:x x})))
             parent-with-error (fn [id]
@@ -85,7 +85,7 @@
     ;; calls run-child-workflow, the :child-workflow suspension must process the
     ;; pending asyncs first before running the child — otherwise they are silently
     ;; dropped, the activities never execute, and join-all blocks forever.
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (let [async-then-child-flow
             (fn [id]
               (let [act   (intemporal/stub #'activity-fn)
@@ -105,7 +105,7 @@
 
 (deftest test-child-workflow-scheduled-observed
   (testing "Scheduling a child workflow emits :child-workflow-scheduled with the child's id"
-    (intemporal/with-workflow-engine [engine {:threads 2 :enable-logging true}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2 :enable-logging true}]
       (with-result [result (intemporal/start-workflow engine parent-flow [5])]
         (is (= :completed (:status result)))
         (let [parent-id (:workflow-id result)
@@ -122,7 +122,7 @@
 
 (deftest test-multiple-child-workflows
   (testing "Parent can run multiple child workflows sequentially"
-    (intemporal/with-workflow-engine [engine {:threads 2}]
+    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
       (let [multi-child-flow (fn [id]
                                (let [c1 (intemporal/run-child-workflow child-flow [1])
                                      c2 (intemporal/run-child-workflow child-flow [2])

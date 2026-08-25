@@ -86,7 +86,7 @@
         :else (do (Thread/sleep 20) (recur))))))
 
 (defn- check [store]
-  (u/with-worker store
+  (u/with-engine store
     (fn [engine]
       (let [pid (str "casc-wake-" (random-uuid))
             cid (str pid "/child")]

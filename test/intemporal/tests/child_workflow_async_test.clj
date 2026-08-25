@@ -66,7 +66,7 @@
 
 (defn- check-parallel-suspending-child [store]
   (reset! act-calls 0)
-  (u/with-worker store
+  (u/with-engine store
     (fn [engine]
       (let [pid (str "parent-" (random-uuid))
             cid (str pid "/child")]
@@ -88,7 +88,7 @@
   ;; One tree, all three policies + recursion. Cancel the parent; each child
   ;; diverges by its policy, and the cascade-cancelled child's own grandchild is
   ;; cancelled too (recursion).
-  (u/with-worker store
+  (u/with-engine store
     (fn [engine]
       (let [pid       (str "pcp-" (random-uuid))
             cancel-id (str pid "/cancel")
@@ -120,7 +120,7 @@
   (let [pid (str "parent-" (random-uuid))
         cid (str pid "/child")]
     ;; Phase 1: submit + run until the child suspends on its signal, then "crash".
-    (let [e1 (intemporal/make-workflow-engine :store store :threads 4
+    (let [e1 (intemporal/start-engine :store store :threads 4
                                               :poll-ms 25 :owner-id "w1")]
       (try
         (intemporal/submit-workflow e1 #'parent-join-wf [5 cid] :workflow-id pid)
@@ -130,7 +130,7 @@
     (let [calls-before @act-calls]
       (is (= :running (p/get-workflow-status store pid)) "durably suspended, not terminal")
       ;; Phase 2: fresh worker + the signal. Resume completes both.
-      (let [e2 (intemporal/make-workflow-engine :store store :threads 4
+      (let [e2 (intemporal/start-engine :store store :threads 4
                                                 :poll-ms 25 :owner-id "w2")]
         (try
           (intemporal/send-signal store cid "go" 7)

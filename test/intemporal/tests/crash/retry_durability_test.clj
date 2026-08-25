@@ -28,6 +28,7 @@
    [intemporal.core :as intemporal]
    [intemporal.internal.activity :as a]
    [intemporal.internal.error :as error]
+   [intemporal.internal.workflow-registry :as wreg]
    [intemporal.protocol :as p]
    [intemporal.store :as store]
    [intemporal.tests.utils :as u]))
@@ -88,7 +89,7 @@
       ;; Phase 1: let attempt 1 run and fail, then kill the engine while the
       ;; workflow is parked on the backoff before attempt 2.
       ;; ======================================================================
-      (let [engine-1 (intemporal/make-workflow-engine :store st :threads 2)
+      (let [engine-1 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st :threads 2)
             fut      (future
                        (try
                          (intemporal/start-workflow engine-1 retry-workflow [1]
@@ -126,7 +127,7 @@
       ;; Phase 2: resume on a fresh engine sharing the same store. The retry
       ;; sequence must CONTINUE (attempts 2 and 3), not restart at 1.
       ;; ======================================================================
-      (let [engine-2 (intemporal/make-workflow-engine :store st :threads 2)
+      (let [engine-2 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st :threads 2)
             result   (drive-to-terminal engine-2 workflow-id)]
         (intemporal/shutdown-engine engine-2)
 
@@ -160,18 +161,26 @@
                         (error/activity-failed-exception
                           "intemporal.tests.crash.retry-durability-test/always-fails-activity"
                           (ex-info "Simulated permanent activity failure" {:x 1})))
-          client      (intemporal/make-workflow-engine
-                        :store st :threads 2 :worker? false)
-          _           (intemporal/submit-workflow client retry-workflow [1]
-                        :workflow-id workflow-id)
-          _           (p/save-event
-                        st workflow-id
-                        (a/attempt-failed-event
-                          0 "intemporal.tests.crash.retry-durability-test/always-fails-activity"
-                          max-attempts last-error 5 false nil))
-          engine      (intemporal/make-workflow-engine
-                        :store st :threads 2
-                        :owner-id "spent-budget-worker"
+          owner-id    "spent-budget-engine"
+          workflow-name (wreg/register-workflow! retry-workflow)
+          _           (p/create-workflow!
+                        st {:workflow-id workflow-id
+                            :owner-id owner-id
+                            :started-event {:event-type :workflow-started
+                                            :seq -1
+                                            :workflow-id workflow-id
+                                            :workflow-fn-name workflow-name
+                                            :args [1]}})
+          _           (p/claim-runnable! st owner-id 1 (System/currentTimeMillis))
+          _           (p/commit-transition!
+                        st {:workflow-id workflow-id
+                            :owner-id owner-id
+                            :kind :continue
+                            :events [(a/attempt-failed-event
+                                      0 "intemporal.tests.crash.retry-durability-test/always-fails-activity"
+                                      max-attempts last-error 5 false nil)]})
+          engine      (intemporal/start-engine :store st :threads 2
+                        :owner-id owner-id
                         :poll-ms 5 :workflow-concurrency 1)]
       (try
         (let [result (intemporal/await-workflow engine workflow-id :timeout-ms 5000)]
@@ -189,8 +198,7 @@
             (is (= (:message last-error) (get-in failed [:error :message]))
                 "the recorded error is replayed as the outcome, not a freshly produced one")))
         (finally
-          (intemporal/shutdown-engine engine)
-          (intemporal/shutdown-engine client))))))
+          (intemporal/shutdown-engine engine))))))
 
 ;; ============================================================================
 ;; 3. The backoff is a suspension: it releases the drive and holds its deadline
@@ -202,8 +210,7 @@
 
     (let [workflow-id "retry-durability-test-3"
           st          (store/create-store)
-          engine      (intemporal/make-workflow-engine
-                        :store st :threads 2
+          engine      (intemporal/start-engine :store st :threads 2
                         :owner-id "retry-parking-worker"
                         :poll-ms 5 :workflow-concurrency 1)
           start       (System/currentTimeMillis)]
@@ -260,7 +267,7 @@
     (reset! child-attempt-log [])
 
     (let [st     (store/create-store)
-          engine (intemporal/make-workflow-engine :store st :threads 2)
+          engine (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store st :threads 2)
           result (intemporal/start-workflow engine parent-of-retrying-child [3]
                                             :workflow-id "retry-durability-test-4")]
       (intemporal/shutdown-engine engine)

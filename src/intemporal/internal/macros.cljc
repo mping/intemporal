@@ -25,7 +25,7 @@
 
 (defmacro defn-workflow
   "Like `defn`, but also registers the function in the workflow registry under its
-   qualified name at load time, so it can be resumed by id (by the recovery worker
+   qualified name at load time, so it can be resumed by id (by a recovery engine
    or a restarted/other process) without a manual `register-workflow!` call.
 
    Accepts the same forms as `defn` (docstring, attr-map, multi-arity). Works in

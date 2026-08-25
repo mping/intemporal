@@ -72,7 +72,7 @@
       ;; Phase 1: Execute workflow in future and cancel it (simulate crash)
       ;; ======================================================================
       (testing "Phase 1: Execute until crash (future cancel)"
-        (let [engine-1 (intemporal/make-workflow-engine
+        (let [engine-1 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid))
                          :store persistent-store
                          :threads 2)
               ;; Start workflow in background future
@@ -110,7 +110,7 @@
         (let [pre-resume-count @execution-counter
               history-before-resume (p/load-history persistent-store workflow-id)
               ;; Create NEW engine with SAME store (simulates process restart)
-              engine-2 (intemporal/make-workflow-engine
+              engine-2 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid))
                          :store persistent-store  ;; Same store!
                          :threads 2)
               ;; Resume workflow

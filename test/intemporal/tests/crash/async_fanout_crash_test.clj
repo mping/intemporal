@@ -77,7 +77,7 @@
     (reset! execution-counter 0)
     (let [workflow-id      "async-fanout-crash-1"
           persistent-store (store/create-store)
-          engine           (intemporal/make-workflow-engine :store persistent-store :threads 2)
+          engine           (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store persistent-store :threads 2)
           ;; Short sleep: enough to force a :timer suspension in between the
           ;; async being scheduled and it being joined, without slowing the test.
           fut              (future
@@ -110,7 +110,7 @@
     (reset! execution-counter 0)
     (let [workflow-id      "async-fanout-crash-2"
           persistent-store (store/create-store)
-          engine-1         (intemporal/make-workflow-engine :store persistent-store :threads 2)
+          engine-1         (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store persistent-store :threads 2)
           ;; wait-for-signal is our deterministic crash point: the workflow
           ;; suspends there on the very first pass, right after the async is
           ;; scheduled, with zero wall-clock races -- :async-started is
@@ -137,7 +137,7 @@
       ;; it, and finalizing -- no need to call it more than once when the
       ;; engine is correct.
       (intemporal/send-signal persistent-store workflow-id "resume" {})
-      (let [engine-2 (intemporal/make-workflow-engine :store persistent-store :threads 2)
+      (let [engine-2 (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store persistent-store :threads 2)
             result   (intemporal/resume-workflow engine-2 workflow-id)]
         (is (= :completed (:status result))
             "resume must re-queue and run the never-executed activity, then complete the workflow")

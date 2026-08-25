@@ -1,8 +1,8 @@
 (ns intemporal.store.checked
-  "A composite IStore decorator that performs the intemporal.spec assertions
+  "A composite workflow-store decorator that performs the intemporal.spec assertions
    every backend used to perform inline, one copy per implementation. Wrap any
-   IStore with ->CheckedStore (or use a backend's create-store factory, which
-   does this automatically) to validate every value crossing the IStore
+   store with ->CheckedStore (or use a backend's create-store factory, which
+   does this automatically) to validate every value crossing the store
    boundary against intemporal.spec; the concrete backends (InMemoryStore,
    JdbcStore, FDBStore) stay assertion-free so the checks aren't duplicated
    per-implementation.
@@ -15,50 +15,10 @@
    [intemporal.spec :as spec]))
 
 (defrecord CheckedStore [inner]
-  p/IStore
+  p/IEngineStore
   (load-history [_ workflow-id]
     (->> (p/load-history inner workflow-id)
          (spec/check! ::spec/events)))
-
-  (save-events [_ workflow-id events]
-    (spec/check! ::spec/events events)
-    (p/save-events inner workflow-id events))
-
-  (save-events-and-wake! [_ workflow-id events]
-    (spec/check! ::spec/events events)
-    (->> (p/save-events-and-wake! inner workflow-id events)
-         (spec/check! ::spec/boolean-result)))
-
-  (find-event [_ workflow-id event-type seq-num]
-    (spec/check! ::spec/event-type event-type)
-    (spec/check! ::spec/seq seq-num)
-    (->> (p/find-event inner workflow-id event-type seq-num)
-         (spec/check! ::spec/maybe-event)))
-
-  (max-seq [_ workflow-id]
-    (->> (p/max-seq inner workflow-id)
-         (spec/check! ::spec/max-seq-result)))
-
-  (get-pending-signals [_ workflow-id]
-    (->> (p/get-pending-signals inner workflow-id)
-         (spec/check! ::spec/pending-signals)))
-
-  (add-signal [_ workflow-id signal-name signal-data]
-    (p/add-signal inner workflow-id signal-name signal-data))
-
-  (consume-signal [_ workflow-id signal-name]
-    (p/consume-signal inner workflow-id signal-name))
-
-  (wake-workflow [_ workflow-id]
-    (->> (p/wake-workflow inner workflow-id)
-         (spec/check! ::spec/boolean-result)))
-
-  (is-cancelled? [_ workflow-id]
-    (->> (p/is-cancelled? inner workflow-id)
-         (spec/check! ::spec/boolean-result)))
-
-  (mark-cancelled [_ workflow-id]
-    (p/mark-cancelled inner workflow-id))
 
   (get-workflow-status [_ workflow-id]
     (->> (p/get-workflow-status inner workflow-id)
@@ -70,32 +30,53 @@
     (->> (p/claim-runnable! inner owner-id limit now-ms)
          (spec/check! ::spec/drive-claims)))
 
-  (park-workflow! [_ workflow-id expected-wake-version events next-run-at-ms]
-    (spec/check! ::spec/wake-version expected-wake-version)
-    (spec/check! ::spec/events events)
-    (spec/check! ::spec/next-run-at-ms next-run-at-ms)
-    (->> (p/park-workflow! inner workflow-id expected-wake-version events next-run-at-ms)
-         (spec/check! ::spec/park-result)))
-
-  (requeue-running! [_ workflow-id]
-    (->> (p/requeue-running! inner workflow-id)
+  (requeue-running! [_ workflow-id owner-id]
+    (->> (p/requeue-running! inner workflow-id owner-id)
          (spec/check! ::spec/boolean-result)))
 
   (recover-running! [_ owner-id]
     (->> (p/recover-running! inner owner-id)
          (spec/check! ::spec/count-result)))
 
-  (release-owner [_ owner-id]
-    (p/release-owner inner owner-id))
+  p/IFsmStore
 
-  (link-child! [_ parent-id parent-seq child-id policy]
-    (spec/check! ::spec/parent-seq parent-seq)
-    (spec/check! ::spec/policy policy)
-    (p/link-child! inner parent-id parent-seq child-id policy))
+  (create-workflow! [_ creation]
+    (spec/check! ::spec/workflow-creation creation)
+    (->> (p/create-workflow! inner creation)
+         (spec/check! ::spec/create-result)))
 
-  (list-children [_ parent-id]
-    (->> (p/list-children inner parent-id)
-         (spec/check! ::spec/children)))
+  (load-workflow-state [_ workflow-id]
+    (->> (p/load-workflow-state inner workflow-id)
+         (spec/check! ::spec/maybe-workflow-state)))
+
+  (load-snapshot [_ workflow-id]
+    (->> (p/load-snapshot inner workflow-id)
+         (spec/check! ::spec/maybe-snapshot)))
+
+  (load-close-tree [_ workflow-id]
+    (->> (p/load-close-tree inner workflow-id)
+         (spec/check! ::spec/close-tree)))
+
+  (add-signal! [_ workflow-id signal-name signal]
+    (spec/check! ::spec/signal-name signal-name)
+    (->> (p/add-signal! inner workflow-id signal-name signal)
+         (spec/check! ::spec/signal-result)))
+
+  (request-cancel! [_ workflow-id]
+    (->> (p/request-cancel! inner workflow-id)
+         (spec/check! ::spec/cancel-result)))
+
+  (wake! [_ workflow-id]
+    (->> (p/wake! inner workflow-id)
+         (spec/check! ::spec/wake-result)))
+
+  (commit-transition! [_ transition]
+    (spec/check! ::spec/transition transition)
+    (->> (p/commit-transition! inner transition)
+         (spec/check! ::spec/commit-result)))
+
+  (release-owner! [_ owner-id]
+    (p/release-owner! inner owner-id))
 
   #?@(:clj
       [java.lang.AutoCloseable

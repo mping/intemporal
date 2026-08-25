@@ -47,6 +47,7 @@ Two concepts apply:
 ;; Create an engine and run the workflow
 (intemporal/with-workflow-engine
   [engine {:threads 2
+           :owner-id "demo-engine"
            :protocols {MyActivities (->MyActivitiesImpl)}}]
   (let [result (intemporal/start-workflow engine my-workflow [1])]
     (println result)))
@@ -58,8 +59,8 @@ Every workflow follows the same path: it is persisted as `RUNNABLE`, atomically 
 `RUNNING`, and either terminates or parks as `WAITING`. Workflow code is never driven
 directly by an API caller.
 
-`make-workflow-engine` is an active resource constructor: it starts exactly one
-engine-owned recovery worker. `start-workflow` submits and waits for the terminal result:
+`start-engine` is an active resource constructor: it starts exactly one
+engine-owned recovery loop. `start-workflow` submits and waits for the terminal result:
 
 ```clojure
 ;; The caller blocks until the workflow completes.
@@ -73,7 +74,7 @@ them through a bounded drive pool. Indefinite signal/join waits are absent from 
 until a signal, cancellation, or child completion durably wakes them.
 
 ```clojure
-(let [engine (intemporal/make-workflow-engine
+(let [engine (intemporal/start-engine
                :threads 4
                :owner-id "orders-pod-0"
                :poll-ms 100
@@ -84,15 +85,15 @@ until a signal, cancellation, or child completion durably wakes them.
                                        :workflow-id "my-wf")]
       (intemporal/await-workflow engine workflow-id))
     (finally
-      ;; No second worker handle is needed. The default shutdown grace is 5s;
+      ;; No second engine handle is needed. The default shutdown grace is 5s;
       ;; pass an explicit value when your activities need longer to drain.
       (intemporal/shutdown-engine engine 10))))
 ```
 
 A restarted process automatically requeues its own interrupted `RUNNING` work when its
 new engine uses the same stable `:owner-id`. One stable owner id must identify at most one
-live process; the stores do not yet implement leases or fencing. The generated
-`ephemeral-*` owner is suitable for local/in-memory use, not cross-process recovery.
+live process; the stores do not implement leases or fencing. `:owner-id` is required,
+including for local and in-memory use.
 
 ### Activities
 
@@ -227,10 +228,10 @@ In **ClojureScript** catch `:default` and rethrow engine suspensions explicitly:
 
 ```clojure
 ;; The engine owns execution for both blocking and asynchronous submission.
-(intemporal/with-workflow-engine [engine {:threads 4}]
+(intemporal/with-workflow-engine [engine {:threads 4 :owner-id "pod-0"}]
   (intemporal/start-workflow engine my-workflow [arg]))
 
-(let [engine (intemporal/make-workflow-engine :threads 4
+(let [engine (intemporal/start-engine :threads 4
                                               :store my-store
                                               :owner-id "pod-0"
                                               :protocols {MyActivities (->MyActivitiesImpl)}
@@ -242,7 +243,7 @@ In **ClojureScript** catch `:default` and rethrow engine suspensions explicitly:
       (intemporal/shutdown-engine engine 10))))
 ```
 
-`make-workflow-engine` options:
+`start-engine` options:
 
 | Option | Default | Description |
 |---|---|---|
@@ -251,24 +252,25 @@ In **ClojureScript** catch `:default` and rethrow engine suspensions explicitly:
 | `:queue-capacity` | 8 × threads | Pending activity submissions for a bounded executor |
 | `:submit-timeout-ms` | activity timeout | Maximum saturated submission wait (JVM) |
 | `:default-timeout-ms` | 30000 | Default timeout for one activity attempt |
-| `:owner-id` | generated `ephemeral-*` | Stable identity required for restart recovery |
+| `:owner-id` | required | Stable identity required for execution and restart recovery |
 | `:poll-ms` | 10 | Durable scheduling poll interval |
 | `:batch-size` | 100 | Maximum claims per poll |
 | `:workflow-concurrency` | 4 | Maximum concurrent workflow drives |
 | `:protocols` | `{}` | Protocol activity implementations installed before recovery |
-| `:worker?` | `true` | `false` creates a submission/status-only client |
 | `:enable-logging` | `false` | Retain observer events in the engine's `:log` atom |
 | `:enable-telemetry` | `true` | OpenTelemetry tracing (JVM only) |
 | `:observer` | — | Additional `IWorkflowObserver` instance |
 
-With `:worker? false`, `submit-workflow`, status, signal, and cancellation APIs remain
-available, but `start-workflow` and `resume-workflow` reject the client. Shutdown stops
-polling, drains or interrupts JVM workflow drives within the requested grace period,
+Shutdown stops polling, drains or interrupts JVM workflow drives within the requested grace period,
 releases ownership, and then closes the activity executor.
 
 ## Stores
 
-Three `IStore` implementations ship with the library:
+The FSM store contract is the engine boundary. Every backend implements the same
+revision-checked, atomic transitions: InMemoryStore in an atom, JDBC in one SQL
+transaction, and FoundationDB in one FDB transaction. JDBC installations use the clean
+FSM schema installed by the current migrations; existing pre-FSM schemas are not
+migrated in place.
 
 Every store factory accepts `:checked?`. Its default, `:auto`, installs
 `intemporal.store.checked/CheckedStore` only when spec assertions are enabled at
@@ -277,7 +279,7 @@ return the raw backend. A checked closeable store delegates close to its backend
 
 ### InMemoryStore
 An in-process atom-based store. Default; adequate for development and single-process
-CLJS (the CLJS worker is also single-process). No persistence across restarts.
+CLJS (the CLJS engine is also single-process). No persistence across restarts.
 
 ```clojure
 (require '[intemporal.store :as store])
@@ -326,7 +328,7 @@ but the runtimes differ:
 | Suspensions      | Subclass `Error` (bypass `catch Exception`)                              | Plain `deftype`, not `js/Error` (bypass `catch js/Error`)                |
 | Saga catch       | `(catch Exception e …)`                                                  | `(catch :default e …)` + rethrow `suspension?`                           |
 | OpenTelemetry    | Supported via `:enable-telemetry`                                        | Not available                                                            |
-| Worker           | Daemon thread with exponential backoff                                   | `js/setTimeout` tick, single-threaded                                    |
+| Engine loop       | Daemon thread with exponential backoff                                   | `js/setTimeout` tick, single-threaded                                    |
 | Vars (`#'`)      | Stable qualified name                                                    | Demangled JS name; `defn-workflow` handles registration uniformly        |
 
 Internal context macros (`blet`, `bthen`, `bfinally`) restore the dynamic

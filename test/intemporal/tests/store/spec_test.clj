@@ -1,11 +1,11 @@
 (ns intemporal.tests.store.spec-test
   "Pins `intemporal.spec` — the declared shape of every value crossing the
-  `IStore` boundary — against the shapes the engine actually constructs.
+  `IFsmStore` boundary — against the shapes the engine actually constructs.
 
   Deliberately store-free: it needs no database, no FDB cluster and no engine,
   so it runs in milliseconds and is where spec typos die. It also covers the
-  three event types a happy-path workflow never produces
-  (:workflow-cancelling, :workflow-terminated, and :run-once-completed) and the
+  two event types a happy-path workflow never produces
+  (:workflow-cancelling and :workflow-terminated) and the
   ragged variants (a nil :result on a failed activity, an :activity-completed
   with no :attempts, the minimal hand-built :workflow-started fixtures, and all
   three mutually incompatible :error shapes).
@@ -36,7 +36,7 @@
 
 (deftest toggle-is-enabled-in-ci
   ;; Guards the one failure mode that would silently void this entire layer:
-  ;; the inline check! calls in the three IStore implementations are no-ops
+  ;; the inline check! calls in the FSM store implementations are no-ops
   ;; unless clojure.spec.check-asserts is set. If someone drops
   ;; -Dclojure.spec.check-asserts=true from the :test alias in deps.edn, every
   ;; store spec stops being enforced and every suite still passes. This test is
@@ -139,10 +139,7 @@
    {:event-type :workflow-cancelling :seq 8}
 
    :workflow-terminated
-   {:event-type :workflow-terminated :seq 8 :workflow-id "wf-1" :timestamp ts}
-
-   :run-once-completed
-   {:event-type :run-once-completed :seq 9 :result :done :timestamp ts}})
+   {:event-type :workflow-terminated :seq 8 :workflow-id "wf-1" :timestamp ts}})
 
 (deftest every-event-type-has-a-sample-and-a-spec
   (testing "the sample table covers the canonical registry exactly"
@@ -323,7 +320,11 @@
         (let [checked-store (store/create-store)]
           (is (checked/checked-store? checked-store))
           (is (thrown? clojure.lang.ExceptionInfo
-                       (p/save-event checked-store "wf" {:event-type :bogus :seq 0}))))
+                       (p/create-workflow!
+                         checked-store
+                         {:workflow-id "wf"
+                          :owner-id "checked-store-test"
+                          :started-event {:event-type :bogus :seq 0}}))))
         (s/check-asserts false)
         (is (not (checked/checked-store? (store/create-store))))
         (finally (s/check-asserts prev)))))

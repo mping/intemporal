@@ -18,6 +18,6 @@
 
           :node {:target    :node-test
                  :output-to "target/tests.js"
-                 :ns-regexp "-test$"
+                 :ns-regexp "intemporal\\.tests\\..*-test$"
                  :compiler-options {:source-map "true"}
                  :autorun   true}}}

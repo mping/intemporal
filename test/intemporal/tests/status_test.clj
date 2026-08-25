@@ -18,7 +18,7 @@
   ;; unknown id
   (is (= :not-found (p/get-workflow-status store (str (random-uuid)))))
   ;; completed (terminal -> cached fast path) — submitted + run by a worker
-  (let [e (intemporal/make-workflow-engine :store store :threads 2 :poll-ms 25)]
+  (let [e (intemporal/start-engine :owner-id (str "migrated-test-" (random-uuid)) :store store :threads 2 :poll-ms 25)]
     (try
       (let [{:keys [workflow-id]} (intemporal/submit-workflow e #'done-wf [21])]
         (is (= {:status :completed :result 42 :workflow-id workflow-id}
