@@ -176,7 +176,7 @@
 
 (def ^:private status-fill
   {:completed "#b7e4c7" :failed "#ffbaad" :cancelled "#ffd8a8"
-   :running   "#a5d8ff" :not-found "#e9ecef"})
+   :terminated "#dee2e6" :running "#a5d8ff" :not-found "#e9ecef"})
 
 (def ^:private node-w 150)
 (def ^:private node-h 58)
@@ -249,7 +249,22 @@
 ;;;;
 ;; Running the workflow
 
-(def ^:private terminal? #{:completed :failed :cancelled})
+(def ^:private terminal-event-types
+  #{:workflow-completed :workflow-failed :workflow-cancelled :workflow-terminated})
+
+(defn- workflow-closed?
+  "True only after a durable terminal event exists. A public :cancelled status
+   can mean that cancellation was merely requested and is not sufficient."
+  [store workflow-id]
+  (boolean
+    (some #(terminal-event-types (:event-type %))
+          (intemporal/get-workflow-history store workflow-id))))
+
+(defn- tree-closed?
+  "Wait for the parent and every scheduled descendant to commit terminal events.
+   This keeps the engine alive while cascade-cancel requests are being driven."
+  [store root]
+  (every? #(workflow-closed? store %) (collect-ids store root)))
 
 (defn- stop-engine!
   ([]
@@ -271,7 +286,7 @@
       (set-results! (str "Status: " (name status)
                          (when (= status :completed)
                            (str "\n\n" (prn-str (intemporal/get-workflow-result store root))))))
-      (if (terminal? status)
+      (if (tree-closed? store root)
         (stop-engine! engine)
         (js/setTimeout #(poll! engine store root) 200)))))
 
@@ -307,6 +322,7 @@
 (defn cancel-demo! []
   (when-let [store (:store @app-state)]
     (intemporal/cancel-workflow store wf-id)
+    (set-results! "Cancellation requested; waiting for the workflow tree to close…")
     (render-trees! store wf-id)))
 
 ;;;;

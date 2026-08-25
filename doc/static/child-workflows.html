@@ -109,6 +109,8 @@
             <p>
                 Children are driven by the engine-owned CLJS recovery loop. The
                 page uses <code>submit-workflow</code> so the UI stays responsive.
+                After cancellation, it keeps the engine running until the parent
+                and every scheduled descendant have durable terminal events.
             </p>
             <pre><code>
 (defn run-demo! []
