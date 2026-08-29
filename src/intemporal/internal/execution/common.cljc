@@ -3,17 +3,6 @@
    [intemporal.internal.activity :as activity]
    [intemporal.internal.context :as context]))
 
-(defn continue-decision []
-  {:op :continue})
-
-(defn park-decision
-  ([reason events] (park-decision reason events nil))
-  ([reason events next-run-at]
-   {:op :park
-    :reason reason
-    :events (vec events)
-    :next-run-at next-run-at}))
-
 (defn due-asyncs [pending-asyncs]
   (remove #(activity/retry-pending? (:attempt-state %)) pending-asyncs))
 
@@ -22,11 +11,6 @@
        (keep #(when (activity/retry-pending? (:attempt-state %))
                 (:retry-at (:attempt-state %))))
        (reduce (fn [a b] (if a (min a b) b)) nil)))
-
-(defn with-async-retry-deadline [pending-asyncs decision]
-  (if (and (= :park (:op decision)) (= :async (:reason decision)))
-    (assoc decision :next-run-at (earliest-async-retry pending-asyncs))
-    decision))
 
 (defn make-workflow-context
   ([workflow-id history registry observer]

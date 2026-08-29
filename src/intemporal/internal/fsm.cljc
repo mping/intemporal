@@ -11,7 +11,10 @@
   Plans contain only data, notably the exact transition that must be committed;
   they never contain functions or live resources.  This lets the FSM enforce
   ordering (snapshot -> replay -> pre-effect commit -> effect -> outcome
-  commit) without duplicating the workflow DSL in the reducer.")
+  commit) without duplicating the workflow DSL in the reducer.
+
+  See the [Mermaid state diagram](../../../doc/fsm.mermaid) for the complete
+  phase and command flow.")
 
 (def terminal-statuses #{:completed :failed :cancelled :terminated})
 
