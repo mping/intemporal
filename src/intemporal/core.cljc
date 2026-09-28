@@ -614,15 +614,14 @@
                                (tracing/ctx->tracecontext
                                  (tracing/ensure-workflow-span! wid workflow-name nil)))
                         :cljs nil)
-        started-event
-        (cond-> {:event-type       :workflow-started
-                 :seq              -1 ;; fixed sentinel, see schedule-independent-child!
-                 :workflow-id      wid
-                 :workflow-fn-name workflow-name
-                 :args             (vec args)
-                 :max-iterations   max-iterations
-                 :timestamp        (clock/now-ms)}
-          tracecontext (assoc :tracecontext tracecontext))
+        started-event (cond-> {:event-type       :workflow-started
+                               :seq              -1 ;; fixed sentinel, see schedule-independent-child!
+                               :workflow-id      wid
+                               :workflow-fn-name workflow-name
+                               :args             (vec args)
+                               :max-iterations   max-iterations
+                               :timestamp        (clock/now-ms)}
+                        tracecontext (assoc :tracecontext tracecontext))
         creation {:workflow-id wid
                   :owner-id owner-id
                   :started-event started-event}
