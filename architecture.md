@@ -28,7 +28,7 @@ graph TD
         Err[intemporal.internal.error]
     end
 
-    subgraph Platform Abstractions [intemporal.protocol]
+    subgraph PlatformAbstractions [intemporal.protocol]
         IStore[(IStore Persistence)]
         IExec[IActivityExecutor]
         ISched[IScheduler]
@@ -51,7 +51,7 @@ graph TD
     Worker --> Resume
     InternalLoop --> Ctx
     InternalLoop --> Err
-    InternalLoop --> Platform Abstractions
+    InternalLoop --> PlatformAbstractions
     
     IStore --> InMemory
     IStore --> JDBC
