@@ -132,8 +132,13 @@
 
 (defn- consume-signal-envelopes
   [wf consumes]
-  (reduce (fn [wf {:keys [signal-name]}]
-            (update-in wf [:signals signal-name] (comp vec rest)))
+  (reduce (fn [wf {:keys [signal-name signal-id]}]
+            ;; Retain IDs from envelopes that predate the receipt ledger too.
+            (let [envelope (first (get-in wf [:signals signal-name]))]
+              (-> wf
+                  (assoc-in [:signal-receipts signal-id]
+                            {:signal-name signal-name :payload (:payload envelope)})
+                  (update-in [:signals signal-name] (comp vec rest)))))
           wf
           consumes))
 
@@ -151,8 +156,7 @@
 (defn- matching-creation?
   [wf {:keys [started-event parent]}]
   (let [history (:history (normalize-workflow wf))]
-    (and (= 1 (count history))
-         (matching-started-event? (first history) started-event)
+    (and (matching-started-event? (first history) started-event)
          (= parent (:parent wf)))))
 
 (defn- valid-related-revisions?
@@ -182,10 +186,11 @@
            (not= expected-wake-version (:wake-version wf))) :wake-raced
       (not (consumable-signals? wf consume-signals)) :conflict
       (not (valid-related-revisions? workflows expected-related-revisions)) :conflict
+      (domain/duplicate-creations? create-workflows) :creation-conflict
       (some (fn [{:keys [workflow-id] :as creation}]
               (let [existing (get workflows workflow-id)]
                 (and existing (not (matching-creation? existing creation)))))
-            create-workflows) :conflict
+            create-workflows) :creation-conflict
       :else :committed)))
 
 (defn- add-created-workflow
@@ -389,25 +394,29 @@
                         (let [wf (normalize-workflow (get-in s [:workflows workflow-id]))]
                           (cond
                             (or (nil? wf) (domain/terminal-status? (:status wf))) s
-                            (some #(= signal-id (:signal-id %))
-                                  (mapcat identity (vals (:signals wf)))) s
+                            (or (contains? (:signal-receipts wf) signal-id)
+                                (some #(= signal-id (:signal-id %))
+                                      (mapcat identity (vals (:signals wf))))) s
                             :else
                             (let [envelope {:queue-id (:next-signal-id wf)
                                             :signal-id signal-id
                                             :payload payload}
                                   wf (-> wf
+                                         (assoc-in [:signal-receipts signal-id]
+                                                   {:signal-name signal-name :payload payload})
                                          (update :next-signal-id inc)
                                          (update-in [:signals signal-name] (fnil conj []) envelope)
                                          wake-workflow-state)]
                               (assoc-in s [:workflows workflow-id] wf))))))
           before (normalize-workflow (get-in old [:workflows workflow-id]))
           after  (normalize-workflow (get-in new [:workflows workflow-id]))
-          existing (some (fn [[name envelopes]]
+          existing (or (get-in before [:signal-receipts signal-id])
+                       (some (fn [[name envelopes]]
                            (some (fn [envelope]
                                    (when (= signal-id (:signal-id envelope))
                                      (assoc envelope :signal-name name)))
                                  envelopes))
-                         (:signals (or before {})))]
+                         (:signals (or before {}))))]
       (cond
         (nil? before) {:signal-status :not-found}
         (domain/terminal-status? (:status before)) {:signal-status :terminal}
@@ -468,6 +477,7 @@
           status (transition-status (:workflows old) transition)
           wf     (get-in new [:workflows workflow-id])]
       {:commit-status status
+       :previous-history-revision (get-in old [:workflows workflow-id :history-revision])
        :state (workflow-state workflow-id wf)}))
 
   (release-owner! [_ owner-id]

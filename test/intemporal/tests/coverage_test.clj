@@ -76,21 +76,14 @@
 ;; Replay budget (max-iterations) enforcement
 ;; ============================================================================
 
-(defn infinite-loop-flow [_id]
-  ;; This workflow never terminates on its own — it loops forever without
-  ;; suspending, which should exhaust the max-iterations budget.
+(defn budget-flow [steps]
   (let [act (intemporal/stub #'slow-long-activity)]
-    (loop []
-      (act :work)
-      (recur))))
+    (mapv act (range steps))))
 
-(deftest test-replay-budget-enforced
-  (testing "A workflow that never terminates is killed after max-iterations"
-    (intemporal/with-workflow-engine [engine {:owner-id (str "migrated-test-" (random-uuid)) :threads 2}]
-      (with-result [result (intemporal/start-workflow engine
-                                                      infinite-loop-flow [nil]
-                                                      :max-iterations 5)]
-        (is (= :failed (:status result))
-            "Workflow should fail after exhausting the replay budget")
-        (is (re-find #"budget" (get-in result [:error :message]))
-            "Failure message should mention budget")))))
+(deftest test-replay-budget-yields
+  (testing "A finite workflow completes across several replay budgets"
+    (intemporal/with-workflow-engine [engine {:owner-id (str "budget-" (random-uuid)) :threads 2}]
+      (with-result [result (intemporal/start-workflow engine budget-flow [6]
+                                                      :max-iterations 2)]
+        (is (= :completed (:status result)))
+        (is (= (vec (repeat 6 :done)) (:result result)))))))

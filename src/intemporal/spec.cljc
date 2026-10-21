@@ -418,11 +418,12 @@
         :terminal (and terminal-status (map? expected-related-revisions))
         false))))
 
-(s/def ::commit-status #{:committed :wake-raced :conflict :not-owner
+(s/def ::commit-status #{:committed :wake-raced :conflict :creation-conflict :not-owner
                          :not-running :terminal})
+(s/def ::previous-history-revision (s/nilable ::history-revision))
 (s/def ::commit-result
   (s/keys :req-un [::commit-status]
-          :opt-un [::workflow-state]))
+          :opt-un [::workflow-state ::previous-history-revision]))
 
 (s/def ::signal-status #{:accepted :duplicate :conflict :terminal :not-found})
 (s/def ::signal-result

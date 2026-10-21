@@ -154,7 +154,7 @@
   (->> (query! tx
                ["SELECT queue_id, signal_id, signal_name, payload
                    FROM intemporal_signals
-                  WHERE workflow_id = ?
+                  WHERE workflow_id = ? AND consumed = FALSE
                   ORDER BY signal_name ASC, queue_id ASC"
                 workflow-id])
        (reduce (fn [signals {:keys [queue_id signal_id signal_name payload]}]
@@ -204,8 +204,7 @@
 (defn- matching-creation?
   [tx row {:keys [started-event parent]}]
   (let [history (workflow-history! tx (:id row))]
-    (and (= 1 (count history))
-         (matching-started-event? (first history) started-event)
+    (and (matching-started-event? (first history) started-event)
          (= parent
             (when (:parent_workflow_id row)
               {:workflow-id (:parent_workflow_id row)
@@ -305,7 +304,7 @@
   (let [row (query-one!
               tx ["SELECT queue_id, signal_id
                     FROM intemporal_signals
-                   WHERE workflow_id = ? AND signal_name = ?
+                   WHERE workflow_id = ? AND signal_name = ? AND consumed = FALSE
                    ORDER BY queue_id ASC LIMIT 1"
                   workflow-id signal-name])]
     (and row (= (long queue-id) (long (:queue_id row)))
@@ -314,7 +313,7 @@
 (defn- consume-fsm-signal!
   [tx workflow-id {:keys [signal-name queue-id signal-id]}]
   (jdbc/execute-one!
-    tx ["DELETE FROM intemporal_signals
+    tx ["UPDATE intemporal_signals SET consumed = TRUE
           WHERE workflow_id = ? AND signal_name = ? AND queue_id = ? AND signal_id = ?"
         workflow-id signal-name queue-id signal-id]))
 
@@ -564,6 +563,7 @@
                                        (some-> (get rows id) :revision long)))
                                   expected-related-revisions)) :conflict
                      (not (every? #(signal-consumable? tx workflow-id %) consume-signals)) :conflict
+                     (domain/duplicate-creations? create-workflows) :creation-conflict
                      :else :committed)]
         (if (not= :committed status)
           {:commit-status status :state current-state}
@@ -573,7 +573,7 @@
                       (when-let [row (get rows (:workflow-id creation))]
                         (not (matching-creation? tx row creation))))
                     create-workflows)
-            {:commit-status :conflict :state (workflow-state! tx workflow-id)}
+            {:commit-status :creation-conflict :state (workflow-state! tx workflow-id)}
             (let [creation-statuses (mapv #(create-fsm-workflow! tx kind %) create-workflows)]
               ;; A unique-key race after the pre-check is an infrastructure
               ;; retry: throw so the enclosing JDBC transaction rolls every
@@ -615,6 +615,7 @@
                                    tx kind workflow-id (or terminal-status :terminated) events)
                       nil))))
               {:commit-status :committed
+               :previous-history-revision (:history-revision current-state)
                :state (workflow-state! tx workflow-id)}))))))
 
   (release-owner! [_ owner-id]

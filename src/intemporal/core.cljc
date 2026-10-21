@@ -605,6 +605,9 @@
   (when-not (running-engine? engine)
     (throw (ex-info "submit-workflow requires a running workflow engine"
                     {:workflow-id workflow-id})))
+  (when-not (pos-int? max-iterations)
+    (throw (ex-info ":max-iterations must be a positive integer"
+                    {:max-iterations max-iterations})))
   (let [wid (or workflow-id (str (random-uuid)))
         workflow-name (wreg/register-workflow! workflow-fn)
         ;; Open the root span here and keep it live in the registry: every claimed

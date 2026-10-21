@@ -1,16 +1,5 @@
 (ns intemporal.internal.execution.common
-  (:require
-   [intemporal.internal.activity :as activity]
-   [intemporal.internal.context :as context]))
-
-(defn due-asyncs [pending-asyncs]
-  (remove #(activity/retry-pending? (:attempt-state %)) pending-asyncs))
-
-(defn earliest-async-retry [pending-asyncs]
-  (->> pending-asyncs
-       (keep #(when (activity/retry-pending? (:attempt-state %))
-                (:retry-at (:attempt-state %))))
-       (reduce (fn [a b] (if a (min a b) b)) nil)))
+  (:require [intemporal.internal.context :as context]))
 
 (defn make-workflow-context
   ([workflow-id history registry observer]

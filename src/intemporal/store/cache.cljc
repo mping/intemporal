@@ -70,6 +70,7 @@
       (invalidate! cache workflow-id)
 
       (and prior state (seq events)
+           (= (:history-revision prior) (:previous-history-revision result))
            (= (inc (:history-revision prior)) (:history-revision state)))
       (remember! cache max-workflows workflow-id (:history-revision state)
                  (merge-first-wins (:history prior) events))

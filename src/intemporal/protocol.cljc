@@ -49,7 +49,9 @@
   (wake! [store workflow-id]
     "Wake a non-terminal workflow atomically.")
   (commit-transition! [store transition]
-    "Commit one declarative FSM transition atomically.  See
+    "Commit one declarative FSM transition atomically. A :creation-conflict is
+     permanent; :conflict and :wake-raced require a fresh snapshot. Successful
+     commits report :previous-history-revision for safe cache updates. See
      intemporal.internal.fsm for transition data shapes.")
   (release-owner! [store owner-id]
     "FSM spelling of release-owner; clears/requeues this owner's active work."))

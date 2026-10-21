@@ -172,8 +172,7 @@
 
 (defn- fsm-matching-creation?
   [tx root workflow-id workflow {:keys [started-event parent]}]
-  (and (= 1 (count (fsm-workflow-history tx root workflow-id)))
-       (fsm-matching-started-event? (first (fsm-workflow-history tx root workflow-id))
+  (and (fsm-matching-started-event? (first (fsm-workflow-history tx root workflow-id))
                                     started-event)
        (= (:parent workflow) parent)))
 
@@ -261,7 +260,7 @@
 (defn- fsm-transition-status
   [tx root transition workflows]
   (let [{:keys [workflow-id owner-id kind expected-wake-version consume-signals
-                expected-related-revisions]} transition
+                expected-related-revisions create-workflows]} transition
         root-workflow (get workflows workflow-id)
         signal-consumable?
         (fn [{:keys [signal-name queue-id signal-id]}]
@@ -284,13 +283,33 @@
                      (= revision (get-in workflows [id :revision])))
                    expected-related-revisions)) :conflict
       (not (every? signal-consumable? consume-signals)) :conflict
+      (domain/duplicate-creations? create-workflows) :creation-conflict
       :else :committed)))
 
-(defn- fsm-workflow-ids
-  [tx root]
-  (let [subspace (fsm-workflow-index-sub root)]
-    (mapv (fn [[[workflow-id] _]] workflow-id)
+(defn- fsm-owned-ids
+  [tx root owner-id]
+  (let [subspace (fsub/get root (fsm-key "owner" owner-id))]
+    (mapv (comp first first)
           (ordered-range tx subspace (fsub/range subspace)))))
+
+(defn- fsm-ready-ids
+  "Read bounded owner-local work first; indefinite waits have no scheduling key."
+  [tx root owner-id limit now-ms]
+  (reduce
+    (fn [ids [owner index]]
+      (let [remaining (- limit (count ids))]
+        (if-not (pos? remaining)
+          (reduced ids)
+          (let [subspace (fsub/get root (fsm-key index owner))
+                all (fsub/range subspace)
+                key-range (if (= "due" index)
+                            (Range. (.-begin all)
+                                    (.-end (fsub/range subspace (->tuple [now-ms]))))
+                            all)]
+            (into ids (map (comp peek first))
+                  (ordered-range tx subspace key-range remaining))))))
+    []
+    [[owner-id "due"] [owner-id "ready"] ["" "due"] ["" "ready"]]))
 
 (defn- fsm-read-workflows
   [tx root workflow-ids]
@@ -334,23 +353,9 @@
     (let [root (fsm-root root-subspace)]
       (ftr/run db
         (fn [tx]
-          (let [claimable
-                (->> (fsm-workflow-ids tx root)
-                     (keep (fn [workflow-id]
-                             (let [workflow (fsm-read-workflow tx root workflow-id)
-                                   eligible? (or (= :runnable (:run-state workflow))
-                                                 (and (= :waiting (:run-state workflow))
-                                                      (:next-run-at workflow)
-                                                      (<= (:next-run-at workflow) now-ms)))]
-                               (when (and eligible? (not (fsm-terminal? workflow))
-                                          (or (nil? (:owner-id workflow))
-                                              (= owner-id (:owner-id workflow))))
-                                 [workflow-id workflow]))))
-                     (sort-by (fn [[workflow-id workflow]]
-                                [(if (= owner-id (:owner-id workflow)) 0 1)
-                                 workflow-id]))
-                     (take limit)
-                     vec)]
+          (let [claimable (mapv (fn [workflow-id]
+                                 [workflow-id (fsm-read-workflow tx root workflow-id)])
+                               (fsm-ready-ids tx root owner-id limit now-ms))]
             (mapv (fn [[workflow-id workflow]]
                     (fsm-write-workflow!
                       tx root workflow-id workflow
@@ -380,7 +385,7 @@
     (let [root (fsm-root root-subspace)]
       (ftr/run db
         (fn [tx]
-          (let [running (->> (fsm-workflow-ids tx root)
+          (let [running (->> (fsm-owned-ids tx root owner-id)
                              (keep (fn [workflow-id]
                                      (let [workflow (fsm-read-workflow tx root workflow-id)]
                                        (when (and (= owner-id (:owner-id workflow))
@@ -497,7 +502,7 @@
                             (not (fsm-matching-creation? tx root (:workflow-id creation)
                                    workflow creation))))
                         create-workflows)
-                {:commit-status :conflict
+                {:commit-status :creation-conflict
                  :state (fsm-workflow-state tx root workflow-id)}
                 (let [creation-statuses (mapv #(fsm-create-workflow! tx root %) create-workflows)]
                   ;; An FDB retry restarts the transaction body, so an anomaly
@@ -507,11 +512,9 @@
                                     {:workflow-id workflow-id})))
                   (let [root-workflow (get workflows workflow-id)
                         root-workflow (reduce
-                                        (fn [workflow {:keys [signal-name queue-id signal-id]}]
+                                        (fn [workflow {:keys [signal-name queue-id]}]
                                           (fdb-core/clear tx (fsm-signal-sub root workflow-id)
                                                           (->tuple [signal-name queue-id]))
-                                          (fdb-core/clear tx root
-                                                          (fsm-signal-id-key workflow-id signal-id))
                                           workflow)
                                         root-workflow consume-signals)
                         root-workflow (fsm-append-events! tx root workflow-id root-workflow events)
@@ -546,13 +549,14 @@
                                                         (or terminal-status :terminated) events)
                             nil))))
                     {:commit-status :committed
+                     :previous-history-revision (:history-revision (get workflows workflow-id))
                      :state (fsm-workflow-state tx root workflow-id)})))))))))
 
   (release-owner! [_ owner-id]
     (let [root (fsm-root root-subspace)]
       (ftr/run db
         (fn [tx]
-          (doseq [workflow-id (fsm-workflow-ids tx root)
+          (doseq [workflow-id (fsm-owned-ids tx root owner-id)
                   :let [workflow (fsm-read-workflow tx root workflow-id)]
                   :when (and (= owner-id (:owner-id workflow))
                              (not (fsm-terminal? workflow)))]

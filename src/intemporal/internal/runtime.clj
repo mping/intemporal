@@ -23,6 +23,26 @@
     {:status :failed :error e :exception (error/map->exception e)}
     {:status :failed :error (error/throwable->map e) :exception e}))
 
+(defn- await-activity
+  [^Future future timeout activity-name]
+  (try
+    (let [result (if timeout (.get future timeout TimeUnit/MILLISECONDS) (.get future))]
+      {:status :success :result (:result result) :duration (:duration result)})
+    (catch TimeoutException _
+      (.cancel future true)
+      (failure (error/activity-timeout-exception activity-name timeout)))
+    (catch InterruptedException e
+      (.interrupt (Thread/currentThread))
+      (.cancel future true)
+      (failure (error/activity-interrupted-exception activity-name e)))
+    (catch CancellationException e
+      (failure (error/activity-interrupted-exception activity-name e)))
+    (catch Exception e
+      (let [cause (or (.getCause e) e)]
+        (failure (if (throwable/interrupted? e)
+                   (error/activity-interrupted-exception activity-name cause)
+                   cause))))))
+
 (defrecord ParallelActivityExecutor [^ExecutorService pool
                                      registry-atom
                                      default-timeout-ms]
@@ -54,89 +74,50 @@
   (execute-activities-parallel [_ activities]
     (if (empty? activities)
       []
-      ;; Capture the workflow-thread context once so every parallel activity span
-      ;; (each on its own pool thread) parents under the workflow trace.
       (let [parent-ctx (tracing/capture)
-            futures (mapv (fn [{:keys [activity-name args timeout-ms]}]
-                            (let [act     (get @registry-atom activity-name)
-                                  timeout (or timeout-ms default-timeout-ms)]
-                              (if (nil? act)
-                                (throw (ex-info "Activity not found"
-                                                {:activity-name activity-name}))
-                                ;; The .submit must not escape this mapv. A saturated or
-                                ;; closing pool rejects here, and an
-                                ;; escaping RejectedExecutionException blows straight
-                                ;; through process-pending-asyncs-parallel ->
-                                ;; handle-suspension -> drive-workflow! (none of
-                                ;; which catch it), killing the drive AND leaving the
-                                ;; already-submitted activities' side effects with no
-                                ;; recorded events. Instead degrade the same way the
-                                ;; sequential path does (see attempt-once): record
-                                ;; :rejected for whatever could not be submitted, let the
-                                ;; futures that WERE submitted run to completion so their
-                                ;; events are still written, and let `stub` / `async`
-                                ;; reschedule the rejected ones on the next pass.
-                                (try
-                                  {:future        (.submit pool ^Callable
-                                                           (fn []
-                                                             (tracing/traced-call parent-ctx (str "activity: " activity-name)
-                                                                                  {:intemporal.activity/name activity-name}
-                                                                                  (fn []
-                                                                                    ;; Exactly ONE attempt. Retrying here was invisible to the
-                                                                                    ;; engine: this thread has no store, workflow-id or seq, so
-                                                                                    ;; nothing about an attempt could be recorded and every crash
-                                                                                    ;; restarted the count at 1. The engine now owns
-                                                                                    ;; the retry loop, which also makes `timeout` bound a single
-                                                                                    ;; attempt rather than the whole sequence.
-                                                                                    (let [start (System/currentTimeMillis)]
-                                                                                      {:result   (apply (:fn act) args)
-                                                                                       :duration (- (System/currentTimeMillis) start)})))))
-                                   :timeout       timeout
-                                   :activity-name activity-name}
-                                  (catch RejectedExecutionException e
-                                    (log/warnf e "Activity %s rejected by executor; recording :rejected for reschedule" activity-name)
-                                    {:rejected      (error/throwable->map
-                                                      (error/activity-rejected-exception activity-name e))
-                                     :activity-name activity-name})))))
-                          activities)]
-        (mapv (fn [{:keys [^Future future timeout activity-name rejected]}]
-                (if rejected
-                  ;; Never submitted: no side effect happened, so this is safe to
-                  ;; re-run. The :rejected exception-kind is what makes `stub` /
-                  ;; `async` reschedule instead of replaying a durable failure.
-                  (failure rejected)
-                  (try
-                    (let [result (if timeout
-                                   (.get future timeout TimeUnit/MILLISECONDS)
-                                   (.get future))]
-                      {:status   :success
-                       :result   (:result result)
-                       :duration (:duration result)})
-                    (catch TimeoutException _
-                      (.cancel future true)
-                      (failure (error/activity-timeout-exception activity-name timeout)))
-                    ;; An interrupt is infrastructure (engine shutdown), not a
-                    ;; workflow outcome. It must be classified with
-                    ;; the same :activity-interrupted kind the single-activity path
-                    ;; uses (execute-activity), or the replay branches cannot tell it
-                    ;; apart from a genuine failure and durably fail the workflow.
-                    (catch InterruptedException e
-                      ;; The collecting (drive) thread itself was interrupted. Re-arm
-                      ;; the flag — .get cleared it — so the remaining collections and
-                      ;; the engine's interrupt-error? guard still see the interrupt.
-                      (.interrupt (Thread/currentThread))
-                      (.cancel future true)
-                      (failure (error/activity-interrupted-exception activity-name e)))
-                    (catch CancellationException e
-                      (failure (error/activity-interrupted-exception activity-name e)))
-                    (catch Exception e
-                      (let [cause (or (.getCause e) e)]
-                        (failure (if (throwable/interrupted? e)
-                                   ;; .shutdownNow interrupted the ACTIVITY thread:
-                                   ;; arrives as ExecutionException(InterruptedException).
-                                   (error/activity-interrupted-exception activity-name cause)
-                                   cause)))))))
-              futures))))
+            watchers (Executors/newVirtualThreadPerTaskExecutor)
+            submitted (atom [])]
+        (try
+          ;; Start each timeout watcher immediately, before submitting the next task.
+          ;; Collection order and bounded-pool backpressure cannot delay its timeout.
+          (let [results
+                (mapv
+                  (fn [{:keys [activity-name args timeout-ms]}]
+                    (let [act (get @registry-atom activity-name)
+                          timeout (or timeout-ms default-timeout-ms)]
+                      (if-not act
+                        {:value (failure (ex-info "Activity not found" {:activity-name activity-name}))}
+                        (try
+                          (let [future (.submit pool ^Callable
+                                         (fn []
+                                           (tracing/traced-call
+                                             parent-ctx (str "activity: " activity-name)
+                                             {:intemporal.activity/name activity-name}
+                                             (fn []
+                                               (let [start (System/currentTimeMillis)]
+                                                 {:result (apply (:fn act) args)
+                                                  :duration (- (System/currentTimeMillis) start)})))))
+                                _ (swap! submitted conj future)]
+                            {:activity-name activity-name
+                             :watcher (.submit watchers ^Callable
+                                        (reify java.util.concurrent.Callable
+                                          (call [_] (await-activity future timeout activity-name))))})
+                          (catch RejectedExecutionException e
+                            {:value (failure (error/activity-rejected-exception activity-name e))})))))
+                  activities)]
+            (mapv (fn [{:keys [value watcher activity-name]}]
+                    (or value
+                        (try
+                          (.get ^Future watcher)
+                          (catch InterruptedException e
+                            (.interrupt (Thread/currentThread))
+                            (failure (error/activity-interrupted-exception activity-name e))))))
+                  results))
+          (finally
+            ;; Interrupting a drive also stops its watchers and unfinished activities.
+            (doseq [^Future future @submitted :when (not (.isDone future))]
+              (.cancel future true))
+            (.shutdownNow watchers))))))
 
   (shutdown-executor [_ grace-period-secs]
     (try
@@ -149,11 +130,7 @@
         (log/error e "Interrupted while shutting down pool"))))
 
   (shutdown? [_]
-    ;; .isShutdown (not .isTerminated): the executor stops ACCEPTING work the
-    ;; moment shutdown is initiated. Using isTerminated left a window where the
-    ;; drive loop kept scheduling activities into a closing pool — each submit
-    ;; rejected, each rejection rescheduled — spinning through the replay budget
-    ;; and wrongly finalizing the workflow as :failed during engine shutdown.
+    ;; Acceptance stops before in-flight tasks finish; termination is too late.
     (.isShutdown pool)))
 
 (defn backpressure-rejection-handler
@@ -172,9 +149,7 @@
    a closing pool, and a wait that exceeds `submit-timeout-ms`. Both surface as
    `RejectedExecutionException`, which `attempt-once` / `execute-activities-parallel`
    classify as `:rejected` so `stub` and `async` RESCHEDULE rather than replay a
-   durable failure. Keeping rejection rare matters: every reschedule costs a
-   replay iteration, and budget exhaustion still finalizes a workflow as
-   `:failed`."
+   durable failure. Keeping rejection rare avoids unnecessary replay passes."
   ^RejectedExecutionHandler [submit-timeout-ms]
   (reify RejectedExecutionHandler
     (rejectedExecution [_ task pool]

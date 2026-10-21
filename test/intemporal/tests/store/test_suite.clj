@@ -12,6 +12,8 @@
    [intemporal.core :as intemporal]
    [intemporal.protocol :as p]
    [intemporal.spec :as spec]
+   [intemporal.tests.engine.progress-test :as progress]
+   [intemporal.tests.store.durability-test :as durability]
    [matcher-combinators.test :refer [match?]]))
 
 (defn test-activity [x] (* x 10))
@@ -74,7 +76,26 @@
               (s/explain-str ::spec/snapshot snapshot))
           (is (= [:workflow-started] (mapv :event-type (:history snapshot))))
           (is (= :runnable (:run-state snapshot)))
-          (is (= 1 (:history-revision snapshot))))))
+          (is (= 1 (:history-revision snapshot))))
+        (claim store owner-id workflow-id (System/currentTimeMillis))
+        (p/commit-transition! store
+          {:workflow-id workflow-id :owner-id owner-id :kind :continue
+           :events [{:event-type :timer-scheduled :seq 0 :fire-at 100}]})
+        (is (= :exists (:create-status (p/create-workflow! store request))))))
+
+    (testing "conflicting child IDs leave the entire batch untouched"
+      (let [parent-id (str "batch-parent-" (random-uuid))
+            child-id (str parent-id "/child")
+            child (creation child-id owner-id
+                            {:workflow-id parent-id :seq 0 :policy :terminate})]
+        (p/create-workflow! store (creation parent-id owner-id))
+        (claim store owner-id parent-id (System/currentTimeMillis))
+        (is (= :creation-conflict
+               (:commit-status
+                 (p/commit-transition! store
+                   {:workflow-id parent-id :owner-id owner-id :kind :continue :events []
+                    :create-workflows [child (assoc-in child [:parent :seq] 1)]}))))
+        (is (= :not-found (p/get-workflow-status store child-id)))))
 
     (testing "competing owners make disjoint durable claims"
       (let [prefix (str "claim-" (random-uuid))
@@ -171,7 +192,13 @@
           (is (= ["two"]
                  (mapv :signal-id
                        (get-in (p/load-workflow-state store workflow-id)
-                               [:signals "go"])))))))
+                               [:signals "go"]))))
+          (is (= :duplicate (:signal-status
+                              (p/add-signal! store workflow-id "go"
+                                             {:signal-id "one" :payload {:n 1}}))))
+          (is (= :conflict (:signal-status
+                             (p/add-signal! store workflow-id "go"
+                                            {:signal-id "one" :payload {:n 9}})))))))
 
     (testing "a terminal transition atomically closes children"
       (let [parent-id (str "parent-" (random-uuid))
@@ -215,6 +242,8 @@
 
 (defn run-store-tests [store]
   (s/check-asserts true)
+  (durability/run-store-tests store)
+  (progress/run-store-tests store)
   (run-fsm-contract-tests store)
   (testing "the engine executes an FSM-backed workflow against this backend"
     (let [owner-id (str "execution-owner-" (random-uuid))

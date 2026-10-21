@@ -7,11 +7,10 @@
   its normalized result back to the reducer.  Keeping that boundary explicit is
   what lets the JVM and CLJS interpreters share workflow lifecycle semantics.
 
-  The replay adapter supplies a `:plan` for suspensions and effect outcomes.
-  Plans contain only data, notably the exact transition that must be committed;
-  they never contain functions or live resources.  This lets the FSM enforce
-  ordering (snapshot -> replay -> pre-effect commit -> effect -> outcome
-  commit) without duplicating the workflow DSL in the reducer.
+  Adapters supply replay outcomes, serialized errors, and clock readings. The
+  reducer plans suspensions, async batches, and activity-result transitions.
+  It enforces snapshot -> replay -> pre-effect commit -> effect -> outcome
+  commit; only adapters invoke user code or access live resources.
 
   See the [Mermaid state diagram](../../../doc/fsm.mermaid) for the complete
   phase and command flow.")
@@ -400,6 +399,92 @@
 
     (throw (ex-info "Unknown replay plan" {:plan plan}))))
 
+(defn- terminal-replay
+  [machine status pending-events payload]
+  {:kind :terminal
+   :result (cond-> {:status status :workflow-id (:workflow-id machine)}
+             (= :completed status) (assoc :result payload)
+             (not= :completed status) (assoc :error payload))
+   :terminal-input {:snapshot (:snapshot machine)
+                    :now-ms (:now-ms machine)
+                    :status status
+                    :pending-events pending-events
+                    :payload payload}})
+
+(defn- retry-pending?
+  [attempt now-ms]
+  (and (:will-retry attempt) (:retry-at attempt) (> (:retry-at attempt) now-ms)))
+
+(defn- replay-plan
+  "Plan replay output using only the supplied snapshot and time."
+  [machine {:keys [status result error pending-events pending-creations pending-asyncs
+                   suspension-type suspension-data]}]
+  (let [{:keys [snapshot now-ms]} machine
+        base (assoc (select-keys machine [:workflow-id :owner-id])
+                    :kind :continue :events (vec pending-events))
+        suspension #(suspension-plan (select-keys machine [:workflow-id :owner-id])
+                                      snapshot now-ms suspension-type suspension-data
+                                      pending-events)]
+    (cond
+      (seq pending-creations)
+      {:kind :continue :transition (assoc base :create-workflows pending-creations)}
+
+      (seq pending-asyncs)
+      (let [{spent true eligible false}
+            (group-by #(boolean (and (:attempt-state %)
+                                     (not (get-in % [:attempt-state :will-retry]))))
+                      pending-asyncs)
+            drain? (= :completed status)
+            runnable (vec (if drain? eligible
+                            (remove #(retry-pending? (:attempt-state %) now-ms) eligible)))]
+        (if (seq (concat spent runnable))
+          {:kind :effect
+           :pre-transition base
+           :effect {:kind :async :spent (vec spent) :runnable runnable :drain? drain?}}
+          (when (= :suspended status)
+            (when-let [plan (suspension)]
+              (if (and (= :park (:kind plan)) (= :async (:reason plan)))
+                (assoc-in plan [:transition :next-run-at]
+                          (reduce min (map #(get-in % [:attempt-state :retry-at]) eligible)))
+                plan)))))
+
+      (= :completed status)
+      (terminal-replay machine :completed pending-events result)
+
+      (= :cancelled status)
+      (terminal-replay machine :cancelled pending-events
+                       {:type #?(:clj "clojure.lang.ExceptionInfo" :cljs "cljs.core/ExceptionInfo")
+                        :message "Workflow cancelled"
+                        :data {:workflow-id (:workflow-id machine)}})
+
+      (= :failed status)
+      (terminal-replay machine :failed pending-events error)
+
+      (= :interrupted status)
+      {:kind :return :result (interrupted-result machine)}
+
+      (= :suspended status) (suspension)
+      :else nil)))
+
+(defn- activity-outcome
+  "Commit the attempt before parking; a wake race must never discard an effect."
+  [machine {:keys [outcome now-ms]}]
+  (let [{:keys [seq activity-name]} (get-in machine [:effect :suspension])
+        retry? (= :retry-scheduled (:status outcome))
+        success? (= :success (:status outcome))
+        event (cond-> {:event-type (if success? :activity-completed :activity-failed)
+                       :seq seq :activity-name activity-name
+                       :duration-ms (:duration outcome) :attempts (:attempts outcome)
+                       :timestamp now-ms}
+                success? (assoc :result (:result outcome))
+                (not success?) (assoc :error (:error outcome)))
+        events (cond-> []
+                 (:attempt-event outcome) (conj (:attempt-event outcome))
+                 (not retry?) (conj event))]
+    {:transition (assoc (select-keys machine [:workflow-id :owner-id])
+                        :kind :continue :events events)
+     :emissions (when retry? [{:event :retry-parked :seq seq :retry-at (:retry-at outcome)}])}))
+
 (defn step
   "Reduce `machine` with one normalized interpreter input.
 
@@ -445,13 +530,12 @@
     :replay
     (case type
       :replay-returned
-      (let [{:keys [status plan] :as replay} (:replay input)]
-        (case status
-          :completed (run-plan machine plan)
-          :cancelled (run-plan machine plan)
-          :failed    (run-plan machine plan)
-          :suspended (run-plan machine plan)
-          :returned  (run-plan machine plan)
+      (let [machine (-> machine (update :iterations inc)
+                        (assoc :now-ms (:now-ms input)))
+            replay (:replay input)
+            plan (or (:plan replay) (replay-plan machine replay))]
+        (if plan
+          (run-plan machine plan)
           (throw (ex-info "Unknown replay result" {:replay replay}))))
 
       :shutdown
@@ -466,7 +550,15 @@
       (let [result (:result input)]
         (cond
           (= :committed (:commit-status result))
-          (replay-command (update machine :iterations inc) (:snapshot machine))
+          (reload machine)
+
+          (= :creation-conflict (:commit-status result))
+          (run-plan machine
+                    (terminal-replay machine :failed []
+                                     {:type "intemporal/ChildIdConflict"
+                                      :message "Child workflow ID belongs to another creation"
+                                      :data {:error/type :intemporal/child-id-conflict
+                                             :workflow-id (:workflow-id machine)}}))
 
           (conflict? result) (reload machine)
           (commit-interrupted? result) (finish machine (interrupted-result machine))
@@ -511,9 +603,11 @@
     :effect
     (case type
       :effect-result
-      (let [{:keys [transition retry-plan]} (:result input)]
+      (let [result (:result input)
+            {:keys [transition retry-plan emissions]}
+            (if (:outcome result) (activity-outcome machine result) result)]
         (cond
-          transition (commit-command machine :commit-effect transition)
+          transition (commit-command machine :commit-effect transition emissions)
           retry-plan (run-plan machine retry-plan)
           :else (throw (ex-info "Effect result needs transition or retry-plan"
                          {:result (:result input)}))))
@@ -532,7 +626,7 @@
       (let [result (:result input)]
         (cond
           (= :committed (:commit-status result))
-          (replay-command (update machine :iterations inc) (:snapshot machine))
+          (reload machine)
 
           (conflict? result) (reload machine)
           (commit-interrupted? result) (finish machine (interrupted-result machine))

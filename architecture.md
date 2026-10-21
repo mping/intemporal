@@ -41,18 +41,22 @@ descendants.
 
 - A snapshot combines immutable ordered history with live owner, scheduling, cancellation,
   revision, wake-version, and FIFO signal-envelope state. Replay only reads this snapshot.
+  Consumed signal IDs remain reserved; resending an ID cannot enqueue it again.
 - Event identity is first-write-wins: `[event-type seq nil]`, except retry-attempt events
   include their running `:attempts` count. Sequence is a replay address, not commit time.
 - A guarded park compares wake-version and returns `:wake-raced` without consuming input.
   Signal transitions compare the selected FIFO envelope. Close transitions compare every
-  related descendant revision. Conflicts reload and replan rather than applying stale work.
+  related descendant revision. Transient conflicts reload and replan; permanent child-ID
+  conflicts fail the parent without modifying the existing child.
 - Terminal transitions write the root terminal event, parent completion alias/wake, and all
   selected `:cascade-cancel` / `:terminate` descendant actions atomically. `:abandon`
   stops traversal below that child.
 - `claim-runnable!`, recovery, and owner release are engine lifecycle operations. A stable
   owner must name at most one live engine; there are deliberately no leases or fencing.
 - `CachedStore` caches histories only by `:history-revision`; metadata and signal inboxes
-  are always read live. Checked and cache decorators preserve `AutoCloseable` delegation.
+  are always read live. A commit reports its previous history revision so a cache cannot
+  mistake another writer's append for its own. Checked and cache decorators preserve
+  `AutoCloseable` delegation.
 
 The atomic operations above must not be reconstructed from independent public reads and
 writes. JDBC keeps them in one SQL transaction, FDB in one FDB transaction, and the
@@ -77,7 +81,7 @@ The store maintains the scheduling machine independently:
 stateDiagram-v2
     [*] --> RUNNABLE: workflow-started
     RUNNABLE --> RUNNING: claim-runnable!
-    RUNNING --> WAITING: park-workflow!
+    RUNNING --> WAITING: commit-transition! park
     WAITING --> RUNNING: claim-runnable! when due
     WAITING --> RUNNABLE: signal / cancel / child completion
     RUNNING --> RUNNING: concurrent wake increments wake_version
@@ -103,7 +107,7 @@ flowchart TD
     Dispatch -->|activity completed or event became available| Continue["{:op :continue}"]
     Continue --> Load
     Dispatch -->|must wait| Park["{:op :park :events :next-run-at}"]
-    Park --> Commit["park-workflow!(expected wake_version)"]
+    Park --> Commit["commit-transition! park(expected wake_version)"]
     Commit -->|parked| Waiting["return :parked"]
     Commit -->|wake-raced + current version| Load
     Outcome -->|executor stopping| Interrupted["return :interrupted; engine requeues"]
@@ -121,8 +125,9 @@ Suspension handlers return one of two shapes:
 ```
 
 Events required before an activity side effect are committed while the workflow remains
-`RUNNING`. Events describing the final suspension are passed to `park-workflow!`, which
-appends them atomically with `RUNNING -> WAITING`.
+`RUNNING`. Activity outcomes commit before any guarded park, so a wake race cannot discard an
+executed attempt. A park transition appends suspension events atomically with
+`RUNNING -> WAITING`.
 
 ## Wake race
 
@@ -132,7 +137,7 @@ Every active workflow has a monotonic `wake_version`.
 2. A signal, cancellation, or child completion commits its data and wakes atomically.
 3. Waking `WAITING` produces `RUNNABLE`; waking `RUNNING` only increments the version.
 4. The drive parks with its expected version.
-5. If the version is stale, `park-workflow!` appends no suspension events, leaves the row
+5. If the version is stale, `commit-transition!` appends no suspension events, leaves the row
    `RUNNING`, and returns the current version. The same drive immediately replays.
 
 This prevents both a lost wake and concurrent redispatch.
@@ -165,11 +170,13 @@ A running engine owns exactly one scheduling loop. It claims at most its availab
 `:workflow-concurrency` capacity and executes claims in a bounded pool. Every poll yields,
 including empty and capacity-exhausted polls.
 
+A drive that exhausts its replay budget yields its claim for another scheduler pass.
+The budget limits work per drive, including conflict retries; it does not fail a workflow.
+
 Stable owner ids allow `recover-running!` to return same-owner crash leftovers to
 `RUNNABLE`. A stable id must identify at most one live process: there are no leases or
-fencing tokens yet. Generated `ephemeral-*` ids are suitable for local/in-memory engines,
-not cross-process crash recovery. Workflow definitions and protocol implementations must
-be loaded at construction, before recovery scans begin.
+fencing tokens yet. Every engine requires an explicit non-empty `:owner-id`. Workflow
+definitions and protocol implementations must be loaded before recovery scans begin.
 
 Controlled shutdown stops claiming, drains or interrupts current work within its grace
 period, requeues interrupted nonterminal drives, releases ownership, and then shuts down

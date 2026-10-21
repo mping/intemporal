@@ -36,3 +36,8 @@
    one replay sequence, so their running attempt number is part of the identity."
   [{:keys [event-type seq attempts]}]
   [event-type seq (when (= :activity-attempt-failed event-type) attempts)])
+
+(defn duplicate-creations?
+  "One transition cannot assign a child ID to multiple operations."
+  [creations]
+  (not= (count creations) (count (set (map :workflow-id creations)))))

@@ -243,9 +243,8 @@
     (vec creations)))
 
 (defn- replay-once
-  [{:keys [store registry owner-id]} workflow-id workflow-fn args observer]
-  (let [snapshot (p/load-snapshot store workflow-id)
-        history  (:history snapshot)
+  [{:keys [registry owner-id]} workflow-id workflow-fn args observer snapshot]
+  (let [history  (:history snapshot)
         context  (common/make-workflow-context workflow-id history registry observer
                                                {:now-ms (clock/now-ms)
                                                 :owner-id owner-id
@@ -294,158 +293,13 @@
     :failed    (-notify obs/on-workflow-failed observer workflow-id payload)
     nil))
 
-(defn- commit-terminal-plan!
-  "Load the close tree and atomically commit one terminal plan.
-
-   A close-tree revision conflict is intentionally reported as an interrupted
-   drive: the scheduler requeues it and a fresh replay rebuilds the exact
-   terminal plan.  It is never converted into a user-visible workflow failure.
-   "
-  [{:keys [store owner-id]} workflow-id snapshot status pending-events payload observer]
-  (let [snapshot (or snapshot (p/load-snapshot store workflow-id))
-        tree     (p/load-close-tree store workflow-id)
-        plan     (fsm/terminal-plan {:workflow-id workflow-id :owner-id owner-id}
-                                    snapshot tree (clock/now-ms) status
-                                    pending-events payload)
-        {:keys [commit-status state]} (p/commit-transition! store (:transition plan))]
-    (cond
-      (= :committed commit-status)
-      (do
-        (deliver-terminal-emissions! observer workflow-id status payload)
-        (doseq [{:keys [op workflow-id]} (:close-actions plan)]
-          (tracing/finish-workflow-span!
-            workflow-id
-            (when (= op :cancel) {:message "cancelled (parent closed)"})))
-        (tracing/finish-workflow-span! workflow-id (when-not (= :completed status) payload))
-        (:result plan))
-
-      (= :terminal commit-status)
-      {:status (:status state) :workflow-id workflow-id}
-
-      :else
-      {:status :interrupted :workflow-id workflow-id})))
-
-(defn- replay-plan
-  "Normalize one replay pass into a pure FSM plan; nil is an invalid outcome."
-  [machine exec-result]
-  (let [snapshot (:snapshot exec-result)
-        terminal (fn [status payload]
-                   {:status :returned
-                    :plan {:kind :terminal
-                           :result (cond-> {:status status
-                                            :workflow-id (:workflow-id machine)}
-                                     (= :completed status) (assoc :result payload)
-                                     (not= :completed status) (assoc :error payload))
-                           :terminal-input {:snapshot snapshot
-                                            :now-ms (clock/now-ms)
-                                            :status status
-                                            :pending-events (:pending-events exec-result)
-                                            :payload payload}}})]
-    (cond
-      ;; Child creation is declared by replay and committed with the parent's
-      ;; scheduled marker before the next pass.  It is a normal continuation,
-      ;; not a special side-effect escape hatch.
-      (seq (:pending-creations exec-result))
-      {:status :returned
-       :plan {:kind :continue
-              :transition {:workflow-id (:workflow-id machine)
-                           :owner-id (:owner-id machine)
-                           :kind :continue
-                           :events (:pending-events exec-result)
-                           :create-workflows
-                           (propagate-child-tracecontext
-                             (:workflow-id machine) snapshot
-                             (:pending-creations exec-result))}}}
-
-      (seq (:pending-asyncs exec-result))
-      (let [pending (:pending-asyncs exec-result)
-            {spent true eligible false}
-            (group-by #(a/retry-budget-spent? (:attempt-state %)) pending)
-            drain? (= :completed (:status exec-result))
-            runnable (vec (if drain? eligible (common/due-asyncs eligible)))]
-        (if (seq (concat spent runnable))
-          {:status :returned
-           :plan {:kind :effect
-                  :pre-transition {:workflow-id (:workflow-id machine)
-                                   :owner-id (:owner-id machine)
-                                   :kind :continue
-                                   :events (:pending-events exec-result)}
-                  :effect {:kind :async
-                           :pending-asyncs pending
-                           :drain? drain?}}}
-          ;; No async is due.  A join/async park must wake at the earliest
-          ;; recorded retry deadline, never by a process-local timer.
-          (when (= :suspended (:status exec-result))
-            (when-let [plan (fsm/suspension-plan
-                              (select-keys machine [:workflow-id :owner-id]) snapshot
-                              (clock/now-ms) (:suspension-type exec-result)
-                              (:suspension-data exec-result) (:pending-events exec-result))]
-              {:status :suspended
-               :plan (if (and (= :park (:kind plan))
-                              (= :async (:reason plan)))
-                       (assoc-in plan [:transition :next-run-at]
-                                 (common/earliest-async-retry pending))
-                       plan)}))))
-
-      (= :completed (:status exec-result))
-      (terminal :completed (:result exec-result))
-
-      (= :cancelled (:status exec-result))
-      (terminal :cancelled {:type "clojure.lang.ExceptionInfo"
-                            :message "Workflow cancelled"
-                            :data {:workflow-id (:workflow-id machine)}})
-
-      (and (= :failed (:status exec-result))
-           (not (interrupt-error? (:error exec-result))))
-      (terminal :failed (error/throwable->map (:error exec-result)))
-
-      (= :suspended (:status exec-result))
-      (when-let [plan (fsm/suspension-plan
-                        (select-keys machine [:workflow-id :owner-id]) snapshot
-                        (clock/now-ms) (:suspension-type exec-result)
-                        (:suspension-data exec-result) (:pending-events exec-result))]
-        {:status :suspended :plan plan})
-
-      :else nil)))
-
 (defn- execute-fsm-activity!
-  "Interpret one durable activity effect after its scheduling transition.
-
-   The activity has no store capability.  Its result is converted into either a
-   post-effect append transition or a durable retry park plan for the reducer.
-   "
-  [{:keys [executor owner-id]} workflow-id {:keys [effect wake-version]} observer]
+  [engine workflow-id {:keys [effect]} observer]
   (let [{:keys [seq activity-name args timeout-ms retry-policy attempt-state]}
         (:suspension effect)
-        outcome (run-attempt executor activity-name args timeout-ms retry-policy
-                             observer workflow-id seq attempt-state)
-        base {:workflow-id workflow-id :owner-id owner-id}]
-    (if (= :retry-scheduled (:status outcome))
-      {:retry-plan {:kind :park
-                    :result {:status :parked :reason :retry :workflow-id workflow-id}
-                    :emissions [{:event :retry-parked :seq seq
-                                 :retry-at (:retry-at outcome)}]
-                    :transition (assoc base
-                                       :kind :park
-                                       :expected-wake-version wake-version
-                                       :next-run-at (:retry-at outcome)
-                                       :events [(:attempt-event outcome)])}}
-      (let [success? (= :success (:status outcome))
-            event (cond-> {:event-type (if success?
-                                         :activity-completed
-                                         :activity-failed)
-                           :seq seq
-                           :activity-name activity-name
-                           :result (:result outcome)
-                           :duration-ms (:duration outcome)
-                           :attempts (:attempts outcome)
-                           :timestamp (clock/now-ms)}
-                    success? (assoc :result (:result outcome))
-                    (not success?) (assoc :error (:error outcome)))
-            events (cond-> []
-                     (:attempt-event outcome) (conj (:attempt-event outcome))
-                     true (conj event))]
-        {:transition (assoc base :kind :continue :events events)}))))
+        outcome (run-attempt (:executor engine) activity-name args timeout-ms retry-policy
+                             observer workflow-id seq attempt-state)]
+    {:outcome outcome :now-ms (clock/now-ms)}))
 
 (defn- execute-fsm-async!
   "Run the eligible async batch after its pre-effect transition.
@@ -453,10 +307,7 @@
    The batch produces one post-effect append transition.  No activity outcome
    is made durable until the complete batch result has been normalized."
   [{:keys [executor owner-id]} workflow-id {:keys [effect]} observer]
-  (let [{:keys [pending-asyncs drain?]} effect
-        {spent true eligible false}
-        (group-by #(a/retry-budget-spent? (:attempt-state %)) pending-asyncs)
-        runnable (vec (if drain? eligible (common/due-asyncs eligible)))
+  (let [{:keys [spent runnable drain?]} effect
         now (clock/now-ms)
         results (if (seq runnable)
                   (p/execute-activities-parallel executor runnable)
@@ -479,30 +330,25 @@
                                         :wake-version wake-version})
                     {:type :begin})]
     (let [{:keys [machine command emissions]} response]
-      (if (>= (:iterations machine) max-iterations)
-        (do
-          (log/warnf "Workflow %s exceeded replay budget of %d iterations"
-                     workflow-id max-iterations)
-          (commit-terminal-plan!
-            engine workflow-id (p/load-snapshot store workflow-id) :failed []
-            (error/throwable->map
-              (ex-info "Replay budget exceeded"
-                       {:workflow-id workflow-id :iterations (:iterations machine)}))
-            observer))
+      (if (and (= :invoke-replay (:op command))
+               (>= (:iterations machine) max-iterations))
+        {:status :interrupted :reason :replay-budget :workflow-id workflow-id}
         (case (:op command)
           :load-snapshot
           (recur (fsm/step machine {:type :snapshot-loaded
                                     :snapshot (p/load-snapshot store workflow-id)}))
 
           :invoke-replay
-          (let [exec-result (replay-once engine workflow-id workflow-fn args observer)
-                replay      (replay-plan machine exec-result)]
-            (if replay
-              (recur (fsm/step machine {:type :replay-returned :replay replay}))
-              (throw (ex-info "Replay produced an unsupported FSM outcome"
-                              {:workflow-id workflow-id
-                               :execution-status (:status exec-result)
-                               :suspension-type (:suspension-type exec-result)}))))
+          (let [result (replay-once engine workflow-id workflow-fn args observer (:snapshot command))
+                result (update result :pending-creations
+                               #(propagate-child-tracecontext workflow-id (:snapshot command) %))
+                result (if (= :failed (:status result))
+                         (if (interrupt-error? (:error result))
+                           (assoc result :status :interrupted)
+                           (update result :error error/throwable->map))
+                         result)]
+            (recur (fsm/step machine {:type :replay-returned :replay result
+                                      :now-ms (clock/now-ms)})))
 
           :commit-transition
           (let [result (p/commit-transition! store (:transition command))]
