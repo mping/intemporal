@@ -1,7 +1,7 @@
 (ns intemporal.benchmarks.store-bench
   "Store throughput benchmark.
 
-   Each store runs two scenarios, 1000 workflows each:
+   Each store runs two scenarios per concurrency level, 1000 workflows each:
    - one activity per workflow
    - ten concurrent async activities per workflow
 
@@ -40,8 +40,10 @@
 
 ;; Identical engine settings for every store, so only the store varies.
 (def ^:private engine-opts
-  {:workflow-concurrency 16
-   :enable-telemetry false})
+  {:enable-telemetry false})
+
+;; Swept :workflow-concurrency values: shows whether engine or store bounds throughput.
+(def ^:private concurrency-levels [4 16 64])
 
 ;; ---------------------------------------------------------------------------
 ;; Workflows
@@ -110,20 +112,29 @@
      :failed     failed
      :elapsed-ms elapsed-ms}))
 
+(defn- bench-engine
+  "Run all scenarios on a fresh engine with the given concurrency."
+  [st store-name concurrency]
+  (let [engine (intemporal/start-engine
+                 (assoc engine-opts
+                        :store st
+                        :workflow-concurrency concurrency
+                        :owner-id (str "bench-" store-name "-" (random-uuid))))]
+    (try
+      (mapv #(assoc (run-scenario engine store-name %) :concurrency concurrency)
+            scenarios)
+      (finally
+        (intemporal/shutdown-engine engine)))))
+
 (defn- bench-store
-  "Run all scenarios on one store with a fresh engine. Returns report rows."
+  "Run every concurrency level on one store. Returns report rows."
   [[store-name make-store]]
   (println "Benchmarking" store-name "...")
   (try
-    (let [st     (make-store)
-          engine (intemporal/start-engine
-                   (assoc engine-opts
-                          :store st
-                          :owner-id (str "bench-" store-name "-" (random-uuid))))]
+    (let [st (make-store)]
       (try
-        (mapv #(run-scenario engine store-name %) scenarios)
+        (into [] (mapcat #(bench-engine st store-name %)) concurrency-levels)
         (finally
-          (intemporal/shutdown-engine engine)
           (close! st))))
     (catch Exception e
       (println "Skipping" store-name "-" (ex-message e))
@@ -136,24 +147,26 @@
 
 (defn- report-row
   "Throughput per workflow and per activity; vs-best is slowdown against the
-   fastest store in the same scenario (1.00 = fastest)."
-  [best {:keys [scenario workflows activities elapsed-ms] :as row}]
+   fastest store in the same scenario and concurrency (1.00 = fastest)."
+  [best {:keys [scenario concurrency workflows activities elapsed-ms] :as row}]
   (let [secs (/ elapsed-ms ms-per-s)]
     (assoc row
            :total-ms (fmt elapsed-ms)
            :wf/s     (fmt (/ workflows secs))
            :act/s    (fmt (/ activities secs))
            :ms/act   (fmt (/ elapsed-ms activities))
-           :vs-best  (fmt (/ elapsed-ms (best scenario))))))
+           :vs-best  (fmt (/ elapsed-ms (best [scenario concurrency]))))))
 
-(defn- print-report [rows]
-  (let [best (update-vals (group-by :scenario rows)
+(defn- print-report
+  "One table, grouped by scenario; rows keep store, then concurrency order."
+  [rows]
+  (let [best (update-vals (group-by (juxt :scenario :concurrency) rows)
                           #(apply min (map :elapsed-ms %)))]
     (pprint/print-table
-      [:scenario :store :workflows :activities :failed
+      [:scenario :store :concurrency :workflows :activities :failed
        :total-ms :wf/s :act/s :ms/act :vs-best]
       (map #(report-row best %)
-           (sort-by (juxt :scenario :elapsed-ms) rows)))))
+           (sort-by :scenario rows)))))
 
 (defn- quiet-logs!
   "Keep log I/O out of timings; test/logback.xml logs at TRACE."
