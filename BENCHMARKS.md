@@ -27,7 +27,7 @@ Source: `test/intemporal/benchmarks/store_bench.clj`.
 - Time: submit all 1000 workflows, then await all 1000, from 16 client threads.
 - `ms/act`: wall time / activities, not per-activity latency.
 - `vs best`: slowdown against the fastest store in the same scenario and concurrency.
-- FDB uses a fresh subspace per run and never deletes it. Postgres and MariaDB reuse the `root` database; rows persist between runs.
+- FDB uses a fresh subspace per run, deleted afterwards. Postgres and MariaDB reuse the `root` database; rows persist between runs.
 
 ## Results
 
