@@ -1,0 +1,1 @@
+DROP INDEX idx_intemporal_history_order ON intemporal_history;

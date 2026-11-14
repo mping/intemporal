@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Store benchmarks. Args: stores to run (memory postgres mariadb fdb); default all.
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  FDB_OPTS="-J-DFDB_LIBRARY_PATH_FDB_C=/usr/local/lib/libfdb_c.dylib -J-DFDB_LIBRARY_PATH_FDB_JAVA=/usr/local/lib/libfdb_java.jnilib"
+fi
+
+clojure $FDB_OPTS -J--enable-native-access=ALL-UNNAMED -M:dev:jdbc:fdb -m intemporal.benchmarks.store-bench "$@"
