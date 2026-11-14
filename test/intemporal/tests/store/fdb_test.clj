@@ -47,3 +47,24 @@
                                      (p/claim-runnable! st owner 2 20)))))
            (is (<= (count @reads) 2)
                             "Indefinite and future waits must not be loaded by claims"))))))
+
+(deftest delete-store-removes-only-its-subspace
+  (let [db      (cfdb/open (cfdb/select-api-version 710) "docker/fdb.cluster")
+        target  (str "delete-store-" (random-uuid))
+        ;; Shares target as a string prefix: must survive.
+        sibling (str target "-sibling")
+        id      "wf"
+        create  {:workflow-id id :owner-id "delete-store"
+                 :started-event {:event-type :workflow-started :seq -1
+                                 :workflow-id id :workflow-fn-name "delete/workflow" :args []}}
+        st      (fdb-store/create-store db target)
+        sib     (fdb-store/create-store db sibling)]
+    (p/create-workflow! st create)
+    (p/create-workflow! sib create)
+
+    (fdb-store/delete-store! db target)
+
+    (is (= :not-found (p/get-workflow-status st id)))
+    (is (empty? (p/load-history st id)))
+    (is (= :running (p/get-workflow-status sib id)))
+    (fdb-store/delete-store! db sibling)))

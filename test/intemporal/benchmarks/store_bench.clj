@@ -16,11 +16,11 @@
    [intemporal.store :as store]
    [intemporal.store.fdb :as fdb-store]
    [intemporal.store.jdbc :as jdbc-store]
-   [me.vedang.clj-fdb.FDB :as cfdb]
    [taoensso.telemere :as telemere])
   (:import
    (ch.qos.logback.classic Level Logger)
    (java.lang AutoCloseable)
+   (java.util.concurrent ExecutorService Executors Future)
    (org.slf4j LoggerFactory)))
 
 (def ^:private workflow-count 1000)
@@ -33,10 +33,22 @@
 (def ^:private postgres-url "jdbc:postgresql://localhost:5432/root?user=root&password=root")
 (def ^:private mariadb-url "jdbc:mariadb://localhost:3306/root?user=root&password=root")
 (def ^:private fdb-cluster-file "docker/fdb.cluster")
-(def ^:private fdb-api-version 710)
 
 ;; Fails FDB transactions instead of retrying forever when the cluster is down.
 (def ^:private fdb-tx-timeout-ms 10000)
+
+(defn- env-long [name default]
+  (or (some-> (System/getenv name) parse-long) default))
+
+;; Client-side parallelism: SQL connections (>= max concurrency level) and
+;; FDB client network threads. Env overrides allow sweeps; FDB client threads
+;; are process-global, so each value needs its own run.
+(def ^:private sql-pool-size (env-long "BENCH_SQL_POOL_SIZE" 64))
+(def ^:private fdb-client-threads (env-long "BENCH_FDB_CLIENT_THREADS" 4))
+
+;; libfdb_c loaded as FDB's external client; bin/bench sets the property on macOS.
+(def ^:private fdb-client-library
+  (or (System/getProperty "FDB_LIBRARY_PATH_FDB_C") "/usr/lib/libfdb_c.so"))
 
 ;; Identical engine settings for every store, so only the store varies.
 (def ^:private engine-opts
@@ -44,6 +56,10 @@
 
 ;; Swept :workflow-concurrency values: shows whether engine or store bounds throughput.
 (def ^:private concurrency-levels [4 16 64])
+
+;; Parallel submit/await callers. With one caller, per-call store latency
+;; (e.g. ~5 ms/workflow on FDB) caps throughput instead of the engine.
+(def ^:private caller-threads 16)
 
 ;; ---------------------------------------------------------------------------
 ;; Workflows
@@ -68,19 +84,31 @@
 ;; ---------------------------------------------------------------------------
 ;; Stores
 
+;; Opened lazily: runs without fdb never start the FDB client.
+(def ^:private fdb-db
+  (delay
+    (let [db (fdb-store/open-db fdb-cluster-file
+                                :client-threads fdb-client-threads
+                                :client-library fdb-client-library)]
+      (.setTransactionTimeout (.options db) fdb-tx-timeout-ms)
+      db)))
+
+;; Fresh subspace per run, deleted afterwards: runs never see each other's data
+;; and the cluster does not grow.
+(def ^:private fdb-subspace (str "intemporal-bench-" (random-uuid)))
+
 (defn- fdb-store []
-  (let [db (cfdb/open (cfdb/select-api-version fdb-api-version) fdb-cluster-file)]
-    (.setTransactionTimeout (.options db) fdb-tx-timeout-ms)
+  (fdb-store/create-store @fdb-db fdb-subspace :checked? false))
 
-    ;; Fresh subspace: no leftovers from previous runs.
-    (fdb-store/create-store db (str "intemporal-bench-" (random-uuid)) :checked? false)))
+(defn- delete-fdb-store! []
+  (fdb-store/delete-store! @fdb-db fdb-subspace))
 
-;; [name constructor], in report order. Spec checks off: measure the store only.
+;; [name constructor cleanup?], in report order. Spec checks off: measure the store only.
 (def ^:private stores
   [["memory" #(store/create-store :checked? false)]
-   ["postgres" #(jdbc-store/create-store postgres-url :checked? false)]
-   ["mariadb" #(jdbc-store/create-store mariadb-url :checked? false)]
-   ["fdb" fdb-store]])
+   ["postgres" #(jdbc-store/create-store postgres-url :checked? false :pool-size sql-pool-size)]
+   ["mariadb" #(jdbc-store/create-store mariadb-url :checked? false :pool-size sql-pool-size)]
+   ["fdb" fdb-store delete-fdb-store!]])
 
 (defn- close! [st]
   (when (instance? AutoCloseable st)
@@ -89,16 +117,27 @@
 ;; ---------------------------------------------------------------------------
 ;; Measurement
 
+(defn- pmapv
+  "Like mapv, but runs f on pool threads."
+  [^ExecutorService pool f coll]
+  (->> coll
+       (mapv (fn [x] (.submit pool ^Callable (fn [] (f x)))))
+       (mapv #(.get ^Future %))))
+
 (defn- run-batch
-  "Submit n workflows, then await all. Elapsed time covers both."
+  "Submit n workflows, then await all, from caller-threads callers.
+   Elapsed time covers both."
   [engine workflow n]
-  (let [start   (System/nanoTime)
-        ids     (mapv #(:workflow-id (intemporal/submit-workflow engine workflow [%]))
-                      (range n))
-        results (mapv #(intemporal/await-workflow engine % :timeout-ms await-timeout-ms)
-                      ids)]
-    {:elapsed-ms (/ (- (System/nanoTime) start) ns-per-ms)
-     :failed     (count (remove #(= :completed (:status %)) results))}))
+  (with-open [pool (Executors/newFixedThreadPool caller-threads)]
+    (let [start   (System/nanoTime)
+          ids     (pmapv pool
+                         #(:workflow-id (intemporal/submit-workflow engine workflow [%]))
+                         (range n))
+          results (pmapv pool
+                         #(intemporal/await-workflow engine % :timeout-ms await-timeout-ms)
+                         ids)]
+      {:elapsed-ms (/ (- (System/nanoTime) start) ns-per-ms)
+       :failed     (count (remove #(= :completed (:status %)) results))})))
 
 (defn- run-scenario [engine store-name {:keys [scenario workflow activities]}]
   ;; Warmup lets the JIT compile store code paths before timing.
@@ -127,15 +166,17 @@
         (intemporal/shutdown-engine engine)))))
 
 (defn- bench-store
-  "Run every concurrency level on one store. Returns report rows."
-  [[store-name make-store]]
+  "Run every concurrency level on one store, then run its cleanup, if any.
+   Returns report rows."
+  [[store-name make-store cleanup]]
   (println "Benchmarking" store-name "...")
   (try
     (let [st (make-store)]
       (try
         (into [] (mapcat #(bench-engine st store-name %)) concurrency-levels)
         (finally
-          (close! st))))
+          (close! st)
+          (when cleanup (cleanup)))))
     (catch Exception e
       (println "Skipping" store-name "-" (ex-message e))
       [])))

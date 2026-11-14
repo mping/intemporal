@@ -9,7 +9,7 @@
    [me.vedang.clj-fdb.subspace.subspace :as fsub]
    [me.vedang.clj-fdb.transaction :as ftr])
   (:import
-   (com.apple.foundationdb KeyValue Range Transaction)
+   (com.apple.foundationdb FDB KeyValue Range Transaction)
    (com.apple.foundationdb.tuple Tuple)
    (java.lang AutoCloseable)))
 
@@ -568,6 +568,38 @@
                 true (update :revision inc))))
           nil)))))
 
+(def ^:private default-api-version 710)
+
+(defn open-db
+  "Opens the FoundationDB database at cluster-file.
+
+  Options:
+  - :api-version    - FDB API version (default 710).
+  - :client-threads - client network threads (FDB client_threads_per_version).
+                      One thread carries all client I/O of a process; more
+                      threads spread it. Above 1, FDB disables its bundled
+                      client and loads :client-library as an external client.
+  - :client-library - path to libfdb_c; required when :client-threads > 1.
+
+  Client threads are process-global network options: set them on the first
+  open in the process, before the FDB network starts."
+  [cluster-file & {:keys [api-version client-threads client-library]
+                   :or {api-version default-api-version}}]
+  (let [fdb (FDB/selectAPIVersion (int api-version))]
+    (when (and client-threads (> client-threads 1))
+      (when-not client-library
+        (throw (ex-info ":client-library is required when :client-threads > 1"
+                        {:client-threads client-threads})))
+      (doto (.options fdb)
+        (.setExternalClientLibrary client-library)
+        (.setDisableLocalClient)
+        (.setClientThreadsPerVersion (long client-threads))))
+    (.open fdb cluster-file)))
+
+;; Every key of a store lives under this subspace.
+(defn- store-root [subspace-name]
+  (fsub/create (->tuple [subspace-name])))
+
 (defn create-store
   "Creates a new FoundationDB-backed workflow store, optionally wrapped with
   intemporal.spec assertions.
@@ -575,6 +607,14 @@
   Options:
   - :checked? - :auto (default), true, or false."
   [db subspace-name & {:keys [checked?] :or {checked? :auto}}]
-  (let [root  (fsub/create (->tuple [subspace-name]))
+  (let [root  (store-root subspace-name)
         store (->FDBStore db root)]
     (checked/wrap store checked?)))
+
+(defn delete-store!
+  "Irreversibly deletes every key of the store created with subspace-name, in
+  one range clear. Meant for throwaway stores, e.g. tests and benchmarks."
+  [db subspace-name]
+  (ftr/run db
+    (fn [^Transaction tx]
+      (.clear tx ^Range (fsub/range (store-root subspace-name))))))

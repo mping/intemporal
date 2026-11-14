@@ -11,7 +11,8 @@
    [next.jdbc.result-set :as rs])
   (:import
    (java.lang AutoCloseable)
-   (java.security MessageDigest)))
+   (java.security MessageDigest)
+   (java.sql SQLException)))
 
 ;; ============================================================================
 ;; JDBC URL resolution
@@ -88,6 +89,48 @@
 
 (defn- query-one! [connectable sql]
   (jdbc/execute-one! connectable sql query-options))
+
+;; ============================================================================
+;; Transaction retry
+;; ============================================================================
+
+;; SQLSTATEs where the database rolled back the whole transaction:
+;; 40001 serialization failure (also MariaDB/MySQL deadlock 1213),
+;; 40P01 PostgreSQL deadlock.
+(def ^:private retryable-sql-states #{"40001" "40P01"})
+(def ^:private max-tx-attempts 5)
+(def ^:private retry-backoff-ms 10)
+
+(defn- retryable? [e]
+  (some #(and (instance? SQLException %)
+              (contains? retryable-sql-states (.getSQLState ^SQLException %)))
+        (take-while some? (iterate ex-cause e))))
+
+(defn- run-tx
+  "Run (f tx) in a transaction, re-running it when the database rolls it back
+   as a deadlock or serialization failure. E.g. MariaDB gap locks deadlock
+   concurrent create-workflow! calls. The rollback undoes every write, so a
+   rerun is safe; jittered backoff keeps the same transactions from colliding
+   again."
+  [datasource f]
+  (loop [attempt 1]
+    (let [result (try
+                   (jdbc/with-transaction [tx datasource]
+                     {::value (f tx)})
+                   (catch Exception e
+                     (when-not (and (retryable? e) (< attempt max-tx-attempts))
+                       (throw e))
+                     ::retry))]
+      (if (not= ::retry result)
+        (::value result)
+        (do
+          (Thread/sleep (long (rand-int (* attempt retry-backoff-ms))))
+          (recur (inc attempt)))))))
+
+(defmacro ^:private with-tx
+  "Like next.jdbc/with-transaction, but retries rolled-back transactions; see run-tx."
+  [[tx datasource] & body]
+  `(run-tx ~datasource (fn [~tx] ~@body)))
 
 ;; ============================================================================
 ;; Payload serialization
@@ -380,7 +423,7 @@
 
   ;; --- Durable scheduling + ownership-based recovery ---
   (claim-runnable! [_ owner-id limit now-ms]
-    (jdbc/with-transaction [tx datasource]
+    (with-tx [tx datasource]
       (let [rows (query!
                    tx
                    [(case kind
@@ -448,7 +491,7 @@
   p/IFsmStore
 
   (create-workflow! [_ creation]
-    (jdbc/with-transaction [tx datasource]
+    (with-tx [tx datasource]
       ;; A child creation must also lock its parent before changing the close
       ;; tree revision. Root creation has no parent.
       (when-let [parent-id (get-in creation [:parent :workflow-id])]
@@ -458,22 +501,22 @@
         {:create-status status :state state})))
 
   (load-workflow-state [_ workflow-id]
-    (jdbc/with-transaction [tx datasource]
+    (with-tx [tx datasource]
       (workflow-state! tx workflow-id)))
 
   (load-snapshot [_ workflow-id]
-    (jdbc/with-transaction [tx datasource]
+    (with-tx [tx datasource]
       (workflow-state! tx workflow-id true)))
 
   (load-close-tree [_ workflow-id]
-    (jdbc/with-transaction [tx datasource]
+    (with-tx [tx datasource]
       (close-tree! tx workflow-id)))
 
   (add-signal! [_ workflow-id signal-name signal]
     (let [signal-id (or (:signal-id signal) (:id signal))
           signal-key (durable-key signal-id)
           payload   (if (contains? signal :payload) (:payload signal) signal)]
-      (jdbc/with-transaction [tx datasource]
+      (with-tx [tx datasource]
         (if-let [row (workflow-row! tx workflow-id)]
           (cond
             (terminal-row? row)
@@ -509,7 +552,7 @@
           {:signal-status :not-found}))))
 
   (request-cancel! [_ workflow-id]
-    (jdbc/with-transaction [tx datasource]
+    (with-tx [tx datasource]
       (if-let [row (workflow-row! tx workflow-id)]
         (cond
           (terminal-row? row) {:cancel-status :terminal}
@@ -529,7 +572,7 @@
         {:cancel-status :not-found})))
 
   (wake! [_ workflow-id]
-    (jdbc/with-transaction [tx datasource]
+    (with-tx [tx datasource]
       (let [woken? (wake-fsm-workflow! tx workflow-id)]
         {:wake-status (if woken? :woken :terminal-or-not-found)
          :state (workflow-state! tx workflow-id)})))
@@ -538,7 +581,7 @@
                                  events consume-signals create-workflows next-run-at
                                  terminal-status parent-notification close-actions
                                  expected-related-revisions] :as transition}]
-    (jdbc/with-transaction [tx datasource]
+    (with-tx [tx datasource]
       ;; Stable lock order covers every row that this transition can mutate.
       ;; Missing creation rows are handled by their unique key below.
       (let [related-ids (into #{workflow-id}
@@ -619,7 +662,7 @@
                :state (workflow-state! tx workflow-id)}))))))
 
   (release-owner! [_ owner-id]
-    (jdbc/with-transaction [tx datasource]
+    (with-tx [tx datasource]
       (jdbc/execute-one!
         tx ["UPDATE intemporal_workflows
                 SET owner = NULL,
@@ -639,9 +682,14 @@
   dialect and migration directory used.
 
   Options:
-  - :checked? - :auto (default), true, or false."
-  [jdbc-url & {:keys [checked?] :or {checked? :auto}}]
+  - :checked?  - :auto (default), true, or false.
+  - :pool-size - fixed connection pool size (default: HikariCP's 10).
+                 Concurrent drives beyond it wait for a connection."
+  [jdbc-url & {:keys [checked? pool-size] :or {checked? :auto}}]
   (let [kind  (migrate! jdbc-url)
-        ds    (hikari/make-datasource {:jdbc-url jdbc-url})
+        ds    (hikari/make-datasource
+                (cond-> {:jdbc-url jdbc-url}
+                  pool-size (assoc :maximum-pool-size pool-size
+                                   :minimum-idle pool-size)))
         store (->JdbcStore ds kind)]
     (checked/wrap store checked?)))
